@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.next/
+out/
+.turbo/
+coverage/
+
+# secrets — Entity Secret adalah honeypot, jangan pernah ter-commit
+.env
+.env.*
+!.env.example
+
+# foundry
+packages/contracts/out/
+packages/contracts/cache/
+packages/contracts/broadcast/
+# packages/contracts/lib/ TIDAK di-ignore — forge-std adalah git submodule terlacak
+
+*.log
+.DS_Store
