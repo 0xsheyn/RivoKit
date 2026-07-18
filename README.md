@@ -187,4 +187,3 @@ Built on top of [Arc](https://arc.io) and the [Circle Developer Platform](https:
 **RivoKit** — _Where money finds its way._
 
 </div>
-````
