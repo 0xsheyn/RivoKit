@@ -5,6 +5,12 @@ out/
 .turbo/
 coverage/
 
+# dokumen perencanaan — disimpan LOKAL saja, jangan dipublikasikan
+CLAUDE.md
+CONCEPT.md
+PRD.md
+README_ID.md
+
 # secrets — Entity Secret adalah honeypot, jangan pernah ter-commit
 .env
 .env.*

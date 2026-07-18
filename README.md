@@ -162,17 +162,9 @@ We **do not** claim to provide "cash-final settlement," "end-to-end non-custodia
 
 ---
 
-## Learn More
-
-- 📘 [`CONCEPT.md`](./CONCEPT.md) — concepts, architecture, and final design decisions (source of truth)
-- 📗 [`PRD.md`](./PRD.md) — product requirements, specifications, and implementation plan
-- 📙 [`CLAUDE.md`](./CLAUDE.md) — contributor and AI agent development guide
-
----
-
 ## Contributing & License
 
-Contributions are welcome through pull requests. Please read `CLAUDE.md` for architectural invariants that must not be violated.
+Contributions are welcome through pull requests.
 
 License: **MIT** (see `LICENSE`).
 
