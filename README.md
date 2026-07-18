@@ -172,8 +172,6 @@ We **do not** claim to provide "cash-final settlement," "end-to-end non-custodia
 
 ## Contributing & License
 
-Contributions are welcome through pull requests. Please read `CLAUDE.md` for architectural invariants that must not be violated.
-
 License: **MIT** (see `LICENSE`).
 
 ---
