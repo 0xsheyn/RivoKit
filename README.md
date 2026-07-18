@@ -1,6 +1,3 @@
-# README.en.md
-
-````markdown
 <div align="center">
 
 # 🌊 RivoKit
@@ -8,7 +5,7 @@
 ### One intent. Every rail. Settled.
 **_Where money finds its way._**
 
-The non-custodial money movement layer for stablecoins — built on **Arc** & **Circle**.
+The non-custodial money-movement layer for stablecoins — built on **Arc** & **Circle**.
 
 [![Track](https://img.shields.io/badge/Build_on_Arc-DeFi-C4633A)](https://arc.io)
 [![Network](https://img.shields.io/badge/Arc-Testnet-2d2a24)]()
