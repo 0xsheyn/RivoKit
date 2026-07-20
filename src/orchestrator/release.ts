@@ -168,6 +168,9 @@ export async function retrySettlement(
       capturedMinor: req.amountMinor,
       eurcOutMinor: swap.amountOutMinor,
       rebateMinor: swap.rebateMinor,
+      // Must be returned: a payment row marked confirmed without a tx hash is
+      // unverifiable against the chain, and `confirmed_has_tx` rejects it.
+      swapTxHash: swap.txHash,
       manualOverride: false,
     };
   } catch (e) {

@@ -3,6 +3,7 @@ import {
   ORDER_STATES,
   assertTransition,
   canTransition,
+  isCaptured,
   isFunded,
   isTerminal,
   nextStates,
@@ -17,9 +18,14 @@ const ALLOWED: ReadonlyArray<[OrderState, OrderState]> = [
   ["funding_pending", "failed"],
   ["funded", "shipped"],
   ["funded", "released"],
+  ["funded", "settlement_pending"],
   ["funded", "refund_pending"],
   ["funded", "failed"],
+  ["settlement_pending", "released"],
+  ["settlement_pending", "refund_pending"],
+  ["settlement_pending", "failed"],
   ["shipped", "released"],
+  ["shipped", "settlement_pending"],
   ["shipped", "refund_pending"],
   ["shipped", "failed"],
   ["released", "refund_pending"],
@@ -101,8 +107,30 @@ describe("isFunded menjaga invariant 3 PRD §10", () => {
     expect(isFunded("funding_pending")).toBe(false);
   });
 
-  it.each(["funded", "shipped", "released"] as const)("%s dianggap funded", (s) => {
-    expect(isFunded(s)).toBe(true);
+  it.each(["funded", "settlement_pending", "shipped", "released"] as const)(
+    "%s dianggap funded",
+    (s) => {
+      expect(isFunded(s)).toBe(true);
+    },
+  );
+});
+
+describe("isCaptured — dana sudah keluar dari escrow", () => {
+  it.each(["settlement_pending", "released"] as const)("%s sudah ter-capture", (s) => {
+    expect(isCaptured(s)).toBe(true);
+  });
+
+  it.each(["created", "funding_pending", "funded", "shipped"] as const)(
+    "%s BELUM ter-capture — void masih murah",
+    (s) => {
+      expect(isCaptured(s)).toBe(false);
+    },
+  );
+
+  it("settlement_pending tidak bisa kembali ke funded", () => {
+    // Escrow is already empty; pretending otherwise would invite a void that
+    // has nothing to void.
+    expect(canTransition("settlement_pending", "funded")).toBe(false);
   });
 
   it.each(["created", "refund_pending", "refunded", "failed"] as const)(
