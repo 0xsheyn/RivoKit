@@ -1,0 +1,90 @@
+/**
+ * Build .env.local from the local credential note (docs/BUILDER-KEY.md).
+ *
+ * docs/ is gitignored and never leaves this machine; .env.local is gitignored
+ * too. This script only maps names — it prints which variables were filled,
+ * never their values, so running it is safe in a shared terminal.
+ *
+ * Existing values in .env.local are preserved. Anything already set there wins,
+ * including the addresses that `npm run setup` writes back.
+ *
+ *   node scripts/sync-env.mjs
+ */
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const SOURCE = resolve(ROOT, "docs/BUILDER-KEY.md");
+const TARGET = resolve(ROOT, ".env.local");
+
+/** BUILDER-KEY.md name -> .env.local name (DEPLOYMENT.md §1). */
+const MAPPING = {
+  CIRCLE_API_KEY: "CIRCLE_API_KEY",
+  CIRCLE_ENTITY_SECRET: "CIRCLE_ENTITY_SECRET",
+  CIRCLE_KIT_KEY: "KIT_KEY",
+  SUPABASE_URL: "NEXT_PUBLIC_SUPABASE_URL",
+  SUPABASE_PUBLISHABLE_KEY: "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+  SUPABASE_SERVICE_ROLE_KEY: "SUPABASE_SECRET_KEY",
+  RELAYER_PRIVATE_KEY: "RELAYER_PRIVATE_KEY",
+  DEPLOYER_PRIVATE_KEY: "DEPLOYER_PRIVATE_KEY",
+  BUYER_PRIVATE_KEY: "BUYER_PRIVATE_KEY",
+  SELLER_ADDRESS: "SELLER_ADDRESS",
+};
+
+/** Values that are not secrets and have a sensible fixed default. */
+const DEFAULTS = {
+  CIRCLE_BLOCKCHAIN: "ARC-TESTNET",
+  NEXT_PUBLIC_ARC_RPC_URL: "https://rpc.testnet.arc.network",
+};
+
+function parseKeyValues(text) {
+  const out = {};
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!m) continue;
+    const [, key, rawValue] = m;
+    // Strip the angle brackets some notes wrap URLs in: <https://...>
+    const value = rawValue.replace(/^<(.*)>$/, "$1").trim();
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
+if (!existsSync(SOURCE)) {
+  console.error(`GAGAL: ${SOURCE} tidak ada.`);
+  process.exit(1);
+}
+
+const source = parseKeyValues(readFileSync(SOURCE, "utf8"));
+const existing = existsSync(TARGET)
+  ? parseKeyValues(readFileSync(TARGET, "utf8"))
+  : {};
+
+const merged = { ...DEFAULTS };
+for (const [from, to] of Object.entries(MAPPING)) {
+  if (source[from]) merged[to] = source[from];
+}
+// Anything already in .env.local wins — never clobber setup's output.
+Object.assign(merged, existing);
+
+const filled = [];
+const missing = [];
+for (const to of [...new Set([...Object.values(MAPPING), ...Object.keys(DEFAULTS)])]) {
+  (merged[to] ? filled : missing).push(to);
+}
+
+const body = [
+  "# Dihasilkan oleh scripts/sync-env.mjs dari docs/BUILDER-KEY.md.",
+  "# JANGAN commit berkas ini. Nilai yang sudah ada di sini tidak ditimpa.",
+  "",
+  ...Object.entries(merged).map(([k, v]) => `${k}=${v}`),
+  "",
+].join("\n");
+
+writeFileSync(TARGET, body, "utf8");
+
+console.log(`.env.local ditulis (${filled.length} variabel terisi).`);
+console.log("terisi :", filled.join(", "));
+if (missing.length) console.log("kosong :", missing.join(", "));
+console.log("\nNilai tidak dicetak. Periksa sendiri dengan: code .env.local");
