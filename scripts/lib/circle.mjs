@@ -107,5 +107,23 @@ export function createCircleClient({ apiKey, entitySecret }) {
 
     getWalletBalance: (walletId) =>
       request("GET", `/v1/w3s/wallets/${walletId}/balances`),
+
+    /**
+     * Call a contract function from a Developer-Controlled wallet.
+     *
+     * `abiFunctionSignature` is the solidity signature, e.g.
+     * "approve(address,uint256)"; `abiParameters` are positional and must be
+     * JSON-encodable (tuples as nested arrays).
+     */
+    contractExecution: ({ walletId, contractAddress, abiFunctionSignature, abiParameters, feeLevel = "MEDIUM" }) =>
+      signedPost("/v1/w3s/developer/transactions/contractExecution", {
+        walletId,
+        contractAddress,
+        abiFunctionSignature,
+        abiParameters,
+        feeLevel,
+      }),
+
+    getTransaction: (id) => request("GET", `/v1/w3s/transactions/${id}`),
   };
 }

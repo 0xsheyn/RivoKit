@@ -22,5 +22,8 @@ out/
 coverage/
 *.tsbuildinfo
 
+# State run uji live — supaya run yang terputus bisa dilanjutkan, bukan diulang
+.live-*.json
+
 *.log
 .DS_Store
