@@ -50,13 +50,16 @@ export class EscrowOperationError extends Error {
 export function createEscrow(config: EscrowConfig) {
   const { escrowAddress, publicClient, operator, payer } = config;
 
+  // viem types readContract against the literal ABI, which a generic string
+  // helper cannot satisfy. The cast is confined here; every caller below is
+  // typed, so the ABI still guards the call sites that matter.
   const read = <T>(functionName: string, args: readonly unknown[]) =>
     publicClient.readContract({
       address: escrowAddress,
       abi: ESCROW_ABI,
       functionName,
       args,
-    }) as Promise<T>;
+    } as never) as Promise<T>;
 
   return {
     /** On-chain hash. Prefer the local computation; use this to cross-check. */
