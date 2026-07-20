@@ -62,15 +62,19 @@ const TRANSITIONS: Record<OrderState, readonly OrderState[]> = {
 
 export class InvalidStateTransition extends Error {
   readonly code = "INVALID_STATE";
-  constructor(
-    readonly from: OrderState,
-    readonly to: OrderState,
-  ) {
+  // Assigned in the body rather than as parameter properties: Node runs .ts in
+  // strip-only mode and rejects `constructor(readonly x: T)`.
+  readonly from: OrderState;
+  readonly to: OrderState;
+
+  constructor(from: OrderState, to: OrderState) {
     super(
       `Transisi tidak sah: ${from} → ${to}. Yang diizinkan dari ${from}: ` +
         (TRANSITIONS[from].length ? TRANSITIONS[from].join(", ") : "(tidak ada — state terminal)"),
     );
     this.name = "InvalidStateTransition";
+    this.from = from;
+    this.to = to;
   }
 }
 
