@@ -1,26 +1,26 @@
+# ── Kredensial — jangan pernah ter-commit ──────────────────────────────
+# Entity Secret Circle adalah honeypot; private key relayer/deployer/buyer
+# memberi kendali penuh atas wallet. Lihat CLAUDE.md §7.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+**/entity-secret*
+**/recovery*
+
+# ── Dokumen internal / perencanaan — LOKAL saja ────────────────────────
+# Hanya README.md yang publik sebagai halaman depan repo (bahasa Inggris).
+# LICENSE juga publik — file legal, bukan dokumentasi.
+docs/
+
+# ── Build & dependency ─────────────────────────────────────────────────
 node_modules/
 dist/
 .next/
 out/
-.turbo/
 coverage/
-
-# dokumen perencanaan — disimpan LOKAL saja, jangan dipublikasikan
-CLAUDE.md
-CONCEPT.md
-PRD.md
-README_ID.md
-
-# secrets — Entity Secret adalah honeypot, jangan pernah ter-commit
-.env
-.env.*
-!.env.example
-
-# foundry
-packages/contracts/out/
-packages/contracts/cache/
-packages/contracts/broadcast/
-# packages/contracts/lib/ TIDAK di-ignore — forge-std adalah git submodule terlacak
+*.tsbuildinfo
 
 *.log
 .DS_Store
