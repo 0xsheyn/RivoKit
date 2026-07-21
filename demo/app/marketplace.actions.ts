@@ -116,9 +116,59 @@ export async function mpCheckout(productId: string): Promise<MpResult> {
   });
 }
 
-/** Pay: gasless USDC into escrow. */
-export async function mpPay(orderId: string): Promise<MpResult> {
-  return wrap(async () => { await getRivoKit().kit.fund(orderId); return orderId; });
+export type PaySource = "arc" | "unified" | "bridge";
+
+export type Balances = {
+  buyerArcUsdc: string; buyerSepUsdc: string; buyerGatewayUsdc: string; sellerEurc: string;
+};
+
+export async function mpBalances(): Promise<Balances | null> {
+  try { return await getRivoKit().balances(); } catch { return null; }
+}
+
+/**
+ * Pay: bring USDC to Arc via the chosen rail, then authorize into escrow (gasless).
+ *   arc     — buyer's USDC already on Arc → authorize directly.
+ *   unified — spend from the Gateway unified balance to Arc, then authorize.
+ *   bridge  — CCTP-bridge from Ethereum Sepolia to Arc, then authorize.
+ * Each rail delivers usdcAmount onto Arc; the escrow authorize is identical.
+ */
+export async function mpPay(orderId: string, source: PaySource = "arc"): Promise<MpResult> {
+  return wrap(async () => {
+    const { kit, store, funding } = getRivoKit();
+    const order = await store.get(orderId);
+    if (!order) throw new Error("order tak ada");
+    const amount = BigInt(order.max_amount);
+
+    // Record the intent before moving cross-chain funds so the UI shows "memproses".
+    if (source !== "arc" && order.state === "created") await store.transition(orderId, "funding_pending");
+
+    if (source === "unified") {
+      const spend = await funding.ub.spend({
+        fromAdapter: funding.sepAdapter, fromChain: "Ethereum_Sepolia",
+        toAdapter: funding.arcAdapter, toChain: "Arc_Testnet",
+        recipientAddress: funding.buyer, amountMinor: amount,
+      });
+      await store.recordPaymentIdempotent({
+        orderId, nonce: `${orderId}:gw-spend`, kind: "funding",
+        status: "confirmed", txHash: spend.txHash, chain: "Arc_Testnet", amountMinor: amount,
+      });
+    } else if (source === "bridge") {
+      const res = await funding.bridge.execute({
+        fromAdapter: funding.sepAdapter, fromChain: funding.chains.sepolia,
+        toAdapter: funding.arcAdapter, toChain: funding.chains.arc,
+        amountMinor: amount, kitKey: funding.kitKey,
+      });
+      if (!res.mintTxHash) throw new Error("bridge tak menghasilkan mint");
+      await store.recordPaymentIdempotent({
+        orderId, nonce: `${orderId}:bridge`, kind: "funding",
+        status: "confirmed", txHash: res.mintTxHash, chain: "Arc_Testnet", amountMinor: amount,
+      });
+    }
+
+    await kit.fund(orderId); // sign ERC-3009 + operator authorize (+ funded)
+    return orderId;
+  });
 }
 
 /** Buyer SIGNAL: goods received. Does not move funds — the host settles. */
