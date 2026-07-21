@@ -26,7 +26,8 @@ import { arcTestnet } from "viem/chains";
 import { createCircleClient } from "./lib/circle.mjs";
 import { arcTransport, sleep } from "../src/lib/rpc.ts";
 import { ARC_TESTNET_CHAIN_ID, USDC_ADDRESS } from "../src/constants/arc.ts";
-import { getPayerAgnosticHash, getPaymentInfoHash } from "../src/escrow/payment-info.ts";
+import { getPaymentInfoHash } from "../src/escrow/payment-info.ts";
+import { receiveAuthorizationTypedData } from "../src/escrow/erc3009.ts";
 import { ESCROW_SIGNATURES } from "../src/escrow/abi.ts";
 import { createEscrow } from "../src/escrow/operations.ts";
 import { createSettlementFx } from "../src/settlement-fx/swap.ts";
@@ -125,22 +126,13 @@ const fundExecutor = async ({ paymentInfo, hash }) => {
     return { authorizeTxHash: state.authorizeTxHash ?? "0xsudah" };
   }
   if (!state.signature) {
-    state.signature = await buyerWallet.signTypedData({
-      domain: { name: "USDC", version: "2", chainId: ARC_TESTNET_CHAIN_ID, verifyingContract: USDC_ADDRESS },
-      types: {
-        ReceiveWithAuthorization: [
-          { name: "from", type: "address" }, { name: "to", type: "address" },
-          { name: "value", type: "uint256" }, { name: "validAfter", type: "uint256" },
-          { name: "validBefore", type: "uint256" }, { name: "nonce", type: "bytes32" },
-        ],
-      },
-      primaryType: "ReceiveWithAuthorization",
-      message: {
-        from: buyer.address, to: TOKEN_COLLECTOR, value: paymentInfo.maxAmount,
-        validAfter: 0n, validBefore: BigInt(paymentInfo.preApprovalExpiry),
-        nonce: getPayerAgnosticHash(paymentInfo, ARC_TESTNET_CHAIN_ID, ESCROW),
-      },
-    });
+    // Buyer signs off-chain (no gas); the operator relays the collection.
+    state.signature = await buyerWallet.signTypedData(
+      receiveAuthorizationTypedData({
+        paymentInfo, chainId: ARC_TESTNET_CHAIN_ID, escrowAddress: ESCROW,
+        tokenCollector: TOKEN_COLLECTOR, usdcAddress: USDC_ADDRESS,
+      }),
+    );
     save();
   }
   const auth = await escrow.authorize(paymentInfo, paymentInfo.maxAmount, TOKEN_COLLECTOR, state.signature);
