@@ -202,12 +202,14 @@ The buyer is locked to `order.usdcAmount`; the seller's settlement rate floats w
 
 ```ts
 await rivokit.fund(order.id, payerAdapter);
-// primary:  kit.unifiedBalance.spend({ to:{ chain:"Arc_Testnet", recipientAddress: ESCROW }})
+// primary:  kit.unifiedBalance.spend({ to:{ chain:"Arc_Testnet", recipientAddress: payer }})
 // fallback: kit.bridge / kit.estimateBridge
-// then:     escrow.authorize(PaymentInfo)
+// then:     escrow.authorize(PaymentInfo)  ← gasless: payer signs ERC-3009, operator relays
 ```
 
-> Cross-chain funding is **async** — CCTP attestation can take several minutes. The order passes through `funding_pending` before `funded`. Design your UI to await the event, not block.
+> Funding mints/bridges USDC to the **payer** on Arc, then `authorize` pulls it into escrow via a gasless ERC-3009 signature — minting straight to the escrow would move tokens with no payment recorded against them.
+>
+> Cross-chain funding is **async** — a Gateway deposit waits on source-chain finality, and CCTP attestation can take several minutes. The order passes through `funding_pending` before `funded`. Design your UI to await the event, not block.
 
 ### 3. Inject the release hook
 
@@ -304,6 +306,15 @@ type OrderState =
 | EURC | `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a` (6 decimals) |
 | Gateway Wallet | `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` (same on all chains) |
 
+## Testing
+
+Two layers, because Arc cannot be faithfully forked:
+
+- **Unit tests** (`npm test`, ~200 green) cover the pure logic — state machine, unit conversions, quote/rebate math, the SDK facade's composition, event routing, compliance gating, webhook ECDSA verification, and the gasless ERC-3009 authorization (signed and recovered against a real key).
+- **Live proofs** (`scripts/live-*.mjs`) exercise every contract-touching path against **Arc Testnet itself** — fund → capture → floored swap → payout, refund with bridge-back, multi-chain funding via bridge and unified balance, and the full flow end-to-end through the SDK.
+
+Foundry **fork** tests are deliberately not the source of truth here: Arc's USDC-as-gas and its blocklist/compliance precompiles do not exist on a local EVM, so a fork test of those paths passes without testing anything. The live scripts run against the real chain instead — slower, but they actually prove the behaviour.
+
 ## Security model
 
 - **Non-custodial** — funds are held by the escrow contract (Commerce Payments Protocol); the operator only submits txs & earns a fee, and **cannot redirect funds**.
@@ -326,19 +337,21 @@ Report vulnerabilities privately, not via public issues.
 ```text
 rivokit/
 ├── src/
-│   ├── orchestrator/     # order state machine (new code)
+│   ├── sdk/              # RivoKit facade — the one object the flow runs through
+│   ├── orchestrator/     # order state machine + reconciliation (new code)
 │   ├── settlement-fx/    # quote-lock + stopLimit swap + rebate (new code)
 │   ├── funding/          # App Kit unified balance / bridge
-│   ├── escrow/           # Commerce Payments Protocol
+│   ├── escrow/           # Commerce Payments Protocol + gasless ERC-3009
 │   ├── payout/           # EURC→EUR instruction (mock) + refund bridge-back
-│   └── events/           # webhooks + compliance
-├── demo/                 # split-panel host demo (Next.js) — buyer + seller
+│   └── events/           # webhooks + signature verification + compliance
+├── scripts/              # live proofs against Arc Testnet (live-*.mjs)
+├── demo/                 # interactive buyer/seller demo (Next.js) driving the SDK
 └── README.md
 ```
 
 ## Roadmap
 
-Build phases (testnet): Setup → Escrow lifecycle → Settlement-FX → Multi-chain funding + refund → Events/compliance/payout mock → SDK surface + demo → Hardening. The full production frontend is built after the core SDK works. Mainnet is out of current scope — gated on audit + key timelock/multisig + legal review + a licensed off-ramp.
+Build phases (testnet), all proven live on Arc: Setup → Escrow lifecycle → Settlement-FX → Multi-chain funding + refund → Events/compliance/payout mock → SDK surface + demo → Hardening. The full production frontend is built after the core SDK works. Mainnet is out of current scope — gated on audit + key timelock/multisig + legal review + a licensed off-ramp.
 
 ## Contributing
 
