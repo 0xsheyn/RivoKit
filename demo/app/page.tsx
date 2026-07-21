@@ -51,6 +51,14 @@ const FLOWS: Flow[] = [
     ],
   },
   {
+    title: "Settlement — release (hanya lewat SDK)",
+    result: "capture → swap ber-floor · €1.50 dijamin → 1.528018 EURC (rebate 0.028) · order released",
+    tone: "ok",
+    legs: [
+      { label: "swap USDC→EURC (Arc)", hash: "0x04b8fdefc7f9351f025af2b4f9de816184a6afa88e7c997c7e74b136a49620d0", url: ARC_TX },
+    ],
+  },
+  {
     title: "Refund — bridge-back ke chain asal",
     result: "escrow Arc → Ethereum Sepolia · order refunded (invariant 5)",
     tone: "ok",
@@ -70,6 +78,24 @@ const PHASES = [
   ["4 · Events & compliance", "screening live + status sinkron + payout MOCK", true],
   ["5 · SDK & demo", "permukaan SDK + demo ini", true],
 ] as const;
+
+// The two B2B/payout wedges the demo targets (src/orchestrator/policy.ts).
+const SCENARIOS: Array<{ title: string; wedge: string; trigger: string; timeout: string; note: string }> = [
+  {
+    title: "Kontraktor / payout B2B",
+    wedge: "contractor_payout",
+    trigger: "release() saat milestone di-approve pihak pembayar",
+    timeout: "auto_capture (pro-seller)",
+    note: "Milestone disetujui = bukti kuat. Pembayar melepas dana secara eksplisit; timeout menguntungkan penerima.",
+  },
+  {
+    title: "Digital goods / SaaS",
+    wedge: "digital_goods",
+    trigger: "release() saat akses diberikan (bisa otomatis)",
+    timeout: "auto_capture (pro-seller)",
+    note: "Pemberian akses deterministik & terobservasi host = bukti kuat. Lisensi/akun langsung terbit.",
+  },
+];
 
 function short(h: string) {
   return `${h.slice(0, 10)}…${h.slice(-8)}`;
@@ -127,6 +153,35 @@ export default function Page() {
           Floor tak tercapai → <span className="font-mono">settlement_pending</span> (dana aman, retry).
           Refund bisa dari <span className="font-mono">funded</span> maupun <span className="font-mono">released</span>.
         </p>
+      </section>
+
+      {/* Scenarios */}
+      <section className="mt-12">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          Skenario demo
+        </h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          Wedge B2B/payout — bukti kuat. Ritel fisik = demo naratif saja (oracle problem).
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {SCENARIOS.map((s) => (
+            <div key={s.wedge} className="rounded border border-neutral-800 bg-neutral-900/40 p-4">
+              <h3 className="text-sm font-medium text-neutral-100">{s.title}</h3>
+              <p className="mt-0.5 font-mono text-xs text-emerald-300">{s.wedge}</p>
+              <dl className="mt-3 space-y-1.5 text-xs">
+                <div className="flex gap-2">
+                  <dt className="w-20 shrink-0 text-neutral-500">rilis</dt>
+                  <dd className="text-neutral-300">{s.trigger}</dd>
+                </div>
+                <div className="flex gap-2">
+                  <dt className="w-20 shrink-0 text-neutral-500">timeout</dt>
+                  <dd className="text-neutral-300">{s.timeout}</dd>
+                </div>
+              </dl>
+              <p className="mt-3 text-xs text-neutral-500">{s.note}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
       {/* Execution Inspector */}
