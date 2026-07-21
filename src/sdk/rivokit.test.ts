@@ -25,7 +25,8 @@ function mkOrder(o: Partial<OrderRecord> = {}): OrderRecord {
     receiving_chain: "Ethereum_Sepolia", mode: "escrow", wedge: "digital_goods", state: "created",
     timeout_kind: "auto_capture", timeout_deadline: iso,
     pre_approval_expiry: iso, authorization_expiry: iso, refund_expiry: iso,
-    payment_info_hash: "0xhash", eurc_out: null, rebate: null, failure_reason: null, funded_at: null, settled_at: null,
+    payment_info_hash: "0xhash", eurc_out: null, rebate: null, failure_reason: null,
+    created_at: "2026-07-22T00:00:00Z", funded_at: null, settled_at: null,
     ...o,
   };
 }

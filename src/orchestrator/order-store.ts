@@ -47,6 +47,7 @@ export type OrderRecord = {
   eurc_out: string | null;
   rebate: string | null;
   failure_reason: string | null;
+  created_at: string;
   funded_at: string | null;
   settled_at: string | null;
 };
