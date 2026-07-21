@@ -24,9 +24,6 @@ export const ORDER_STATES = [
 
 export type OrderState = (typeof ORDER_STATES)[number];
 
-/** States from which nothing further can happen. */
-export const TERMINAL_STATES: readonly OrderState[] = ["refunded"];
-
 const TRANSITIONS: Record<OrderState, readonly OrderState[]> = {
   // Funding submitted, or abandoned before it ever started.
   created: ["funding_pending", "failed"],

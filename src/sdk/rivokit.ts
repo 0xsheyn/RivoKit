@@ -39,7 +39,7 @@ export type Order = {
   mode: "escrow" | "direct";
   wedge: Wedge;
   state: OrderState;
-  createdAt: string | null;
+  createdAt: string;
   fundedAt: string | null;
   settledAt: string | null;
 };
@@ -113,7 +113,7 @@ function toOrder(r: OrderRecord): Order {
     mode: r.mode,
     wedge: r.wedge,
     state: r.state,
-    createdAt: (r as { created_at?: string }).created_at ?? null,
+    createdAt: r.created_at,
     fundedAt: r.funded_at,
     settledAt: r.settled_at,
   };

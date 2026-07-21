@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AppKit } from "@circle-fin/app-kit";
-import { createPublicClient, createWalletClient, getAddress, http, type Address, type Hex } from "viem";
+import { createPublicClient, createWalletClient, getAddress, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -23,7 +23,6 @@ import { createCircleClient } from "../../scripts/lib/circle.mjs";
 import { installCircleDnsPinning } from "../../src/lib/circle-dns.ts";
 import { arcTransport, sleep } from "../../src/lib/rpc.ts";
 import { ARC_TESTNET_CHAIN_ID, USDC_ADDRESS } from "../../src/constants/arc.ts";
-import { getPaymentInfoHash } from "../../src/escrow/payment-info.ts";
 import { receiveAuthorizationTypedData } from "../../src/escrow/erc3009.ts";
 import { ESCROW_SIGNATURES } from "../../src/escrow/abi.ts";
 import { createEscrow } from "../../src/escrow/operations.ts";

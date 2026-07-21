@@ -15,7 +15,7 @@ function order(overrides: Partial<OrderRecord> = {}): OrderRecord {
     state: "funding_pending", timeout_kind: "auto_capture",
     timeout_deadline: "", pre_approval_expiry: "", authorization_expiry: "", refund_expiry: "",
     payment_info_hash: HASH, eurc_out: null, rebate: null, failure_reason: null,
-    funded_at: null, settled_at: null,
+    created_at: "2026-07-22T00:00:00Z", funded_at: null, settled_at: null,
     ...overrides,
   };
 }
