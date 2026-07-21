@@ -27,7 +27,7 @@ import { getPaymentInfoHash } from "../src/escrow/payment-info.ts";
 import { ESCROW_SIGNATURES } from "../src/escrow/abi.ts";
 import { createEscrow } from "../src/escrow/operations.ts";
 import { createOrderStore } from "../src/orchestrator/order-store.ts";
-import { createBridge } from "../src/funding/bridge.ts";
+import { createBridge, BridgeStuckError, BridgeFailedError } from "../src/funding/bridge.ts";
 import { refund } from "../src/orchestrator/refund.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 
@@ -65,7 +65,8 @@ const record = (pass, label, detail) => {
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
 const state = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};
-const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+// bigint-safe: a persisted bridge result (state.bridgePrevious) can carry bigints.
+const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2));
 
 const arcUsdc = async (a) => {
   await sleep(250);
@@ -185,18 +186,36 @@ if (stillEscrowed) {
     save();
   }
   ok(`void ${outcome.escrowTxHash ?? "-"}`);
+  // If the bridge-back stalled after burning, persist the resumable result so a
+  // re-run continues via retry, never a second burn.
+  if (outcome.status === "refund_pending" && outcome.stuckPrevious != null) {
+    state.bridgeStuck = true;
+    state.bridgePrevious = outcome.stuckPrevious;
+    save();
+  }
 } else {
-  // Resume: the void already happened in an interrupted run; the payer holds
-  // the USDC on Arc. Only the bridge leg is left — finish it, do not void again.
+  // Resume: the void already happened; the payer holds USDC on Arc. Finish only
+  // the bridge leg — and if it was stuck (burn landed), RESUME via retry, which
+  // never burns again. bridgeStuck gates the execute (burn) path out entirely.
   ok("escrow sudah kosong — void tuntas di run sebelumnya; lanjutkan bridge saja");
-  const res = await bridge.execute(bridgeBack);
-  outcome = {
-    mechanism: "void",
-    burnTxHash: res.burnTxHash,
-    mintTxHash: res.mintTxHash,
-    bridged: res.state === "success",
-    status: res.state === "success" ? "refunded" : "refund_pending",
-  };
+  try {
+    const res = state.bridgeStuck
+      ? await bridge.retry(bridgeBack, state.bridgePrevious)
+      : await bridge.execute(bridgeBack);
+    state.bridgeStuck = false;
+    delete state.bridgePrevious;
+    save();
+    outcome = { mechanism: "void", burnTxHash: res.burnTxHash, mintTxHash: res.mintTxHash, bridged: true, status: "refunded" };
+  } catch (e) {
+    if (e instanceof BridgeStuckError) {
+      state.bridgeStuck = true;
+      state.bridgePrevious = e.detail ?? state.bridgePrevious ?? null;
+      save();
+    } else if (!(e instanceof BridgeFailedError)) {
+      throw e;
+    }
+    outcome = { mechanism: "void", bridged: false, status: "refund_pending", reason: e.message };
+  }
 }
 
 if (outcome.mintTxHash && !state.bridgeRecorded) {
@@ -214,7 +233,7 @@ record(outcome.status === "refunded", "bridge-back tuntas ke chain asal", outcom
 
 if (outcome.status !== "refunded") {
   console.log(`\n  TERTAHAN — ${outcome.reason ?? "bridge belum tuntas"}`);
-  console.log("  Payer sudah pegang USDC di Arc. Jalankan ulang untuk menuntaskan bridge; JANGAN reset.");
+  console.log("  Payer sudah pegang USDC di Arc. Jalankan ulang: skrip MELANJUTKAN via retry, TAK burn ulang. JANGAN reset.");
   process.exit(1);
 }
 

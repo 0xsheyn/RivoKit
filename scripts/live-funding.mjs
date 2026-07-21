@@ -73,7 +73,8 @@ const record = (pass, label, detail) => {
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
 const state = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};
-const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+// bigint-safe: a persisted bridge result (state.bridgePrevious) can carry bigints.
+const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2));
 
 const arcUsdc = async (a) => {
   await sleep(250);
@@ -182,21 +183,28 @@ if (!state.bridged) {
   const arcAdapter = createViemAdapterFromPrivateKey({
     privateKey: env.BUYER_PRIVATE_KEY, chain: BridgeChain.Arc_Testnet,
   });
+  const bridgeParams = {
+    fromAdapter: sepAdapter, fromChain: BridgeChain.Ethereum_Sepolia,
+    toAdapter: arcAdapter, toChain: BridgeChain.Arc_Testnet,
+    amountMinor: AMOUNT, kitKey: env.KIT_KEY,
+  };
 
+  // The safety invariant: a burn happens at most ONCE. `bridgeStuck` (set when a
+  // prior run's burn landed but attestation didn't) gates the execute path out
+  // entirely — a stuck transfer is only ever RESUMED via retry (kit.retryBridge),
+  // which continues from attestation and never burns again.
+  const resuming = Boolean(state.bridgeStuck);
   const t0 = Date.now();
   try {
-    const res = await bridge.execute({
-      fromAdapter: sepAdapter, fromChain: BridgeChain.Ethereum_Sepolia,
-      toAdapter: arcAdapter, toChain: BridgeChain.Arc_Testnet,
-      amountMinor: AMOUNT, kitKey: env.KIT_KEY,
-    });
-    // execute() now throws on a failed bridge, so reaching here means success
-    // and a real mint hash. Guard anyway: never record a confirmed payment
-    // without proof it landed (the DB enforces confirmed_has_tx).
+    const res = resuming
+      ? await bridge.retry(bridgeParams, state.bridgePrevious)
+      : await bridge.execute(bridgeParams);
     if (res.state !== "success" || !res.mintTxHash) {
       throw new BridgeFailedError(`bridge tak sukses: state ${res.state}, mint ${res.mintTxHash ?? "-"}`);
     }
     state.bridged = true;
+    state.bridgeStuck = false;
+    delete state.bridgePrevious;
     state.bridge = { burn: res.burnTxHash, mint: res.mintTxHash };
     save();
 
@@ -210,25 +218,30 @@ if (!state.bridged) {
       amountMinor: AMOUNT,
     });
 
-    ok(`bridge selesai dalam ${Math.round((Date.now() - t0) / 1000)} detik — ${res.state}`);
+    ok(`bridge ${resuming ? "dilanjutkan" : "selesai"} dalam ${Math.round((Date.now() - t0) / 1000)} detik — ${res.state}`);
     info(`burn (Sepolia) ${res.burnTxHash ?? "-"}`);
     info(`mint (Arc)     ${res.mintTxHash ?? "-"}`);
     record(res.state === "success", "bridge sukses");
   } catch (e) {
     if (e instanceof BridgeStuckError) {
-      // Funds may be in flight — leave the order recoverable, do not fail it.
-      await store.transition(order.id, "failed", { failureReason: e.message });
+      // Burn landed, attestation didn't. Persist the resumable result and STAY
+      // in funding_pending — the funds are in flight, not failed. The next run
+      // continues via retry, never a second burn.
+      state.bridgeStuck = true;
+      state.bridgePrevious = e.detail ?? state.bridgePrevious ?? null;
+      save();
       console.log(`\n  TERTAHAN — ${e.message}`);
-      console.log("  Jalankan ulang skrip ini untuk melanjutkan; JANGAN reset.");
+      console.log("  Jalankan ulang: skrip MELANJUTKAN via retry (kit.retryBridge), TAK akan burn ulang. JANGAN reset.");
       process.exit(1);
     }
     if (e instanceof BridgeFailedError) {
-      // Nothing moved — record the reason and stop; a clean re-run is safe.
-      await store.transition(order.id, "failed", { failureReason: e.message });
+      // A transport failure. If we were resuming, the transfer is still in
+      // flight — keep it stuck so the next run retries, never falls back to a
+      // burn. If not resuming, nothing moved and a clean re-run is safe.
+      save();
       console.log(`\n  GAGAL — ${e.message}`);
-      if (e.networkSuspected) {
-        console.log("  Penyebab jaringan (bukan on-chain). Perbaiki DNS Circle lalu ulangi.");
-      }
+      if (e.networkSuspected) console.log("  Penyebab jaringan (bukan on-chain). Perbaiki DNS Circle lalu ulangi.");
+      if (resuming) console.log("  (Masih mode resume — run berikutnya tetap retry, tak akan burn ulang.)");
       process.exit(1);
     }
     throw e;
