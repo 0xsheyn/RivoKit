@@ -286,6 +286,19 @@ export function createOrderStore(url: string, serviceKey: string) {
       fail("recordEvent", error);
     },
 
+    /** On-chain actions recorded for an order, oldest first — the inspector view. */
+    async listPayments(orderId: string): Promise<Array<{
+      kind: PaymentKind; status: string; tx_hash: string | null; chain: string | null; amount: string | null;
+    }>> {
+      const { data, error } = await db
+        .from("payments")
+        .select("kind, status, tx_hash, chain, amount")
+        .eq("order_id", orderId)
+        .order("created_at", { ascending: true });
+      fail("listPayments", error);
+      return ((data ?? []) as Array<Record<string, unknown>>).map((r) => normalizeAmount(r)) as never;
+    },
+
     /** Orders waiting on an external event — the reconciliation sweep. */
     async listPending(): Promise<OrderRecord[]> {
       const { data, error } = await db

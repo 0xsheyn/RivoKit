@@ -4,6 +4,7 @@ import {
   EURC_ADDRESS,
   USDC_ADDRESS,
 } from "../../src/constants/arc";
+import DemoPanels from "./DemoPanels";
 
 const ARC_TX = (h: string) => `${ARC_TESTNET_EXPLORER_URL}/tx/${h}`;
 const SEP_TX = (h: string) => `https://sepolia.etherscan.io/tx/${h}`;
@@ -114,6 +115,10 @@ export default function Page() {
         <strong className="font-semibold">Testnet only — unaudited.</strong> Leg fiat
         (EURC→EUR) di-<span className="font-mono">mock</span> dan milik host berlisensi.
         Jangan pakai dana riil atau private key mainnet.
+      </div>
+
+      <div className="mt-10">
+        <DemoPanels />
       </div>
 
       {/* SDK surface */}
