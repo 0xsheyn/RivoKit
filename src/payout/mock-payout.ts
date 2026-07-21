@@ -45,7 +45,7 @@ export type MockPayoutParams = {
   beneficiary: Address;
   /** EURC delivered to the receiver on Arc, in minor units (6dp). */
   eurcMinor: bigint;
-  settlementTxHash?: string;
+  settlementTxHash?: string | undefined;
   /** Pass the current time in; this module stays pure (no Date.now). */
   now: number;
 };
