@@ -155,6 +155,31 @@ export default function Page() {
         </p>
       </section>
 
+      {/* Gasless */}
+      <section className="mt-12">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          Gasless — buyer bayar 0 gas
+        </h2>
+        <p className="mt-2 text-sm text-neutral-400">
+          Buyer <span className="text-neutral-200">menandatangani otorisasi ERC-3009</span>{" "}
+          <code className="rounded bg-neutral-900 px-1 py-0.5 font-mono text-xs text-emerald-300">receiveWithAuthorization</code>{" "}
+          secara off-chain (tanpa transaksi). Operator me-<span className="text-neutral-200">relay</span>{" "}
+          pengumpulan on-chain lewat <span className="font-mono text-xs">ERC3009PaymentCollector</span> dan membayar gas-nya.
+          USDC buyer berpindah; buyer tak pernah butuh token gas native.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300">buyer tanda tangan (off-chain, 0 gas)</span>
+          <span className="text-neutral-600">→</span>
+          <span className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300">operator relay (bayar gas)</span>
+          <span className="text-neutral-600">→</span>
+          <span className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-300">USDC masuk escrow</span>
+        </div>
+        <p className="mt-2 text-xs text-neutral-500">
+          Operator-relay, bukan paymaster generik — nonce = hash payer-agnostik (sekali pakai, anti-replay).
+          Satu sumber: <code className="font-mono">src/escrow/erc3009.ts</code>.
+        </p>
+      </section>
+
       {/* Scenarios */}
       <section className="mt-12">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
@@ -254,7 +279,7 @@ export default function Page() {
 
       <footer className="mt-12 border-t border-neutral-800 pt-6 text-xs text-neutral-600">
         Arc Testnet · chain {ARC_TESTNET_CHAIN_ID} · USDC <span className="font-mono">{USDC_ADDRESS.slice(0, 10)}…</span>{" "}
-        · EURC <span className="font-mono">{EURC_ADDRESS.slice(0, 10)}…</span> · 191 tes unit hijau
+        · EURC <span className="font-mono">{EURC_ADDRESS.slice(0, 10)}…</span> · 196 tes unit hijau
       </footer>
     </main>
   );

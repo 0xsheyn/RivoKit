@@ -26,7 +26,8 @@ import { arcTestnet, sepolia } from "viem/chains";
 import { createCircleClient } from "./lib/circle.mjs";
 import { arcTransport, sleep } from "../src/lib/rpc.ts";
 import { ARC_TESTNET_CHAIN_ID, USDC_ADDRESS } from "../src/constants/arc.ts";
-import { getPayerAgnosticHash, getPaymentInfoHash, ZERO_ADDRESS } from "../src/escrow/payment-info.ts";
+import { getPaymentInfoHash, ZERO_ADDRESS } from "../src/escrow/payment-info.ts";
+import { receiveAuthorizationTypedData } from "../src/escrow/erc3009.ts";
 import { ESCROW_SIGNATURES } from "../src/escrow/abi.ts";
 import { createEscrow } from "../src/escrow/operations.ts";
 import { createOrderStore } from "../src/orchestrator/order-store.ts";
@@ -255,22 +256,13 @@ step("Langkah 5 — authorize: USDC hasil unified balance masuk escrow");
 let ps = await escrow.getPaymentState(hash);
 if (!ps.hasCollectedPayment) {
   if (!state.signature) {
-    state.signature = await buyerArcWallet.signTypedData({
-      domain: { name: "USDC", version: "2", chainId: ARC_TESTNET_CHAIN_ID, verifyingContract: USDC_ADDRESS },
-      types: {
-        ReceiveWithAuthorization: [
-          { name: "from", type: "address" }, { name: "to", type: "address" },
-          { name: "value", type: "uint256" }, { name: "validAfter", type: "uint256" },
-          { name: "validBefore", type: "uint256" }, { name: "nonce", type: "bytes32" },
-        ],
-      },
-      primaryType: "ReceiveWithAuthorization",
-      message: {
-        from: buyer.address, to: TOKEN_COLLECTOR, value: pi.maxAmount,
-        validAfter: 0n, validBefore: BigInt(pi.preApprovalExpiry),
-        nonce: getPayerAgnosticHash(pi, ARC_TESTNET_CHAIN_ID, ESCROW),
-      },
-    });
+    // Buyer signs off-chain (no gas); the operator relays the collection.
+    state.signature = await buyerArcWallet.signTypedData(
+      receiveAuthorizationTypedData({
+        paymentInfo: pi, chainId: ARC_TESTNET_CHAIN_ID, escrowAddress: ESCROW,
+        tokenCollector: TOKEN_COLLECTOR, usdcAddress: USDC_ADDRESS,
+      }),
+    );
     save();
   }
   const auth = await escrow.authorize(pi, AMOUNT, TOKEN_COLLECTOR, state.signature);
