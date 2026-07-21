@@ -300,6 +300,28 @@ export function createOrderStore(url: string, serviceKey: string) {
       return ((data ?? []) as Array<Record<string, unknown>>).map((r) => normalizeAmount(r)) as never;
     },
 
+    /** Most-recent orders — the marketplace's seller/host order lists. */
+    async listOrders(limit = 50): Promise<OrderRecord[]> {
+      const { data, error } = await db
+        .from("orders")
+        .select()
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      fail("listOrders", error);
+      return ((data ?? []) as OrderRecord[]).map(normalizeOrder);
+    },
+
+    /** Off-chain signals recorded for an order (shipped, confirmed, dispute…), oldest first. */
+    async listEvents(orderId: string): Promise<Array<{ type: string; payload: unknown; received_at: string }>> {
+      const { data, error } = await db
+        .from("events")
+        .select("type, payload, received_at")
+        .eq("order_id", orderId)
+        .order("received_at", { ascending: true });
+      fail("listEvents", error);
+      return (data ?? []) as never;
+    },
+
     /** Orders waiting on an external event — the reconciliation sweep. */
     async listPending(): Promise<OrderRecord[]> {
       const { data, error } = await db
