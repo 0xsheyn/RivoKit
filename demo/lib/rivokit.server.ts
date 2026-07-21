@@ -14,20 +14,22 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AppKit } from "@circle-fin/app-kit";
-import { createPublicClient, createWalletClient, getAddress, type Address, type Hex } from "viem";
+import { AppKit, BridgeChain } from "@circle-fin/app-kit";
+import { createViemAdapterFromPrivateKey } from "@circle-fin/adapter-viem-v2";
+import { createPublicClient, createWalletClient, erc20Abi, getAddress, http, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { arcTestnet } from "viem/chains";
+import { arcTestnet, sepolia } from "viem/chains";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import { createCircleClient } from "../../scripts/lib/circle.mjs";
 import { installCircleDnsPinning } from "../../src/lib/circle-dns.ts";
 import { arcTransport, sleep } from "../../src/lib/rpc.ts";
-import { ARC_TESTNET_CHAIN_ID, USDC_ADDRESS } from "../../src/constants/arc.ts";
+import { ARC_TESTNET_CHAIN_ID, EURC_ADDRESS, USDC_ADDRESS } from "../../src/constants/arc.ts";
 import { receiveAuthorizationTypedData } from "../../src/escrow/erc3009.ts";
 import { ESCROW_SIGNATURES } from "../../src/escrow/abi.ts";
 import { createEscrow } from "../../src/escrow/operations.ts";
 import { createSettlementFx } from "../../src/settlement-fx/swap.ts";
 import { createBridge } from "../../src/funding/bridge.ts";
+import { createUnifiedBalance } from "../../src/funding/unified-balance.ts";
 import { createOrderStore } from "../../src/orchestrator/order-store.ts";
 import { createComplianceGate, createCircleScreener } from "../../src/events/compliance.ts";
 import { createRivoKit } from "../../src/sdk/rivokit.ts";
@@ -101,7 +103,41 @@ function build() {
   const fx = createSettlementFx({
     kitKey: need("KIT_KEY"), circleApiKey: need("CIRCLE_API_KEY"), circleEntitySecret: need("CIRCLE_ENTITY_SECRET"),
   });
-  const bridge = createBridge(new AppKit());
+
+  // Funding rails share one App Kit. The buyer's adapters let the demo move USDC
+  // onto Arc from Sepolia (bridge) or Gateway (unified balance) before authorize.
+  const appKit = new AppKit();
+  const bridge = createBridge(appKit);
+  const ub = createUnifiedBalance(appKit);
+  const KIT_KEY = need("KIT_KEY");
+  const BUYER_PK = need("BUYER_PRIVATE_KEY") as Hex;
+  // `chain` is honoured at runtime (proven in scripts/live-*.mjs) but absent from
+  // the adapter's published type, hence the cast.
+  const arcAdapter = createViemAdapterFromPrivateKey({ privateKey: BUYER_PK, chain: BridgeChain.Arc_Testnet } as never);
+  const sepAdapter = createViemAdapterFromPrivateKey({ privateKey: BUYER_PK, chain: BridgeChain.Ethereum_Sepolia } as never);
+
+  const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as const;
+  const sepoliaClient = createPublicClient({ chain: sepolia, transport: http() });
+  const erc20Balance = (client: typeof arcClient, token: Address, owner: string) =>
+    client.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [owner as Address] });
+
+  /** Live wallet balances for the marketplace header (before/after transactions). */
+  async function balances() {
+    const [buyerArcUsdc, buyerSepUsdc, sellerEurc] = await Promise.all([
+      erc20Balance(arcClient, USDC_ADDRESS, buyer.address),
+      sepoliaClient.readContract({ address: SEPOLIA_USDC, abi: erc20Abi, functionName: "balanceOf", args: [buyer.address] }),
+      erc20Balance(arcClient, EURC_ADDRESS, MERCHANT),
+    ]);
+    let gateway = 0n;
+    try { gateway = (await ub.getBalance(sepAdapter)).confirmedMinor; } catch { /* Gateway unreachable — show 0 */ }
+    return {
+      buyerArcUsdc: buyerArcUsdc.toString(),
+      buyerSepUsdc: (buyerSepUsdc as bigint).toString(),
+      buyerGatewayUsdc: gateway.toString(),
+      sellerEurc: sellerEurc.toString(),
+    };
+  }
+
   const gate = createComplianceGate(
     createCircleScreener((path, body) => circle.request("POST", path, body), () => randomUUID()),
   );
@@ -130,7 +166,14 @@ function build() {
     },
   });
 
-  return { kit, store, addresses: { buyer: buyer.address as string, merchant: MERCHANT as string } };
+  return {
+    kit, store, balances,
+    addresses: { buyer: buyer.address as string, merchant: MERCHANT as string },
+    funding: {
+      bridge, ub, arcAdapter, sepAdapter, buyer: buyer.address as string, kitKey: KIT_KEY,
+      chains: { arc: BridgeChain.Arc_Testnet, sepolia: BridgeChain.Ethereum_Sepolia },
+    },
+  };
 }
 
 export function getRivoKit() {
