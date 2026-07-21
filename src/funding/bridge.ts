@@ -108,6 +108,101 @@ function looksLikeNetworkFailure(text: string): boolean {
   );
 }
 
+function mapSteps(r: Record<string, any>): BridgeStep[] {
+  return (r.steps ?? []).map((s: Record<string, any>) => ({
+    name: s.name,
+    state: s.state,
+    txHash: s.txHash ?? s.data?.txHash,
+    errorMessage: s.errorMessage ?? (s.error ? String(s.error?.message ?? s.error) : undefined),
+    errorCategory: s.errorCategory,
+  }));
+}
+
+/**
+ * Turn a raw kit bridge/retry result into a BridgeResult, throwing on anything
+ * that is not a completed transfer. Shared by `execute` and `retry` so both
+ * classify identically — a bridge that stalled after burn is a BridgeStuckError
+ * (resume, never resend); one that never moved is a BridgeFailedError.
+ */
+function interpret(res: unknown): BridgeResult {
+  const r = res as Record<string, any>;
+  const steps = mapSteps(r);
+  const burnDone = steps.some((s) => s.name === "burn" && s.state === "success");
+
+  if (r.state !== "success") {
+    const bad = steps.find((s) => s.state === "error");
+    const reason = bad
+      ? `langkah "${bad.name}" gagal${bad.errorCategory ? ` (${bad.errorCategory})` : ""}: ${bad.errorMessage ?? "tanpa pesan"}`
+      : `bridge berakhir state "${r.state}" tanpa langkah sukses`;
+    const network = looksLikeNetworkFailure(`${reason} ${JSON.stringify(steps)}`);
+
+    // Burn already landed → funds are in flight; carry the result as `detail`
+    // so a caller can hand it to `retry` and resume from attestation.
+    if (burnDone || r.state === "pending") {
+      throw new BridgeStuckError(
+        `Bridge belum tuntas (${reason}). Dana mungkin sudah ter-burn di chain asal — ` +
+          "JANGAN kirim ulang; lanjutkan lewat retry (kit.retryBridge).",
+        res,
+      );
+    }
+    throw new BridgeFailedError(
+      `Bridge gagal tanpa memindahkan dana: ${reason}.` +
+        (network
+          ? " Ini galat jaringan (SDK tak bisa menjangkau API Circle) — " +
+            "cek DNS host *.circle.com (lihat catatan DNS dibajak), bukan revert on-chain."
+          : ""),
+      { detail: res, networkSuspected: network },
+    );
+  }
+
+  return {
+    state: r.state,
+    steps,
+    burnTxHash: steps.find((s) => s.name === "burn")?.txHash,
+    mintTxHash: steps.find((s) => s.name === "mint")?.txHash,
+    raw: res,
+  };
+}
+
+/**
+ * Classify a THROWN error from kit.bridge / kit.retryBridge. Always throws
+ * (return type `never`), so callers use it as the whole catch body.
+ */
+function classifyThrow(e: unknown): never {
+  // Our own classified errors pass straight through.
+  if (e instanceof BridgeStuckError || e instanceof BridgeFailedError) throw e;
+
+  const msg = String((e as Error)?.message ?? e);
+  // Attestation problems are recoverable and must not be reported as a failed
+  // payment — the burn may already have happened, so funds are in flight.
+  if (/attestation|timeout|pending/i.test(msg)) {
+    throw new BridgeStuckError(
+      `Bridge belum tuntas: ${msg.slice(0, 160)}. ` +
+        "Dana mungkin sudah ter-burn di chain asal dan sedang menunggu atestasi — " +
+        "JANGAN kirim ulang; lanjutkan lewat retry (kit.retryBridge).",
+      e,
+    );
+  }
+  // A transport failure before any burn — nothing moved, safe to retry cleanly.
+  if (looksLikeNetworkFailure(msg)) {
+    throw new BridgeFailedError(
+      `Bridge gagal — SDK tak bisa menjangkau API Circle: ${msg.slice(0, 160)}. ` +
+        "Cek DNS host *.circle.com (lihat catatan DNS dibajak), bukan revert on-chain.",
+      { detail: e, networkSuspected: true },
+    );
+  }
+  throw e;
+}
+
+function bridgeArgs(params: BridgeParams) {
+  return {
+    from: { adapter: params.fromAdapter, chain: params.fromChain },
+    to: { adapter: params.toAdapter, chain: params.toChain },
+    amount: toDecimalString(params.amountMinor),
+    config: { kitKey: params.kitKey },
+  };
+}
+
 export function createBridge(kit: AppKit = new AppKit()) {
   return {
     /**
@@ -146,101 +241,32 @@ export function createBridge(kit: AppKit = new AppKit()) {
      * rather than a payment nobody knows about.
      */
     async execute(params: BridgeParams): Promise<BridgeResult> {
+      // There is no top-level txHash: a CCTP transfer is four stages across two
+      // chains, so `interpret` reads the per-step hashes (burn proves funds
+      // left, mint proves they arrived) and throws on any non-completed state.
       try {
-        const res = await kit.bridge({
-          from: { adapter: params.fromAdapter, chain: params.fromChain },
-          to: { adapter: params.toAdapter, chain: params.toChain },
-          amount: toDecimalString(params.amountMinor),
-          config: { kitKey: params.kitKey },
-        } as never);
-
-        const r = res as Record<string, any>;
-        // There is no top-level txHash: a CCTP transfer is four stages across
-        // two chains, so the hashes live per-step. Burn and mint are the two
-        // that matter — burn proves the funds left, mint proves they arrived.
-        const steps: BridgeStep[] = (r.steps ?? []).map((s: Record<string, any>) => ({
-          name: s.name,
-          state: s.state,
-          txHash: s.txHash ?? s.data?.txHash,
-          errorMessage: s.errorMessage ?? (s.error ? String(s.error?.message ?? s.error) : undefined),
-          errorCategory: s.errorCategory,
-        }));
-
-        const burnDone = steps.some((s) => s.name === "burn" && s.state === "success");
-
-        // App Kit reports a failed bridge as `state: "error"` WITHOUT throwing.
-        // Returning it as if it were a normal result lets a non-transfer look
-        // like a completed one downstream — exactly what stranded an order in
-        // funding_pending with no money moved. Turn it into a thrown error.
-        if (r.state !== "success") {
-          const bad = steps.find((s) => s.state === "error");
-          const reason = bad
-            ? `langkah "${bad.name}" gagal${bad.errorCategory ? ` (${bad.errorCategory})` : ""}: ${bad.errorMessage ?? "tanpa pesan"}`
-            : `bridge berakhir state "${r.state}" tanpa langkah sukses`;
-          const network = looksLikeNetworkFailure(`${reason} ${JSON.stringify(steps)}`);
-
-          // Burn already landed → funds are in flight, must be resumed not
-          // resent, regardless of what the later step reported.
-          if (burnDone || r.state === "pending") {
-            throw new BridgeStuckError(
-              `Bridge belum tuntas (${reason}). Dana mungkin sudah ter-burn di chain asal — ` +
-                "JANGAN kirim ulang; lanjutkan lewat retryBridge.",
-              res,
-            );
-          }
-          throw new BridgeFailedError(
-            `Bridge gagal tanpa memindahkan dana: ${reason}.` +
-              (network
-                ? " Ini galat jaringan (SDK tak bisa menjangkau API Circle) — " +
-                  "cek DNS host *.circle.com (lihat catatan DNS dibajak), bukan revert on-chain."
-                : ""),
-            { detail: res, networkSuspected: network },
-          );
-        }
-
-        return {
-          state: r.state,
-          steps,
-          burnTxHash: steps.find((s) => s.name === "burn")?.txHash,
-          mintTxHash: steps.find((s) => s.name === "mint")?.txHash,
-          raw: res,
-        };
+        return interpret(await kit.bridge(bridgeArgs(params) as never));
       } catch (e) {
-        // Our own classified errors (thrown above) pass straight through.
-        if (e instanceof BridgeStuckError || e instanceof BridgeFailedError) throw e;
-
-        const msg = String((e as Error)?.message ?? e);
-        // Attestation problems are recoverable and must not be reported as a
-        // failed payment — the burn may already have happened on the source
-        // chain, in which case the funds are in flight, not lost.
-        if (/attestation|timeout|pending/i.test(msg)) {
-          throw new BridgeStuckError(
-            `Bridge belum tuntas: ${msg.slice(0, 160)}. ` +
-              "Dana mungkin sudah ter-burn di chain asal dan sedang menunggu atestasi — " +
-              "JANGAN kirim ulang; lanjutkan lewat retryBridge.",
-            e,
-          );
-        }
-        // A transport failure before any burn — nothing moved, safe to retry.
-        if (looksLikeNetworkFailure(msg)) {
-          throw new BridgeFailedError(
-            `Bridge gagal — SDK tak bisa menjangkau API Circle: ${msg.slice(0, 160)}. ` +
-              "Cek DNS host *.circle.com (lihat catatan DNS dibajak), bukan revert on-chain.",
-            { detail: e, networkSuspected: true },
-          );
-        }
-        throw e;
+        return classifyThrow(e);
       }
     },
 
     /**
      * Resume an interrupted bridge instead of starting a second one.
      *
-     * Takes the original bridge arguments plus the prior result, so the SDK can
-     * pick up from whichever stage completed rather than burning again.
+     * `kit.retryBridge` picks up from the attestation/mint stage using `previous`
+     * (the result carried on a BridgeStuckError) — it does NOT burn again, so it
+     * is the ONLY safe way to continue a stuck transfer. Re-running `execute`
+     * would move a second amount. If it is still stuck it throws BridgeStuckError
+     * again; nothing is ever double-sent.
      */
-    retry: (args: unknown, previous: unknown) =>
-      kit.retryBridge(args as never, previous as never),
+    async retry(params: BridgeParams, previous: unknown): Promise<BridgeResult> {
+      try {
+        return interpret(await kit.retryBridge(bridgeArgs(params) as never, previous as never));
+      } catch (e) {
+        return classifyThrow(e);
+      }
+    },
   };
 }
 

@@ -63,6 +63,12 @@ export type RefundOutcome = {
    */
   status: "refunded" | "refund_pending";
   reason?: string | undefined;
+  /**
+   * When the bridge-back stalled after burning, the resumable result from the
+   * BridgeStuckError — hand it to `bridge.retry` to continue from attestation
+   * rather than burning a second time. Absent for a clean (nothing-moved) fail.
+   */
+  stuckPrevious?: unknown;
 };
 
 function requireCollector(c?: Address): Address {
@@ -119,6 +125,8 @@ export async function refund(deps: RefundDeps, req: RefundRequest): Promise<Refu
         bridged: false,
         status: "refund_pending",
         reason: e.message,
+        // Only a stuck (already-burned) bridge is resumable; a clean failure moved nothing.
+        stuckPrevious: e instanceof BridgeStuckError ? e.detail : undefined,
       };
     }
     throw e;

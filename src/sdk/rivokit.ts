@@ -165,8 +165,20 @@ export function createRivoKit(deps: RivoKitDeps) {
     /** Read the mock payout instruction emitted for a settled order, if any. */
     payoutFor: (orderId: string): PayoutInstruction | undefined => payouts.get(orderId),
 
-    async estimateSwap(params: { address: string; amountInMinor: bigint }) {
-      return deps.fx.quote({ address: params.address, tokenIn, tokenOut, amountInMinor: params.amountInMinor });
+    /** FX quote without executing. Money as strings, like every other wire value. */
+    async estimateSwap(params: { address: string; amountInMinor: bigint }): Promise<{
+      amountInMinor: string;
+      amountOutMinor: string;
+      stopLimitMinor: string | null;
+      fees: ReadonlyArray<{ token: string; amount: string | null; type: string }>;
+    }> {
+      const q = await deps.fx.quote({ address: params.address, tokenIn, tokenOut, amountInMinor: params.amountInMinor });
+      return {
+        amountInMinor: q.amountInMinor.toString(),
+        amountOutMinor: q.amountOutMinor.toString(),
+        stopLimitMinor: q.stopLimitMinor === null ? null : q.stopLimitMinor.toString(),
+        fees: q.fees,
+      };
     },
 
     /**
