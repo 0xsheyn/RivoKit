@@ -55,6 +55,17 @@ export type PaymentKind =
   | "funding" | "authorize" | "capture" | "void"
   | "refund" | "reclaim" | "swap" | "rebate" | "bridge_back";
 
+export type RecordPaymentParams = {
+  orderId: string;
+  nonce: string;
+  kind: PaymentKind;
+  status?: "pending" | "confirmed" | "failed";
+  txHash?: string;
+  chain?: string;
+  amountMinor?: bigint;
+  errorReason?: string;
+};
+
 const iso = (unixSeconds: number) => new Date(unixSeconds * 1000).toISOString();
 
 /**
@@ -206,16 +217,7 @@ export function createOrderStore(url: string, serviceKey: string) {
      * safe: a replayed step reuses its nonce and collides instead of moving
      * money twice. Callers should derive it deterministically, not randomly.
      */
-    async recordPayment(params: {
-      orderId: string;
-      nonce: string;
-      kind: PaymentKind;
-      status?: "pending" | "confirmed" | "failed";
-      txHash?: string;
-      chain?: string;
-      amountMinor?: bigint;
-      errorReason?: string;
-    }) {
+    async recordPayment(params: RecordPaymentParams) {
       const { data, error } = await db
         .from("payments")
         .insert({
@@ -232,6 +234,40 @@ export function createOrderStore(url: string, serviceKey: string) {
         .select()
         .single();
       fail("recordPayment", error);
+      return normalizeAmount(data);
+    },
+
+    /**
+     * Record a payment, treating a replay as success rather than an error.
+     *
+     * `nonce` is UNIQUE, so a retry of an already-recorded step hits a unique
+     * violation (Postgres 23505). For a reconciliation sweep that is the desired
+     * outcome — the step is already on the books — not a failure. Returns the
+     * existing row on collision so callers can proceed idempotently.
+     */
+    async recordPaymentIdempotent(params: RecordPaymentParams) {
+      const { data, error } = await db
+        .from("payments")
+        .insert({
+          order_id: params.orderId,
+          nonce: params.nonce,
+          kind: params.kind,
+          status: params.status ?? "pending",
+          tx_hash: params.txHash ?? null,
+          chain: params.chain ?? null,
+          amount: params.amountMinor?.toString() ?? null,
+          error_reason: params.errorReason ?? null,
+          confirmed_at: params.status === "confirmed" ? new Date().toISOString() : null,
+        })
+        .select()
+        .single();
+      if (error) {
+        if (error.code === "23505") {
+          const existing = await db.from("payments").select().eq("nonce", params.nonce).maybeSingle();
+          return existing.data ? normalizeAmount(existing.data) : null;
+        }
+        fail("recordPaymentIdempotent", error);
+      }
       return normalizeAmount(data);
     },
 
