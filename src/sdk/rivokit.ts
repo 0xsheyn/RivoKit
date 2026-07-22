@@ -64,6 +64,12 @@ export type FundExecutor = (args: {
   order: OrderRecord;
   paymentInfo: PaymentInfo;
   hash: Hex;
+  /**
+   * A pre-obtained ERC-3009 authorization signature. When present (e.g. the buyer
+   * signed in their own browser wallet), the executor relays it instead of signing
+   * with a host-held key. Absent for the default server-signed path.
+   */
+  signature?: Hex;
 }) => Promise<{ fundingTxHash?: string; authorizeTxHash: string }>;
 
 export type RivoKitConfig = {
@@ -122,7 +128,7 @@ function toOrder(r: OrderRecord): Order {
 const secondsFromIso = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000);
 
 /** Rebuild the on-chain PaymentInfo from a stored order — its fields are all persisted. */
-function toPaymentInfo(r: OrderRecord): PaymentInfo {
+export function paymentInfoFromRecord(r: OrderRecord): PaymentInfo {
   return {
     operator: r.operator as Address,
     payer: r.payer as Address,
@@ -238,10 +244,14 @@ export function createRivoKit(deps: RivoKitDeps) {
       return toOrder(record);
     },
 
-    /** Move USDC to Arc and authorize into escrow. Emits funding_pending → funded. */
-    async fund(orderId: string): Promise<void> {
+    /**
+     * Move USDC to Arc and authorize into escrow. Emits funding_pending → funded.
+     * `opts.signature` carries a buyer-signed ERC-3009 authorization (e.g. from a
+     * browser wallet); omit it for the default host-signed path.
+     */
+    async fund(orderId: string, opts?: { signature?: Hex }): Promise<void> {
       let order = await get(orderId);
-      const paymentInfo = toPaymentInfo(order);
+      const paymentInfo = paymentInfoFromRecord(order);
       const hash = getPaymentInfoHash(paymentInfo, config.chainId, config.escrowAddress);
 
       if (order.state === "created") {
@@ -249,7 +259,7 @@ export function createRivoKit(deps: RivoKitDeps) {
         emitter.emit("funding_pending", { orderId });
       }
 
-      const res = await deps.fund({ order, paymentInfo, hash });
+      const res = await deps.fund({ order, paymentInfo, hash, ...(opts?.signature ? { signature: opts.signature } : {}) });
       await deps.store.recordPaymentIdempotent({
         orderId, nonce: `${hash}:authorize`, kind: "authorize",
         status: "confirmed", txHash: res.authorizeTxHash, chain: "Arc_Testnet", amountMinor: paymentInfo.maxAmount,
@@ -269,7 +279,7 @@ export function createRivoKit(deps: RivoKitDeps) {
      */
     async release(orderId: string, proof: ReleaseProof): Promise<void> {
       const order = await get(orderId);
-      const paymentInfo = toPaymentInfo(order);
+      const paymentInfo = paymentInfoFromRecord(order);
       const hash = getPaymentInfoHash(paymentInfo, config.chainId, config.escrowAddress);
       const priceOutMinor = BigInt(order.price_eur);
 
@@ -317,7 +327,7 @@ export function createRivoKit(deps: RivoKitDeps) {
     /** Return the payer's money and bridge it back to receivingChain (invariant 5). */
     async refund(orderId: string): Promise<void> {
       let order = await get(orderId);
-      const paymentInfo = toPaymentInfo(order);
+      const paymentInfo = paymentInfoFromRecord(order);
       // Capture the pre-transition state: it decides void vs refund AND is what
       // runRefund's guard validates (funded/released → refund_pending). Passing
       // the already-moved "refund_pending" would fail that guard against itself.
