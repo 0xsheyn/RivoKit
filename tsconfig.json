@@ -22,7 +22,8 @@
     "incremental": true,
 
     "paths": {
-      "@rivokit/*": ["./src/*"]
+      "@rivokit/*": ["./src/*"],
+      "@/*": ["./demo/*"]
     },
     "plugins": [{ "name": "next" }]
   },
