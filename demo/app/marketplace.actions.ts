@@ -9,6 +9,7 @@ import { productById } from "../lib/catalog.ts";
 // decision of WHEN to release or refund — never the funds themselves.
 export type OrderView = {
   id: string;
+  payer: string;
   product: { id: string; name: string; seller: string; emoji: string } | null;
   priceEURMinor: string;
   usdcAmount: string | null;
@@ -52,6 +53,7 @@ async function view(orderId: string): Promise<OrderView> {
 
   return {
     id: order.id,
+    payer: order.payer,
     product: product ? { id: product.id, name: product.name, seller: product.seller, emoji: product.emoji } : null,
     priceEURMinor: order.priceEUR,
     usdcAmount: order.usdcAmount,
@@ -95,14 +97,19 @@ const wrap = async (fn: () => Promise<string>): Promise<MpResult> => {
 
 // ── Buyer ──────────────────────────────────────────────────────────────
 
-/** Checkout: create the order (locks FX quote, screens) + record the product. */
-export async function mpCheckout(productId: string): Promise<MpResult> {
+/**
+ * Checkout: create the order (locks FX quote, screens) + record the product.
+ * `payer` defaults to the demo's server buyer; pass a connected wallet address to
+ * make that address the payer — it will then sign the ERC-3009 authorization in
+ * its own browser wallet (see mpAuthTypedData + mpPaySigned).
+ */
+export async function mpCheckout(productId: string, payer?: string): Promise<MpResult> {
   return wrap(async () => {
     const { kit, store, addresses } = getRivoKit();
     const product = productById(productId);
     if (!product) throw new Error(`produk ${productId} tak ada`);
     const order = await kit.createOrder({
-      payer: addresses.buyer as `0x${string}`,
+      payer: (payer ?? addresses.buyer) as `0x${string}`,
       receiver: addresses.merchant as `0x${string}`,
       priceEURMinor: BigInt(product.priceEURMinor),
       receivingChain: "Arc_Testnet",
@@ -124,6 +131,58 @@ export type Balances = {
 
 export async function mpBalances(): Promise<Balances | null> {
   try { return await getRivoKit().balances(); } catch { return null; }
+}
+
+/** Arc USDC balance of a connected browser wallet (minor units, string). */
+export async function mpAddrArcUsdc(address: string): Promise<string | null> {
+  try { return await getRivoKit().addrArcUsdc(address); } catch { return null; }
+}
+
+/** EIP-712 typed data — JSON-safe (bigints as strings) for a browser wallet to sign. */
+export type AuthTypedData = {
+  domain: { name: string; version: string; chainId: number; verifyingContract: string };
+  types: Record<string, ReadonlyArray<{ name: string; type: string }>>;
+  primaryType: string;
+  message: { from: string; to: string; value: string; validAfter: string; validBefore: string; nonce: string };
+};
+
+/**
+ * Return the ERC-3009 authorization the connected wallet must sign for `orderId`.
+ * The signature it produces is relayed by mpPaySigned — the buyer never pays gas.
+ */
+export async function mpAuthTypedData(orderId: string): Promise<{ ok: true; typedData: AuthTypedData } | { ok: false; error: string }> {
+  try {
+    const td = await getRivoKit().authTypedDataFor(orderId);
+    return {
+      ok: true,
+      typedData: {
+        domain: { ...td.domain, verifyingContract: td.domain.verifyingContract as string },
+        types: td.types as AuthTypedData["types"],
+        primaryType: td.primaryType,
+        message: {
+          from: td.message.from, to: td.message.to,
+          value: td.message.value.toString(),
+          validAfter: td.message.validAfter.toString(),
+          validBefore: td.message.validBefore.toString(),
+          nonce: td.message.nonce,
+        },
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) };
+  }
+}
+
+/**
+ * Connected-wallet pay: the buyer signed the ERC-3009 authorization in their own
+ * wallet; the operator relays it (gasless). Arc rail only — the wallet's USDC is
+ * already on Arc; cross-chain rails need the host's own key and stay server-signed.
+ */
+export async function mpPaySigned(orderId: string, signature: string): Promise<MpResult> {
+  return wrap(async () => {
+    await getRivoKit().kit.fund(orderId, { signature: signature as `0x${string}` });
+    return orderId;
+  });
 }
 
 /**

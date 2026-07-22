@@ -24,6 +24,7 @@ coverage/
 
 # State run uji live — supaya run yang terputus bisa dilanjutkan, bukan diulang
 .live-*.json
+.demo-topup.json
 
 *.log
 .DS_Store

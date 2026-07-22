@@ -32,7 +32,7 @@ import { createBridge } from "../../src/funding/bridge.ts";
 import { createUnifiedBalance } from "../../src/funding/unified-balance.ts";
 import { createOrderStore } from "../../src/orchestrator/order-store.ts";
 import { createComplianceGate, createCircleScreener } from "../../src/events/compliance.ts";
-import { createRivoKit } from "../../src/sdk/rivokit.ts";
+import { createRivoKit, paymentInfoFromRecord } from "../../src/sdk/rivokit.ts";
 
 // Next loads .env from the app dir (demo/), but the credentials live in the
 // repo-root .env.local. Load it here so the same file drives scripts and demo.
@@ -142,18 +142,22 @@ function build() {
     createCircleScreener((path, body) => circle.request("POST", path, body), () => randomUUID()),
   );
 
-  // Gasless same-chain funding: the demo buyer already holds USDC on Arc. Signs
-  // off-chain, operator relays. Idempotent so a re-fund is a no-op.
-  const fund = async ({ paymentInfo, hash }: { paymentInfo: Record<string, unknown>; hash: Hex }) => {
+  /** Build the exact ERC-3009 typed data a buyer signs to authorize an order. */
+  const authTypedData = (paymentInfo: Record<string, unknown>) =>
+    receiveAuthorizationTypedData({
+      paymentInfo: paymentInfo as never, chainId: ARC_TESTNET_CHAIN_ID, escrowAddress: ESCROW,
+      tokenCollector: TOKEN_COLLECTOR, usdcAddress: USDC_ADDRESS,
+    });
+
+  // Gasless same-chain funding: the payer already holds USDC on Arc. Either the
+  // buyer signs in their own wallet (browser) and we relay `signature`, or — the
+  // demo default — the server signs with a testnet key. Operator relays either
+  // way; idempotent so a re-fund is a no-op.
+  const fund = async ({ paymentInfo, hash, signature }: { paymentInfo: Record<string, unknown>; hash: Hex; signature?: Hex }) => {
     const ps = await escrow.getPaymentState(hash);
     if (ps.hasCollectedPayment) return { authorizeTxHash: "0xsudah" };
-    const signature = await buyerWallet.signTypedData(
-      receiveAuthorizationTypedData({
-        paymentInfo: paymentInfo as never, chainId: ARC_TESTNET_CHAIN_ID, escrowAddress: ESCROW,
-        tokenCollector: TOKEN_COLLECTOR, usdcAddress: USDC_ADDRESS,
-      }) as never,
-    );
-    const auth = await escrow.authorize(paymentInfo as never, (paymentInfo as { maxAmount: bigint }).maxAmount, TOKEN_COLLECTOR, signature);
+    const sig = signature ?? (await buyerWallet.signTypedData(authTypedData(paymentInfo) as never));
+    const auth = await escrow.authorize(paymentInfo as never, (paymentInfo as { maxAmount: bigint }).maxAmount, TOKEN_COLLECTOR, sig);
     return { authorizeTxHash: auth.txHash };
   };
 
@@ -166,8 +170,22 @@ function build() {
     },
   });
 
+  /** Arc USDC balance of an arbitrary address (for a connected browser wallet). */
+  const addrArcUsdc = async (address: string) =>
+    (await erc20Balance(arcClient, USDC_ADDRESS, getAddress(address))).toString();
+
+  /**
+   * The ERC-3009 typed data for a stored order, ready for a browser wallet to sign.
+   * `from` is the order's payer — a connected wallet only signs its own orders.
+   */
+  const authTypedDataFor = async (orderId: string) => {
+    const record = await store.get(orderId);
+    if (!record) throw new Error("order tak ada");
+    return authTypedData(paymentInfoFromRecord(record) as unknown as Record<string, unknown>);
+  };
+
   return {
-    kit, store, balances,
+    kit, store, balances, addrArcUsdc, authTypedDataFor,
     addresses: { buyer: buyer.address as string, merchant: MERCHANT as string },
     funding: {
       bridge, ub, arcAdapter, sepAdapter, buyer: buyer.address as string, kitKey: KIT_KEY,
