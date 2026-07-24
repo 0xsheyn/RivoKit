@@ -14,6 +14,7 @@ export const ORDER_STATES = [
   "created",
   "funding_pending",
   "funded",
+  "settlement_pending",
   "shipped",
   "released",
   "refund_pending",
@@ -23,9 +24,6 @@ export const ORDER_STATES = [
 
 export type OrderState = (typeof ORDER_STATES)[number];
 
-/** States from which nothing further can happen. */
-export const TERMINAL_STATES: readonly OrderState[] = ["refunded"];
-
 const TRANSITIONS: Record<OrderState, readonly OrderState[]> = {
   // Funding submitted, or abandoned before it ever started.
   created: ["funding_pending", "failed"],
@@ -34,9 +32,16 @@ const TRANSITIONS: Record<OrderState, readonly OrderState[]> = {
   funding_pending: ["funded", "failed"],
 
   // Held in escrow. `shipped` is optional: digital goods release immediately.
-  funded: ["shipped", "released", "refund_pending", "failed"],
+  funded: ["shipped", "released", "settlement_pending", "refund_pending", "failed"],
 
-  shipped: ["released", "refund_pending", "failed"],
+  // Captured, but the swap has not delivered the promised currency yet.
+  //
+  // The escrow is already empty and void/reclaim no longer apply, so this is
+  // NOT recoverable by returning to `funded`. The only ways out are retrying
+  // the swap, or giving up and refunding from the operator's own balance.
+  settlement_pending: ["released", "refund_pending", "failed"],
+
+  shipped: ["released", "settlement_pending", "refund_pending", "failed"],
 
   // EXTENSION beyond API.md, which draws `released` as terminal.
   //
@@ -102,5 +107,21 @@ export function isTerminal(state: OrderState): boolean {
  * settled. `funding_pending` is NOT funded — the attestation may still fail.
  */
 export function isFunded(state: OrderState): boolean {
-  return state === "funded" || state === "shipped" || state === "released";
+  return (
+    state === "funded" ||
+    state === "settlement_pending" ||
+    state === "shipped" ||
+    state === "released"
+  );
+}
+
+/**
+ * True when funds have LEFT escrow and cannot be recovered by void or reclaim.
+ *
+ * Past this point a return to the payer costs the operator its own balance
+ * (refund pulls from the operator, not from escrow), so the cheap cancellation
+ * path is gone.
+ */
+export function isCaptured(state: OrderState): boolean {
+  return state === "settlement_pending" || state === "released";
 }
