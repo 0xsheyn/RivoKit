@@ -40,7 +40,7 @@ export default function Page() {
         </div>
 
         <footer className="mt-12 border-t pt-6 text-xs text-muted-foreground">
-          Arc Testnet · escrow CPP non-custodial · 203 tes unit hijau ·{" "}
+          Arc Testnet · escrow CPP non-custodial · off-ramp CPN live · 240 tes unit hijau ·{" "}
           <a href="/sdk" className="font-medium text-foreground underline-offset-4 hover:underline">
             panel penguji SDK
           </a>
