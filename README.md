@@ -8,7 +8,7 @@ Payers pay in USDC from any chain; a recipient in Europe receives **EURC** (and 
 
 <br/>
 
-![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![status](https://img.shields.io/badge/status-mvp-orange) ![hackathon](https://img.shields.io/badge/built%20for-Hackathon-red)   ![stack](https://img.shields.io/badge/stack-TypeScript%20%2B%20App%20Kit-3178c6) ![node](https://img.shields.io/badge/node-%3E%3D20-339933) ![license](https://img.shields.io/badge/license-Apache--2.0-green) 
+![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![status](https://img.shields.io/badge/status-mvp-orange) ![hackathon](https://img.shields.io/badge/built%20for-Hackathon-red)   ![stack](https://img.shields.io/badge/stack-TypeScript%20%2B%20App%20Kit-3178c6) ![node](https://img.shields.io/badge/node-%3E%3D20-339933) ![license](https://img.shields.io/badge/license-Apache--2.0-green)
 
 <br/>
 
