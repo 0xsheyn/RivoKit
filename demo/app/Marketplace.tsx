@@ -17,6 +17,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import SellerCashout from "./SellerCashout";
+import MintRedeem from "./MintRedeem";
 
 const usd = (m: string | null) => (m == null ? "—" : `${(Number(m) / 1e6).toFixed(2)}`);
 const num = (m: string | null | undefined) => (m == null ? 0 : Number(m) / 1e6);
@@ -414,6 +416,8 @@ function SellerPanel({ views, busy, run }: { views: OrderView[]; busy: (id: stri
   const relevant = views.filter((v) => v.state !== "created");
   return (
     <Panel title="Seller" icon={<Store className="size-4" />}>
+      <SellerCashout />
+      <MintRedeem />
       {relevant.length === 0 && <p className="text-xs text-muted-foreground">Belum ada pesanan dibayar.</p>}
       {relevant.map((v) => (
         <div key={v.id} className="rounded-lg border bg-card p-3">
@@ -437,7 +441,7 @@ function SellerPanel({ views, busy, run }: { views: OrderView[]; busy: (id: stri
               </Button>
             </div>
           )}
-          {v.status === "completed" && <p className="mt-1 text-[10px] text-emerald-600">Dibayar {fmtEUR(v.eurcOutMinor)} EURC · payout MOCK.</p>}
+          {v.status === "completed" && <p className="mt-1 text-[10px] text-emerald-600">Diterima {fmtEUR(v.eurcOutMinor)} EURC di Arc · cairkan ke EUR via panel off-ramp CPN (bawah).</p>}
           {["shipped", "confirmed"].includes(v.status) && <p className="mt-1 text-[10px] text-muted-foreground">Menunggu konfirmasi / settlement.</p>}
           {v.status.startsWith("refund") && <p className="mt-1 text-[10px] text-muted-foreground">Dikembalikan ke buyer.</p>}
           <TxList view={v} />
