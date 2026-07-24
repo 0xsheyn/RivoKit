@@ -2,7 +2,8 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@rivokit/*": ["../src/*"]
+      "@rivokit/*": ["../src/*"],
+      "@/*": ["./*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "../src/**/*.ts"],
