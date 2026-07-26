@@ -50,7 +50,7 @@ loadRootEnv();
 
 const need = (key: string): string => {
   const v = process.env[key];
-  if (v == null || v === "") throw new Error(`env ${key} kosong — cek .env.local`);
+  if (v == null || v === "") throw new Error(`env ${key} is empty — check .env.local`);
   return v;
 };
 
@@ -87,7 +87,7 @@ function build() {
       const s = t.transaction?.state;
       if (s && ["COMPLETE", "CONFIRMED"].includes(s)) return t.transaction!.txHash as Hex;
       if (s && ["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-        throw new Error(`${label} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+        throw new Error(`${label} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
       }
     }
     throw new Error(`${label}: timeout`);
@@ -110,16 +110,24 @@ function build() {
   // when MERCHANT_WALLET_ID is present; otherwise the SDK keeps the surplus with
   // the seller. The live proof of this path is scripts/live-scenario.mjs.
   const merchantWalletId = process.env.MERCHANT_WALLET_ID;
-  const payRebate = merchantWalletId
-    ? async ({ to, amountMinor }: { orderId: string; to: Address; amountMinor: bigint }) => {
+
+  /** Move EURC out of the settlement wallet. Used for the rebate and, in
+   *  two-wallet mode, to forward the seller's floor to their own wallet. */
+  const sendEurc = merchantWalletId
+    ? async (to: Address, amountMinor: bigint, label: string) => {
         const tx = await circle.contractExecution({
           walletId: merchantWalletId,
           contractAddress: EURC_ADDRESS,
           abiFunctionSignature: "transfer(address,uint256)",
           abiParameters: [to, amountMinor.toString()],
         });
-        return { txHash: await settleCircleTx(tx.id, "rebate") };
+        return { txHash: await settleCircleTx(tx.id, label) };
       }
+    : undefined;
+
+  const payRebate = sendEurc
+    ? async ({ to, amountMinor }: { orderId: string; to: Address; amountMinor: bigint }) =>
+        sendEurc(to, amountMinor, "rebate")
     : undefined;
 
   const escrow = createEscrow({ escrowAddress: ESCROW, publicClient: arcClient as never, operator: operatorSender });
@@ -184,12 +192,29 @@ function build() {
     return { authorizeTxHash: auth.txHash };
   };
 
+  // Cost recovery for the gasless relay. The operator pays Arc gas (which is
+  // USDC) for authorize/capture/void/refund; this fee, withheld by the escrow at
+  // capture and grossed onto what the payer authorizes, is what pays for it.
+  // Set RIVO_FEE_BPS=0 to go back to a fully subsidised demo.
+  const FEE_BPS = Number(process.env.RIVO_FEE_BPS ?? "25");
+  const FEE_RECEIVER = getAddress(process.env.RIVO_FEE_RECEIVER ?? OPERATOR);
+  // Arc charges gas in USDC with 18 decimals; 1e18 wei = 1 USDC.
+  const MIN_OPERATOR_GAS_WEI = BigInt(
+    Math.round(Number(process.env.MIN_OPERATOR_GAS_USDC ?? "0.5") * 1e6),
+  ) * 10n ** 12n;
+
+  /** Operator's native (gas) balance on Arc, in wei. */
+  const operatorGas = () => arcClient.getBalance({ address: OPERATOR });
+
   const kit = createRivoKit({
     store, escrow, fx, bridge, fund: fund as never, payRebate, compliance: gate,
+    operatorGas,
     config: {
       chainId: ARC_TESTNET_CHAIN_ID, escrowAddress: ESCROW, operator: OPERATOR, token: USDC_ADDRESS as Address,
       refundCollector: REFUND_COLLECTOR, settlementAddress: MERCHANT,
       screeningChain: process.env.CIRCLE_BLOCKCHAIN || "ARC-TESTNET",
+      ...(FEE_BPS > 0 ? { feeBps: FEE_BPS, feeReceiver: FEE_RECEIVER } : {}),
+      minOperatorGasWei: MIN_OPERATOR_GAS_WEI,
     },
   });
 
@@ -197,13 +222,21 @@ function build() {
   const addrArcUsdc = async (address: string) =>
     (await erc20Balance(arcClient, USDC_ADDRESS, getAddress(address))).toString();
 
+  /** Sepolia USDC balance of an arbitrary address — the source of both cross-chain rails. */
+  const addrSepUsdc = async (address: string) =>
+    (
+      (await sepoliaClient.readContract({
+        address: SEPOLIA_USDC, abi: erc20Abi, functionName: "balanceOf", args: [getAddress(address)],
+      })) as bigint
+    ).toString();
+
   /**
    * The ERC-3009 typed data for a stored order, ready for a browser wallet to sign.
    * `from` is the order's payer — a connected wallet only signs its own orders.
    */
   const authTypedDataFor = async (orderId: string) => {
     const record = await store.get(orderId);
-    if (!record) throw new Error("order tak ada");
+    if (!record) throw new Error("no such order");
     return authTypedData(paymentInfoFromRecord(record) as unknown as Record<string, unknown>);
   };
 
@@ -221,7 +254,12 @@ function build() {
   };
 
   return {
-    kit, store, balances, addrArcUsdc, authTypedDataFor, resolveWebhookPublicKey,
+    kit, store, balances, addrArcUsdc, addrSepUsdc, authTypedDataFor, resolveWebhookPublicKey,
+    relay: { operatorGas, minGasWei: MIN_OPERATOR_GAS_WEI, feeBps: FEE_BPS, feeReceiver: FEE_RECEIVER },
+    sendEurc,
+    /** EURC balance of an arbitrary address — a connected seller wallet. */
+    addrEurc: async (address: string) =>
+      (await erc20Balance(arcClient, EURC_ADDRESS, getAddress(address))).toString(),
     addresses: { buyer: buyer.address as string, merchant: MERCHANT as string },
     funding: {
       bridge, ub, arcAdapter, sepAdapter, buyer: buyer.address as string, kitKey: KIT_KEY,
