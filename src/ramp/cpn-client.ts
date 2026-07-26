@@ -260,7 +260,7 @@ export function buildQuoteBody(p: CreateQuoteParams): Record<string, unknown> {
   const hasDest = p.destinationAmount !== undefined;
   if (hasSource === hasDest) {
     throw new Error(
-      "buildQuoteBody: beri amount pada TEPAT SATU sisi — sourceAmount ATAU destinationAmount, tidak keduanya/tak satu pun",
+      "buildQuoteBody: give an amount on EXACTLY ONE side — sourceAmount OR destinationAmount, never both and never neither",
     );
   }
   return {
@@ -312,7 +312,7 @@ export type CreateCpnClientParams = {
 
 export function createCpnClient(params: CreateCpnClientParams) {
   const apiKey = params.apiKey;
-  if (!apiKey) throw new Error("createCpnClient: apiKey (CIRCLE_CPN_KEY) kosong");
+  if (!apiKey) throw new Error("createCpnClient: apiKey (CIRCLE_CPN_KEY) is empty");
   const base = params.baseUrl ?? DEFAULT_BASE;
   const doFetch = params.fetchImpl ?? fetch;
 
@@ -381,7 +381,7 @@ export function createCpnClient(params: CreateCpnClientParams) {
     async createQuote(params: CreateQuoteParams): Promise<CpnQuote> {
       const res = await request<CpnQuote[] | CpnQuote>("POST", "/v1/cpn/quotes", buildQuoteBody(params));
       const quote = Array.isArray(res) ? res[0] : res;
-      if (!quote) throw new CpnError(200, "createQuote: respons kosong (tak ada quote)");
+      if (!quote) throw new CpnError(200, "createQuote: empty response (no quote)");
       return quote;
     },
 

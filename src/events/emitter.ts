@@ -59,7 +59,7 @@ export function createEmitter() {
       try {
         (handler as (p: OrderEventMap[E]) => void)(payload);
       } catch (e) {
-        console.warn(`[rivokit events] handler untuk "${event}" melempar dan diabaikan:`, e);
+        console.warn(`[rivokit events] handler for "${event}" threw and was ignored:`, e);
       }
     }
   }

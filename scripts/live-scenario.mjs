@@ -291,7 +291,7 @@ record(outcome.eurcOutMinor >= PRICE_EUR, "penerima menerima >= priceEUR", `${fm
 record(order.eurc_out === outcome.eurcOutMinor.toString(), "eurc_out tersimpan di DB");
 record(order.rebate === outcome.rebateMinor.toString(), "rebate tersimpan di DB");
 
-// ── Langkah 5: kirim rebate ────────────────────────────────────────────
+// ── Step 5: send the rebate ────────────────────────────────────────────
 
 step("Langkah 5 — kirim rebate ke buyer");
 

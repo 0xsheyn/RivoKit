@@ -39,7 +39,7 @@ export class ComplianceBlockedError extends Error {
 
   constructor(address: string, decision: ScreenDecision, context: ScreenContext, reasons?: string[]) {
     super(
-      `Screening ${context} untuk ${address} tidak lolos (${decision})` +
+      `Screening ${context} for ${address} did not pass (${decision})` +
         (reasons?.length ? `: ${reasons.join(", ")}` : ""),
     );
     this.name = "ComplianceBlockedError";

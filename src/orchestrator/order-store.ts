@@ -189,7 +189,7 @@ export function createOrderStore(url: string, serviceKey: string) {
       }> = {},
     ): Promise<OrderRecord> {
       const current = await this.get(id);
-      if (!current) throw new Error(`order-store transition: order ${id} tidak ada`);
+      if (!current) throw new Error(`order-store transition: no such order ${id}`);
 
       assertTransition(current.state, to);
 

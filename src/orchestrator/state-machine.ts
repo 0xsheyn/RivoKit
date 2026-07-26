@@ -74,8 +74,8 @@ export class InvalidStateTransition extends Error {
 
   constructor(from: OrderState, to: OrderState) {
     super(
-      `Transisi tidak sah: ${from} → ${to}. Yang diizinkan dari ${from}: ` +
-        (TRANSITIONS[from].length ? TRANSITIONS[from].join(", ") : "(tidak ada — state terminal)"),
+      `Invalid transition: ${from} → ${to}. Allowed from ${from}: ` +
+        (TRANSITIONS[from].length ? TRANSITIONS[from].join(", ") : "(none — terminal state)"),
     );
     this.name = "InvalidStateTransition";
     this.from = from;

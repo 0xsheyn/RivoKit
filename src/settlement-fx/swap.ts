@@ -61,8 +61,8 @@ export class FloorNotMetError extends Error {
 
   constructor(floorMinor: bigint, cause: unknown) {
     super(
-      `Swap tidak mencapai floor ${toDecimalString(floorMinor)}. ` +
-        "Dana TIDAK berpindah — aman di tempat semula.",
+      `Swap did not reach the floor of ${toDecimalString(floorMinor)}. ` +
+        "Funds did NOT move — they are safe where they were.",
     );
     this.name = "FloorNotMetError";
     this.floorMinor = floorMinor;
@@ -76,8 +76,8 @@ export class NoRouteError extends Error {
 
   constructor(tokenIn: FxToken, tokenOut: FxToken, cause: unknown) {
     super(
-      `Tidak ada rute ${tokenIn}→${tokenOut}. StableFX berbasis RFQ: ini berarti ` +
-        "tak ada maker melayani arah tersebut, bukan galat konfigurasi.",
+      `No ${tokenIn}→${tokenOut} route. StableFX is RFQ-based: this means no maker ` +
+        "is serving that direction, not that the configuration is wrong.",
     );
     this.name = "NoRouteError";
     this.pair = `${tokenIn}->${tokenOut}`;
