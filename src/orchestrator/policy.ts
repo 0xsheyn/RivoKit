@@ -57,20 +57,20 @@ const POLICY: Record<Wedge, WedgePolicy> = {
   contractor_payout: {
     timeout: "auto_capture",
     expectedProof: ["milestone", "manual"],
-    rationale: "milestone disetujui pihak pembayar — bukti kuat",
+    rationale: "a milestone approved by the payer — strong proof",
   },
 
   // Access grants are deterministic and observable by the host.
   digital_goods: {
     timeout: "auto_capture",
     expectedProof: ["access_granted", "manual"],
-    rationale: "pemberian akses deterministik — bukti kuat",
+    rationale: "deterministic access grant — strong proof",
   },
 
   invoice: {
     timeout: "auto_capture",
     expectedProof: ["milestone", "manual"],
-    rationale: "penerimaan invoice B2B — bukti kuat",
+    rationale: "B2B invoice acceptance — strong proof",
   },
 
   // The oracle problem: nothing on-chain can confirm a physical parcel matched
@@ -78,7 +78,7 @@ const POLICY: Record<Wedge, WedgePolicy> = {
   physical_demo: {
     timeout: "reclaim",
     expectedProof: ["delivery", "manual"],
-    rationale: "pengiriman fisik tak bisa dibuktikan on-chain — bukti lemah",
+    rationale: "physical delivery cannot be proven on-chain — weak proof",
   },
 };
 
@@ -96,7 +96,7 @@ export class ReleaseRejected extends Error {
   readonly proof: ReleaseProof;
 
   constructor(wedge: Wedge, proof: ReleaseProof, reason: string) {
-    super(`Rilis ditolak untuk wedge ${wedge}: ${reason}`);
+    super(`Release rejected for wedge ${wedge}: ${reason}`);
     this.name = "ReleaseRejected";
     this.wedge = wedge;
     this.proof = proof;
@@ -122,7 +122,7 @@ export function checkReleaseProof(wedge: Wedge, proof: ReleaseProof): ReleaseChe
   const policy = POLICY[wedge];
 
   if (!RELEASE_PROOF_KINDS.includes(proof.kind)) {
-    return { accepted: false, manualOverride: false, reason: `jenis bukti tidak dikenal: ${proof.kind}` };
+    return { accepted: false, manualOverride: false, reason: `unknown proof kind: ${proof.kind}` };
   }
 
   if (!policy.expectedProof.includes(proof.kind)) {
@@ -130,8 +130,8 @@ export function checkReleaseProof(wedge: Wedge, proof: ReleaseProof): ReleaseChe
       accepted: false,
       manualOverride: false,
       reason:
-        `bukti "${proof.kind}" tidak cocok untuk wedge ini; ` +
-        `yang diharapkan: ${policy.expectedProof.join(" atau ")}`,
+        `proof "${proof.kind}" does not fit this wedge; ` +
+        `expected: ${policy.expectedProof.join(" or ")}`,
     };
   }
 
@@ -176,7 +176,7 @@ export function expiriesFor(
 
   if (preApprovalExpiry > authorizationExpiry || authorizationExpiry > refundExpiry) {
     throw new Error(
-      `Urutan expiry tidak sah: preApproval=${preApprovalExpiry} ` +
+      `Invalid expiry ordering: preApproval=${preApprovalExpiry} ` +
         `authorization=${authorizationExpiry} refund=${refundExpiry}. ` +
         "Kontrak mensyaratkan preApproval <= authorization <= refund.",
     );

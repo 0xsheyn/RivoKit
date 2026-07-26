@@ -89,7 +89,7 @@ export function normalizeTypedData(m: MessageToBeSigned): NormalizedTypedData {
  */
 export async function signPaymentIntent(account: Account, m: MessageToBeSigned): Promise<Hex> {
   if (!account.signTypedData) {
-    throw new Error("signPaymentIntent: account tidak mendukung signTypedData");
+    throw new Error("signPaymentIntent: account does not support signTypedData");
   }
   const t = normalizeTypedData(m);
   // viem's typed-data generics can't infer over our runtime-shaped object; the

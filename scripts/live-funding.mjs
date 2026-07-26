@@ -120,7 +120,7 @@ const operatorSender = async ({ functionName, args }) => {
 
 const escrow = createEscrow({ escrowAddress: ESCROW, publicClient: arcClient, operator: operatorSender });
 
-// ── Langkah 1: order dengan receivingChain tercatat ────────────────────
+// ── Step 1: order with receivingChain recorded ─────────────────────────
 
 step("Langkah 1 — buat order, catat receivingChain untuk refund");
 
@@ -254,7 +254,7 @@ await sleep(4000);
 const buyerArcAfterBridge = await arcUsdc(buyer.address);
 record(buyerArcAfterBridge > buyerArcBefore, "USDC tiba di Arc", `+${fmt(buyerArcAfterBridge - buyerArcBefore)}`);
 
-// ── Langkah 3: dana masuk escrow ───────────────────────────────────────
+// ── Step 3: funds land in escrow ───────────────────────────────────────
 
 step("Langkah 3 — authorize: USDC yang baru tiba masuk escrow");
 

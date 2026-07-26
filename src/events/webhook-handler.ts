@@ -69,7 +69,7 @@ export async function handleCircleWebhook(
   req: WebhookRequest,
 ): Promise<WebhookResult> {
   if (!req.signatureBase64) {
-    return { ok: false, status: 401, reason: "tanda tangan X-Circle-Signature tidak ada" };
+    return { ok: false, status: 401, reason: "missing X-Circle-Signature header" };
   }
 
   let publicKey: string | null;
@@ -79,7 +79,7 @@ export async function handleCircleWebhook(
     publicKey = null;
   }
   if (!publicKey) {
-    return { ok: false, status: 401, reason: `kunci publik untuk keyId ${req.keyId ?? "?"} tak ditemukan` };
+    return { ok: false, status: 401, reason: `no public key found for keyId ${req.keyId ?? "?"}` };
   }
 
   const verified = verifyCircleSignature({
@@ -88,7 +88,7 @@ export async function handleCircleWebhook(
     publicKey,
   });
   if (!verified) {
-    return { ok: false, status: 401, reason: "tanda tangan tidak sah" };
+    return { ok: false, status: 401, reason: "invalid signature" };
   }
 
   // Parse the RAW bytes we just verified — never a re-serialized copy.
@@ -97,7 +97,7 @@ export async function handleCircleWebhook(
   try {
     payload = JSON.parse(rawText);
   } catch {
-    return { ok: false, status: 400, reason: "body bukan JSON yang sah" };
+    return { ok: false, status: 400, reason: "body is not valid JSON" };
   }
 
   const event = parseWebhookEvent(payload);

@@ -57,7 +57,7 @@ export async function reconcileOrder(deps: ReconcileDeps, order: OrderRecord): P
 
   if (order.state === "funding_pending") {
     if (!order.payment_info_hash) {
-      return { ...base, action: "blocked_no_hash", detail: "order tanpa payment_info_hash" };
+      return { ...base, action: "blocked_no_hash", detail: "order has no payment_info_hash" };
     }
     const ps = await deps.escrow.getPaymentState(order.payment_info_hash as Hex);
     // Escrow holds the authorized amount → the funding move landed; promote.
@@ -71,7 +71,7 @@ export async function reconcileOrder(deps: ReconcileDeps, order: OrderRecord): P
   if (order.state === "refund_pending") {
     // The origin-chain leg cannot be verified from escrow state; hand it back
     // for a bridge retry rather than closing it on incomplete evidence.
-    return { ...base, action: "needs_bridge_retry", detail: `bridge-back ke ${order.receiving_chain} belum terkonfirmasi` };
+    return { ...base, action: "needs_bridge_retry", detail: `bridge-back to ${order.receiving_chain} is not confirmed yet` };
   }
 
   return { ...base, action: "skipped" };

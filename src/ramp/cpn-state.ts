@@ -175,7 +175,7 @@ export function verifyAndInterpretCpn(params: VerifyAndInterpretParams): CpnEven
     signatureBase64: params.signatureBase64,
     publicKey: params.publicKey,
   });
-  if (!ok) throw new Error("verifyAndInterpretCpn: tanda tangan webhook tidak sah");
+  if (!ok) throw new Error("verifyAndInterpretCpn: invalid webhook signature");
   const body = typeof params.rawBody === "string" ? params.rawBody : params.rawBody.toString("utf8");
   return interpretCpnEvent(JSON.parse(body));
 }
