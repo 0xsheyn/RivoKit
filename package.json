@@ -1,6 +1,7 @@
 {
   "name": "rivokit",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "_comment_private": "Still private: nothing here is audited and the payout leg is MOCK, so it must not land on the public npm registry by accident. `npm pack` and git/file installs work regardless — see README > Installation.",
   "private": true,
   "description": "An embeddable cross-border settlement SDK on Arc — multi-chain USDC in, local-currency out.",
   "license": "Apache-2.0",
@@ -8,9 +9,30 @@
   "engines": {
     "node": ">=20"
   },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "infra/supabase/migrations",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
   "scripts": {
     "dev": "next dev demo",
     "build": "next build demo",
+    "build:lib": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build:lib",
+    "prepare": "npm run build:lib",
     "start": "next start demo",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
