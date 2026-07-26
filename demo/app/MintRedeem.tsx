@@ -45,43 +45,46 @@ export default function MintRedeem() {
     });
 
   return (
-    <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-sky-700">
-          <Landmark className="size-3.5" /> Circle Mint — redeem ke bank
+    <div className="rounded-lg border bg-card p-3 shadow-xs">
+      <div className="flex items-center gap-2">
+        <span className="flex size-7 items-center justify-center rounded-md bg-sky-50 text-sky-600">
+          <Landmark className="size-4" />
         </span>
-        <span className="text-[10px] text-muted-foreground">
-          saldo <b className="tabular-nums text-foreground">{usd ? two(usd.amount) : "…"}</b> {usd?.currency ?? ""}
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">Circle Mint — redeem to a bank</div>
+          <p className="truncate text-xs text-muted-foreground">StableFX's final leg, redeemed 1:1 (sandbox: USD)</p>
+        </div>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          <b className="tabular-nums text-foreground">{usd ? two(usd.amount) : "…"}</b> {usd?.currency ?? ""}
         </span>
       </div>
-      <p className="mt-1 text-[10px] text-muted-foreground">
-        Leg akhir jalur StableFX: EURC→EUR (di sandbox: USD) diredeem 1:1 ke rekening bank. Melengkapi CPN.
-      </p>
 
       {deposit?.address && (
-        <div className="mt-2 rounded-md border bg-card p-2 text-[9px] text-muted-foreground">
-          <span className="font-medium text-foreground">Isi saldo (deposit):</span> kirim USDC ke{" "}
-          <span className="font-mono text-foreground">{deposit.address.slice(0, 10)}…{deposit.address.slice(-6)}</span> di{" "}
-          {deposit.chains.join("/")}. <span className="text-amber-600">Arc perlu bridge CCTP dulu.</span>
+        <div className="mt-3 rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Top up:</span> send USDC to{" "}
+          <span className="font-mono text-foreground">{deposit.address.slice(0, 10)}…{deposit.address.slice(-6)}</span> on{" "}
+          {deposit.chains.join("/")}. <span className="text-amber-600">From Arc, bridge over CCTP first.</span>
         </div>
       )}
 
-      <div className="mt-2 flex items-end gap-1.5">
+      <div className="mt-2 flex items-center gap-2">
         <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
-          className="h-8 flex-1 text-[11px]" placeholder="jumlah" />
-        <Button size="xs" variant="outline" onClick={() => setAmount(two(balNum))}>Semua</Button>
+          className="h-8 flex-1 text-xs" placeholder="amount" aria-label="Redeem amount" />
+        <Button size="xs" variant="ghost" onClick={() => setAmount(two(balNum))}>Max</Button>
         <Button size="sm" disabled={pending || !enough} onClick={redeem}>
           {pending ? <Loader2 className="size-3.5 animate-spin" /> : "Redeem"}
         </Button>
       </div>
-      {amount !== "" && !enough && <p className="mt-1 text-[10px] text-amber-600">Jumlah melebihi saldo Mint.</p>}
-      {error && <p className="mt-2 text-[10px] text-red-600">{error}</p>}
+      {amount !== "" && balances.length > 0 && !enough && (
+        <p className="mt-1.5 text-xs text-amber-600">More than the Mint balance.</p>
+      )}
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
 
       {payout && (
-        <div className="mt-2 flex items-center gap-1.5 rounded-md border bg-card p-2 text-[10px]">
-          <CircleCheck className="size-3.5 text-emerald-600" />
-          Payout {two(payout.amount)} {payout.currency} → {payout.bankName}
-          <Badge variant="outline" className="ml-auto text-[9px]">{payout.status}</Badge>
+        <div className="mt-3 flex items-center gap-2 rounded-md border bg-muted/30 p-2 text-xs">
+          <CircleCheck className="size-3.5 shrink-0 text-emerald-600" />
+          <span className="truncate">Payout {two(payout.amount)} {payout.currency} → {payout.bankName}</span>
+          <Badge variant="outline" className="ml-auto">{payout.status}</Badge>
         </div>
       )}
     </div>

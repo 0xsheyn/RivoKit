@@ -203,14 +203,30 @@ An open RFI (`rfiEffect`) blocks the payment; a rejection fails it.
 
 ## Installation
 
-> **Not published to npm yet.** The package is `private` at `0.0.0`; there is no `@rivokit/sdk` to install. Use it from source — clone the repo and import from `src/`.
+> **Not on the public npm registry, and deliberately so** — nothing here is audited and the payout leg is still `MOCK`, so the package stays `private` to make an accidental `npm publish` impossible. It is otherwise a normal installable package: it builds to `dist/` with type declarations and a single entry point.
+
+Install it into your app straight from git (the `prepare` script builds it on install):
+
+```bash
+npm install github:0xsheyn/RivoKit          # or: npm install file:../RivoKit
+```
+
+Or work on it from source:
 
 ```bash
 git clone https://github.com/0xsheyn/RivoKit.git && cd RivoKit
-npm install
+npm install          # runs `prepare` → builds dist/
+npm run build:lib    # rebuild the SDK on its own
+npm test             # 261 unit tests, no credentials needed
 ```
 
-Runtime dependencies of note: `@circle-fin/app-kit` + `@circle-fin/adapter-viem-v2` (bridge/swap/unified balance), `viem` (chain access and signing), `jose` (JWE encryption of CPN payment data).
+Everything supported is exported from the package root — deep imports into `src/` work but move without a version bump:
+
+```ts
+import { createRivoKit, createEscrow, createSettlementFx, createCpnRamp } from "rivokit";
+```
+
+Runtime dependencies of note: `@circle-fin/app-kit` + `@circle-fin/adapter-viem-v2` (bridge/swap/unified balance), `viem` (chain access and signing), `jose` (JWE encryption of CPN payment data). The order store expects Postgres/Supabase — the migrations under `infra/supabase/migrations/` ship with the package.
 
 ## Configuration
 
@@ -313,6 +329,44 @@ await rivokit.release(order.id, { kind: "access_granted", ref: "LIC-8842" });
 | Floored USDC→EURC FX + rebate | **Beneficiary data** (IBAN/CLABE/PIX key) + travel-rule fields |
 | CPN off-ramp: quote → prepare → submit | **KYB/AML**, merchant of record, dispute/arbitration |
 | Status events + verified CPN webhooks | Being the licensed **OFI**/PSP (production) |
+
+### 0. Wire the composition root
+
+`createRivoKit` is a composition root, not a service: it holds no keys and opens no connections. Every dependency that needs a credential is injected, which is what keeps the SDK out of custody of both funds and secrets. A minimal server-side wiring:
+
+```ts
+import {
+  createRivoKit, createEscrow, createSettlementFx, createBridge,
+  createUnifiedBalance, createOrderStore, createComplianceGate, createCircleScreener,
+  ARC_TESTNET_CHAIN_ID, USDC_ADDRESS, installCircleDnsPinning,
+} from "rivokit";
+
+installCircleDnsPinning();                        // never disable TLS verification instead
+
+const kit = createRivoKit({
+  store:  createOrderStore(SUPABASE_URL, SUPABASE_SECRET_KEY),
+  escrow: createEscrow({ escrowAddress, publicClient, operator: sendViaYourOperatorWallet }),
+  fx:     createSettlementFx({ kitKey, circleApiKey, circleEntitySecret }),
+  bridge: createBridge(),
+  fund:   async ({ paymentInfo, hash, signature }) => { /* your ERC-3009 relay → { authorizeTxHash } */ },
+  payRebate,                                      // optional: returns the buffer surplus to the payer
+  compliance: createComplianceGate(createCircleScreener(request, uuid)),
+  operatorGas: () => publicClient.getBalance({ address: operator }),
+  config: {
+    chainId: ARC_TESTNET_CHAIN_ID, escrowAddress, operator, token: USDC_ADDRESS,
+    refundCollector, settlementAddress,
+    feeBps: 25, feeReceiver: operator,            // cost recovery for the gasless relay
+    minOperatorGasWei: 5n * 10n ** 17n,           // refuse new orders below 0.5 USDC of gas
+  },
+});
+```
+
+Two of those are worth stating plainly, because they are the running cost of "gasless":
+
+- **`feeBps` / `feeReceiver`** — the operator pays Arc gas (which *is* USDC) for authorize, capture, void and refund. The fee is withheld by the escrow at capture and **grossed onto what the payer authorizes**, never subtracted from the receiver's floor; taking it out of the captured amount would shrink the swap input below `priceEUR` and the floored swap would revert. Default `0` = you subsidise every order.
+- **`operatorGas` + `minOperatorGasWei`** — without this, an operator that runs out of gas fails *after* the payer has signed, leaving the order in `funding_pending` with nothing on-chain to explain it. With it, `createOrder` throws `OperatorGasLowError` before anything is quoted or stored.
+
+`demo/lib/rivokit.server.ts` is the reference composition; `scripts/live-sdk.mjs` runs the same one against Arc Testnet.
 
 ### 1. Lock the payment amount (inside `createOrder`)
 

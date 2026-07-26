@@ -1,51 +1,50 @@
 import { ArrowUpRight, ShieldCheck } from "lucide-react";
 import Marketplace from "./Marketplace";
+import WalletButton from "./WalletButton";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
+/**
+ * Single-screen board: a fixed header over a grid of role columns — Buyer,
+ * Seller, Host, Seller wallet. Nothing below the fold; each column scrolls on
+ * its own.
+ */
 export default function Page() {
   return (
-    <main className="w-full px-5 py-8 sm:px-8 lg:px-12">
-      <div className="mx-auto w-full">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <ShieldCheck className="size-4" />
-              </span>
-              <h1 className="text-2xl font-semibold tracking-tight">RivoKit</h1>
-            </div>
-            <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
-              Marketplace demo bertenaga RivoKit — pembeli bayar USDC dari chain mana pun, penjual di Eropa
-              menerima <span className="font-medium text-foreground">EURC ber-floor</span> di Arc. Escrow
-              non-custodial (Commerce Payments Protocol), bukan dompet platform.
-            </p>
+    <div className="flex h-dvh flex-col overflow-hidden bg-muted/30">
+      <header className="flex shrink-0 items-center gap-4 border-b bg-background px-5 py-3">
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <ShieldCheck className="size-4" />
+          </span>
+          <div className="leading-tight">
+            <h1 className="text-sm font-semibold tracking-tight">RivoKit</h1>
+            <p className="text-xs text-muted-foreground">Cross-border settlement on Arc</p>
           </div>
+        </div>
+
+        <Badge variant="outline" className="hidden border-amber-200 bg-amber-50 text-amber-700 sm:inline-flex">
+          Arc Testnet · unaudited
+        </Badge>
+        <p className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground xl:block">
+          Real on chain: order + locked FX, USDC into escrow, capture, floored swap, refund bridge-back. Catalog,
+          shipping and courier are <span className="font-mono">mocked</span>.
+        </p>
+
+        <div className="ml-auto flex items-center gap-2 xl:ml-0">
+          <WalletButton />
           <Button asChild variant="outline" size="sm">
             <a href="/sdk">
-              Lihat permukaan SDK
+              SDK surface
               <ArrowUpRight className="size-4" />
             </a>
           </Button>
-        </header>
-
-        <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <strong className="font-semibold">Testnet only — unaudited.</strong> Katalog, ongkir, kurir/tracking,
-          dan leg fiat (EURC→EUR) di-<span className="font-mono text-[13px]">mock</span>. Yang{" "}
-          <span className="font-semibold">nyata</span> di chain: order + FX terkunci, USDC masuk escrow, capture,
-          swap ber-floor, refund + bridge-back. Verifikator pihak-ketiga (kurir/arbiter) diperankan panel Host.
         </div>
+      </header>
 
-        <div className="mt-8">
-          <Marketplace />
-        </div>
-
-        <footer className="mt-12 border-t pt-6 text-xs text-muted-foreground">
-          Arc Testnet · escrow CPP non-custodial · off-ramp CPN live · 240 tes unit hijau ·{" "}
-          <a href="/sdk" className="font-medium text-foreground underline-offset-4 hover:underline">
-            panel penguji SDK
-          </a>
-        </footer>
-      </div>
-    </main>
+      <main className="min-h-0 flex-1 overflow-y-auto p-3 xl:overflow-hidden">
+        <Marketplace />
+      </main>
+    </div>
   );
 }

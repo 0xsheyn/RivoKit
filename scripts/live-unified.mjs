@@ -131,7 +131,7 @@ const operatorSender = async ({ functionName, args }) => {
 
 const escrow = createEscrow({ escrowAddress: ESCROW, publicClient: arcClient, operator: operatorSender });
 
-// ── Langkah 1: order + saldo awal ──────────────────────────────────────
+// ── Step 1: order + starting balances ──────────────────────────────────
 
 step("Langkah 1 — order dengan receivingChain, saldo awal");
 
@@ -173,7 +173,7 @@ info(`buyer: Sepolia ${fmt(sepBefore)} · Arc ${fmt(arcBefore)} USDC`);
 const ub0 = await ub.getBalance(sepAdapter);
 info(`unified balance: confirmed ${fmt(ub0.confirmedMinor)} · pending ${fmt(ub0.pendingMinor)}`);
 
-// ── Langkah 2: deposit ke Gateway (bila belum ada saldo) ───────────────
+// ── Step 2: deposit into Gateway (when there is no balance yet) ────────
 
 step("Langkah 2 — deposit Sepolia → Gateway (unified balance)");
 

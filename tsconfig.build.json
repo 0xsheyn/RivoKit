@@ -1,0 +1,25 @@
+{
+  // Library build: emit `src/` to `dist/` as ESM + .d.ts so an app can install
+  // RivoKit instead of vendoring it. The dev tsconfig is noEmit and covers the
+  // demo and scripts too; this one compiles the SDK alone.
+  //
+  // `rewriteRelativeImportExtensions` (inherited) is what makes the source's
+  // explicit `./foo.ts` specifiers legal: TypeScript rewrites them to `./foo.js`
+  // on emit, so the published files are valid Node ESM.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "incremental": false,
+    "jsx": "react-jsx",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "src/**/*.test.ts"]
+}

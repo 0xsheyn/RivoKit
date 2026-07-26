@@ -21,7 +21,7 @@ describe("toDecimalString", () => {
     expect(toDecimalString(minor)).toBe(expected);
   });
 
-  it("menolak nilai negatif", () => {
+  it("rejects a negative value", () => {
     expect(() => toDecimalString(-1n)).toThrow(MoneyFormatError);
   });
 });
@@ -37,19 +37,19 @@ describe("fromDecimalString", () => {
     expect(fromDecimalString(value)).toBe(expected);
   });
 
-  it("MEMOTONG di bawah 1e-6, tidak membulatkan ke atas", () => {
+  it("TRUNCATES below 1e-6 rather than rounding up", () => {
     // Rounding up here would let a floor check pass on money that never arrives.
     expect(fromDecimalString("29.7509609999")).toBe(29_750_960n);
     expect(fromDecimalString("0.0000009")).toBe(0n);
   });
 
-  it("menolak input tak sah", () => {
+  it("rejects invalid input", () => {
     for (const bad of ["", "abc", "-1", "1.2.3", "1e6", " "]) {
       expect(() => fromDecimalString(bad), bad).toThrow(MoneyFormatError);
     }
   });
 
-  it("bolak-balik tanpa kehilangan presisi", () => {
+  it("round-trips without losing precision", () => {
     for (const v of [0n, 1n, 18_500_000n, 999_999_999_999n]) {
       expect(fromDecimalString(toDecimalString(v))).toBe(v);
     }
@@ -61,7 +61,7 @@ describe("deriveRate", () => {
     expect(deriveRate(1_000_000n, 1_000_000n)).toBe(1_000_000n);
   });
 
-  it("cocok dengan kuotasi nyata: 20 EURC → 29.75096 USDC", () => {
+  it("matches a real quote: 20 EURC → 29.75096 USDC", () => {
     // Live quote observed on Arc Testnet.
     expect(deriveRate(20_000_000n, 29_750_960n)).toBe(1_487_548n);
   });
@@ -74,7 +74,7 @@ describe("deriveRate", () => {
 describe("computeUsdcAmount", () => {
   const PRICE = 18_500_000n; // €18.50
 
-  it("tanpa buffer pada kurs 1:1, buyer membayar tepat harga", () => {
+  it("with no buffer at a 1:1 rate, the buyer pays exactly the price", () => {
     expect(computeUsdcAmount(PRICE, 1_000_000n, 0)).toBe(PRICE);
   });
 
@@ -83,7 +83,7 @@ describe("computeUsdcAmount", () => {
     expect(withBuffer).toBe(18_777_500n);
   });
 
-  it("nilai demo PRD: 1 EURC ≈ 1,08 USDC, buffer 150bps → ~20,28 USDC", () => {
+  it("PRD demo figures: 1 EURC ≈ 1.08 USDC, 150bps buffer → ~20.28 USDC", () => {
     // PRD §14 quotes ~20.28 USDC for €18.50. Its "1.08" is USDC per EURC, so
     // the rate this function wants is the reciprocal: ~0.9259 EURC per USDC.
     const rate = deriveRate(1_080_000n, 1_000_000n); // 1.08 USDC in → 1 EURC out
@@ -91,7 +91,7 @@ describe("computeUsdcAmount", () => {
     expect(Number(amount) / 1e6).toBeCloseTo(20.28, 1);
   });
 
-  it("membalik arah kurs menghasilkan angka yang salah tapi tampak masuk akal", () => {
+  it("inverting the rate gives a wrong number that still looks plausible", () => {
     // Documents the trap: 1.08 fed directly instead of its reciprocal returns
     // 17.39 — no error, no warning, recipient €2.89 short. This test exists so
     // the hazard stays visible if anyone "simplifies" the API later.
@@ -102,7 +102,7 @@ describe("computeUsdcAmount", () => {
     expect(right).toBeGreaterThan(wrong);
   });
 
-  it("usdcAmountFromQuote tidak bisa dibalik arahnya", () => {
+  it("usdcAmountFromQuote cannot be used in the other direction", () => {
     // Same result, but the argument names carry the direction.
     const viaQuote = usdcAmountFromQuote(
       PRICE,
@@ -130,11 +130,11 @@ describe("computeRebate (invariant 6 PRD §10)", () => {
     expect(computeRebate(19_000_000n, 18_500_000n)).toBe(500_000n);
   });
 
-  it("nol saat output tepat sama", () => {
+  it("is zero when the output matches exactly", () => {
     expect(computeRebate(18_500_000n, 18_500_000n)).toBe(0n);
   });
 
-  it("nol — TIDAK negatif — saat output kurang", () => {
+  it("is zero — NOT negative — when the output falls short", () => {
     // A negative rebate would mean billing the buyer twice.
     expect(computeRebate(18_000_000n, 18_500_000n)).toBe(0n);
   });

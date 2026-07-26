@@ -61,7 +61,7 @@ describe("handleCircleWebhook", () => {
 
     const res = await handleCircleWebhook(deps, { rawBody: tampered, signatureBase64: sign(body), keyId: "k1" });
 
-    expect(res).toEqual({ ok: false, status: 401, reason: "tanda tangan tidak sah" });
+    expect(res).toEqual({ ok: false, status: 401, reason: "invalid signature" });
     expect(store.recordEvent).not.toHaveBeenCalled();
     expect(store.findOrderIdByTxHash).not.toHaveBeenCalled();
   });
@@ -86,7 +86,7 @@ describe("handleCircleWebhook", () => {
     const body = "not json at all";
     const { deps, store } = makeDeps();
     const res = await handleCircleWebhook(deps, { rawBody: body, signatureBase64: sign(body), keyId: "k1" });
-    expect(res).toEqual({ ok: false, status: 400, reason: "body bukan JSON yang sah" });
+    expect(res).toEqual({ ok: false, status: 400, reason: "body is not valid JSON" });
     expect(store.recordEvent).not.toHaveBeenCalled();
   });
 });

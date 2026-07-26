@@ -51,9 +51,9 @@ export type MockPayoutParams = {
 };
 
 const DISCLAIMER =
-  "MOCK — RivoKit tidak mengeksekusi leg fiat. Instruksi ini diserahkan ke host " +
-  "untuk dijalankan lewat off-ramp berlisensi (EURC→EUR). Tidak ada dana fiat yang " +
-  "berpindah dari sini. KYB/AML dan settlement fiat adalah tanggung jawab host.";
+  "MOCK — RivoKit does not execute the fiat leg. This instruction is handed to the host " +
+  "to run through a licensed off-ramp (EURC→EUR). No fiat moves from here. " +
+  "KYB/AML and fiat settlement are the host's responsibility.";
 
 /**
  * Build a mock payout instruction from a settled order.
@@ -64,7 +64,7 @@ const DISCLAIMER =
  */
 export function mockPayout(params: MockPayoutParams): PayoutInstruction {
   if (params.eurcMinor <= 0n) {
-    throw new Error("mockPayout: eurcMinor harus > 0 — tak ada yang dibayarkan");
+    throw new Error("mockPayout: eurcMinor must be > 0 — there is nothing to pay out");
   }
   return {
     kind: "mock",

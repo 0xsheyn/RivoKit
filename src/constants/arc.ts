@@ -77,7 +77,7 @@ export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as c
  *
  * Recorded for observability/debugging only. RivoKit reaches FX through App Kit
  * Swap (`kit.swap`), NOT by calling this contract directly — see CLAUDE.md §5
- * ("StableFX diakses lewat App Kit Swap, bukan kontrak FxEscrow terpisah").
+ * ("StableFX is reached through App Kit Swap, not a separate FxEscrow contract").
  */
 export const STABLEFX_ESCROW_ADDRESS = "0x867650F5eAe8df91445971f14d89fd84F0C9a9f8" as const;
 
