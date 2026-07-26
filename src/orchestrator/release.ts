@@ -27,6 +27,7 @@ import type { Escrow } from "../escrow/operations.ts";
 import type { PaymentInfo } from "../escrow/payment-info.ts";
 import type { FxToken, SettlementFx } from "../settlement-fx/swap.ts";
 import { FloorNotMetError } from "../settlement-fx/swap.ts";
+import { netOfFee } from "../sdk/fee.ts";
 import { assertReleaseProof, type ReleaseProof, type Wedge } from "./policy.ts";
 import { assertTransition, type OrderState } from "./state-machine.ts";
 
@@ -103,12 +104,16 @@ export async function release(
   );
 
   // 4. Settle into the recipient's currency, floored at the guaranteed price.
+  //    Swap the POST-FEE remainder: the escrow already split the operator fee
+  //    off at capture, so swapping the gross would try to move tokens the
+  //    settlement wallet never received.
+  const netMinor = netOfFee(req.amountMinor, req.feeBps ?? 0);
   try {
     const swap = await deps.fx.swapWithFloor({
       address: deps.settlementAddress,
       tokenIn,
       tokenOut,
-      amountInMinor: req.amountMinor,
+      amountInMinor: netMinor,
       floorOutMinor: req.priceOutMinor,
     });
 
@@ -126,8 +131,8 @@ export async function release(
     // already happened, so this is NOT "funds safe in escrow". Say so plainly.
     const reason =
       e instanceof FloorNotMetError
-        ? `Floor ${req.priceOutMinor} tidak tercapai; dana ada di ${deps.settlementAddress} sebagai ${tokenIn}, belum dikonversi.`
-        : `Settlement gagal: ${String((e as Error)?.message ?? e).slice(0, 200)}`;
+        ? `Floor ${req.priceOutMinor} not met; ${netMinor} ${tokenIn} sits at ${deps.settlementAddress}, not yet converted.`
+        : `Settlement failed: ${String((e as Error)?.message ?? e).slice(0, 200)}`;
 
     return {
       status: "settlement_pending",

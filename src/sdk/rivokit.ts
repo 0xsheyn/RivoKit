@@ -26,6 +26,7 @@ import type { Bridge, BridgeParams } from "../funding/bridge.ts";
 import { createEmitter, type Emitter } from "../events/emitter.ts";
 import type { ComplianceGate } from "../events/compliance.ts";
 import { mockPayout, type PayoutInstruction } from "../payout/mock-payout.ts";
+import { assertFeeBps, grossUpForFee, InvalidFeeError } from "./fee.ts";
 
 /** Public order shape — money as strings, per API.md. */
 export type Order = {
@@ -53,6 +54,10 @@ export type CreateOrderParams = {
   wedge: Wedge;
   mode?: "escrow" | "direct";
   bufferBps?: number;
+  /** Operator fee in bps for this order; falls back to `config.feeBps`. */
+  feeBps?: number;
+  /** Where the fee lands; falls back to `config.feeReceiver`. */
+  feeReceiver?: Address;
 };
 
 /**
@@ -105,6 +110,25 @@ export type RivoKitConfig = {
   tokenIn?: FxToken;
   tokenOut?: FxToken;
   bufferBps?: number;
+  /**
+   * Operator fee in bps, withheld by the escrow at capture. This is how the
+   * gasless relay pays for itself: the operator funds gas for authorize,
+   * capture, void and refund, and on Arc that gas is USDC. Default 0 — the
+   * operator subsidises every order, which is fine for a demo and not for
+   * anything else.
+   *
+   * Grossed up onto what the payer authorizes (see ./fee.ts), so the seller's
+   * floor is never funded out of. Requires `feeReceiver`.
+   */
+  feeBps?: number;
+  feeReceiver?: Address;
+  /**
+   * Refuse to create orders once the operator's gas balance drops below this
+   * (wei — Arc's native USDC has 18 decimals as gas, 6 as ERC-20). Needs
+   * `deps.operatorGas`. Failing at checkout with a clear reason beats failing
+   * mid-flight with an order stuck in funding_pending.
+   */
+  minOperatorGasWei?: bigint;
 };
 
 export type RivoKitDeps = {
@@ -118,6 +142,12 @@ export type RivoKitDeps = {
   config: RivoKitConfig;
   compliance?: ComplianceGate;
   emitter?: Emitter;
+  /**
+   * The operator's native gas balance, in wei. Injected because reading it needs
+   * a chain client, which lives in the host's environment. Paired with
+   * `config.minOperatorGasWei` to gate `createOrder`.
+   */
+  operatorGas?: () => Promise<bigint>;
   /** Injected for determinism in tests. */
   now?: () => number;
   salt?: () => bigint;
@@ -126,6 +156,29 @@ export type RivoKitDeps = {
 };
 
 const DEFAULT_BUFFER_BPS = 150;
+
+/**
+ * The operator's gas balance fell below the configured floor, so the gasless
+ * relay cannot be honoured. Thrown at `createOrder` — before the payer commits
+ * anything — rather than letting authorize fail after they have signed.
+ */
+export class OperatorGasLowError extends Error {
+  readonly code = "OPERATOR_GAS_LOW";
+  readonly balanceWei: bigint;
+  readonly requiredWei: bigint;
+  readonly operator: Address;
+
+  constructor(balanceWei: bigint, requiredWei: bigint, operator: Address) {
+    super(
+      `Operator ${operator} has ${balanceWei} wei of gas left, below the ${requiredWei} wei floor. ` +
+        "New orders are refused: the operator pays for the gasless relay, and on Arc that gas is USDC. Top it up first.",
+    );
+    this.name = "OperatorGasLowError";
+    this.balanceWei = balanceWei;
+    this.requiredWei = requiredWei;
+    this.operator = operator;
+  }
+}
 
 function toOrder(r: OrderRecord): Order {
   return {
@@ -178,9 +231,24 @@ export function createRivoKit(deps: RivoKitDeps) {
   /** Last payout instruction produced per order — the host reads this on `released`. */
   const payouts = new Map<string, PayoutInstruction>();
 
+  /**
+   * Refuse new orders when the operator can no longer pay for the relay.
+   *
+   * Gasless means the operator, not the payer, funds every escrow call. When
+   * that balance runs dry the failure surfaces mid-flight — the payer has signed,
+   * the order sits in funding_pending, and nothing on-chain explains why. Better
+   * to refuse at checkout, while nothing has moved.
+   */
+  async function assertOperatorCanRelay(): Promise<void> {
+    const floor = config.minOperatorGasWei;
+    if (!deps.operatorGas || floor == null) return;
+    const balance = await deps.operatorGas();
+    if (balance < floor) throw new OperatorGasLowError(balance, floor, config.operator);
+  }
+
   async function get(orderId: string): Promise<OrderRecord> {
     const r = await deps.store.get(orderId);
-    if (!r) throw new Error(`RivoKit: order ${orderId} tidak ada`);
+    if (!r) throw new Error(`RivoKit: no such order ${orderId}`);
     return r;
   }
 
@@ -212,6 +280,11 @@ export function createRivoKit(deps: RivoKitDeps) {
      * stored, so a blocked address never becomes a fundable order.
      */
     async createOrder(params: CreateOrderParams): Promise<Order> {
+      // Gas first: the operator relays every escrow call, so an operator that
+      // cannot pay gas turns a new order into one that will stall after the
+      // payer has already committed funds.
+      await assertOperatorCanRelay();
+
       if (deps.compliance) {
         const chain = config.screeningChain ?? "ARC-TESTNET";
         await deps.compliance.assertAllowed(params.payer, chain, "funding");
@@ -219,8 +292,15 @@ export function createRivoKit(deps: RivoKitDeps) {
       }
 
       const bufferBps = params.bufferBps ?? config.bufferBps ?? DEFAULT_BUFFER_BPS;
+      const feeBps = params.feeBps ?? config.feeBps ?? 0;
+      const feeReceiver = params.feeReceiver ?? config.feeReceiver ?? ZERO_ADDRESS;
+      assertFeeBps(feeBps);
+      if (feeBps > 0 && feeReceiver === ZERO_ADDRESS) {
+        throw new InvalidFeeError("feeBps > 0 but feeReceiver is empty — the fee would burn to the zero address.");
+      }
+
       // Invert the settlement quote to find how much USDC clears priceEUR + buffer.
-      const { amountInMinor: usdcAmount } = await deps.fx.lockQuote({
+      const { amountInMinor: netUsdcAmount } = await deps.fx.lockQuote({
         address: params.payer,
         tokenIn,
         tokenOut,
@@ -228,6 +308,10 @@ export function createRivoKit(deps: RivoKitDeps) {
         bufferBps,
         probeInMinor: params.priceEURMinor, // ~1:1 stablecoins; a probe near value
       });
+
+      // The payer authorizes the fee ON TOP of the net, so what the escrow hands
+      // the receiver still clears priceEUR + buffer and the floored swap holds.
+      const usdcAmount = grossUpForFee(netUsdcAmount, feeBps);
 
       const t = now();
       const exp = expiriesFor(params.wedge, t);
@@ -240,9 +324,11 @@ export function createRivoKit(deps: RivoKitDeps) {
         preApprovalExpiry: exp.preApprovalExpiry,
         authorizationExpiry: exp.authorizationExpiry,
         refundExpiry: exp.refundExpiry,
-        minFeeBps: 0,
-        maxFeeBps: 0,
-        feeReceiver: ZERO_ADDRESS,
+        // Pinned, not a range: the payer authorizes exactly the fee they were
+        // quoted, so the operator cannot capture with a larger one later.
+        minFeeBps: feeBps,
+        maxFeeBps: feeBps,
+        feeReceiver,
         salt: salt(),
       };
       const hash = getPaymentInfoHash(paymentInfo, config.chainId, config.escrowAddress);
@@ -312,6 +398,10 @@ export function createRivoKit(deps: RivoKitDeps) {
           wedge: order.wedge,
           proof,
           currentState: order.state,
+          // Capture with exactly the fee the payer authorized. `release` swaps
+          // the post-fee remainder, which is what the receiver actually holds.
+          feeBps: paymentInfo.minFeeBps,
+          feeReceiver: paymentInfo.feeReceiver,
         },
       );
 

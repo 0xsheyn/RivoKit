@@ -126,6 +126,89 @@ describe("createOrder", () => {
   });
 });
 
+describe("operator fee (cost recovery for the gasless relay)", () => {
+  it("grosses the fee onto the payer and pins it in paymentInfo", async () => {
+    const deps = makeDeps();
+    const kit = createRivoKit(deps);
+    const order = await kit.createOrder({
+      payer: ADDR.payer, receiver: ADDR.receiver, priceEURMinor: 2_000_000n,
+      receivingChain: "Ethereum_Sepolia", wedge: "digital_goods",
+      feeBps: 25, feeReceiver: ADDR.operator,
+    });
+
+    // The quote said 2_100_000 must reach the receiver; at 25 bps the payer
+    // authorizes more so the post-fee remainder still clears it.
+    expect(BigInt(order.usdcAmount!)).toBeGreaterThan(2_100_000n);
+    const created = (deps.store.create as unknown as { mock: { calls: Array<[{ paymentInfo: { maxAmount: bigint; minFeeBps: number; maxFeeBps: number; feeReceiver: string } }]> } }).mock.calls[0]![0];
+    const gross = created.paymentInfo.maxAmount;
+    expect(gross - (gross * 25n) / 10_000n).toBeGreaterThanOrEqual(2_100_000n);
+    // Pinned min === max: the operator cannot capture a bigger fee than quoted.
+    expect(created.paymentInfo.minFeeBps).toBe(25);
+    expect(created.paymentInfo.maxFeeBps).toBe(25);
+    expect(created.paymentInfo.feeReceiver).toBe(ADDR.operator);
+  });
+
+  it("refuses a fee with no receiver rather than burning it to the zero address", async () => {
+    const deps = makeDeps();
+    const kit = createRivoKit(deps);
+    await expect(
+      kit.createOrder({
+        payer: ADDR.payer, receiver: ADDR.receiver, priceEURMinor: 2_000_000n,
+        receivingChain: "Ethereum_Sepolia", wedge: "digital_goods", feeBps: 25,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_FEE" });
+    expect(deps.store.create).not.toHaveBeenCalled();
+  });
+
+  it("captures with the authorized fee and swaps only what the receiver actually got", async () => {
+    const deps = makeDeps({
+      initial: mkOrder({
+        state: "funded", max_amount: "2105264",
+        min_fee_bps: 25, max_fee_bps: 25, fee_receiver: ADDR.operator,
+      }),
+    });
+    const kit = createRivoKit(deps);
+
+    await kit.release("ord_x", proof);
+
+    // fee = floor(2_105_264 * 25 / 10_000) = 5_263 → net 2_100_001.
+    expect(deps.escrow.capture).toHaveBeenCalledWith(
+      expect.anything(), 2_105_264n, 25, ADDR.operator,
+    );
+    expect(deps.fx.swapWithFloor).toHaveBeenCalledWith(
+      expect.objectContaining({ amountInMinor: 2_100_001n, floorOutMinor: 2_000_000n }),
+    );
+  });
+});
+
+describe("operator gas guard", () => {
+  it("refuses a new order when the operator cannot pay for the relay", async () => {
+    const deps = makeDeps();
+    deps.operatorGas = vi.fn(async () => 10n ** 16n); // 0.01 USDC of gas
+    deps.config.minOperatorGasWei = 5n * 10n ** 17n; // floor: 0.5
+    const kit = createRivoKit(deps);
+
+    await expect(
+      kit.createOrder({ payer: ADDR.payer, receiver: ADDR.receiver, priceEURMinor: 2_000_000n, receivingChain: "Ethereum_Sepolia", wedge: "digital_goods" }),
+    ).rejects.toMatchObject({ code: "OPERATOR_GAS_LOW" });
+    // Nothing was quoted, screened or stored — the payer never committed.
+    expect(deps.fx.lockQuote).not.toHaveBeenCalled();
+    expect(deps.store.create).not.toHaveBeenCalled();
+  });
+
+  it("lets the order through once the balance clears the floor", async () => {
+    const deps = makeDeps();
+    deps.operatorGas = vi.fn(async () => 10n ** 18n);
+    deps.config.minOperatorGasWei = 5n * 10n ** 17n;
+    const kit = createRivoKit(deps);
+    const order = await kit.createOrder({
+      payer: ADDR.payer, receiver: ADDR.receiver, priceEURMinor: 2_000_000n,
+      receivingChain: "Ethereum_Sepolia", wedge: "digital_goods",
+    });
+    expect(order.state).toBe("created");
+  });
+});
+
 describe("fund", () => {
   it("transitions created→funding_pending→funded and emits both, via the injected executor", async () => {
     const deps = makeDeps({ initial: mkOrder({ state: "created" }) });
