@@ -78,6 +78,21 @@ function build() {
     String(pi.minFeeBps), String(pi.maxFeeBps), pi.feeReceiver, String(pi.salt),
   ];
 
+  // Poll a Circle transaction to on-chain settlement. Shared by the operator relay
+  // (escrow calls) and the rebate transfer (an EURC transfer from the merchant).
+  const settleCircleTx = async (txId: string, label: string): Promise<Hex> => {
+    for (let i = 0; i < 60; i++) {
+      await sleep(3000);
+      const t = await circle.getTransaction(txId);
+      const s = t.transaction?.state;
+      if (s && ["COMPLETE", "CONFIRMED"].includes(s)) return t.transaction!.txHash as Hex;
+      if (s && ["FAILED", "CANCELLED", "DENIED"].includes(s)) {
+        throw new Error(`${label} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      }
+    }
+    throw new Error(`${label}: timeout`);
+  };
+
   const operatorSender = async ({ functionName, args }: { functionName: string; args: readonly unknown[] }) => {
     const tx = await circle.contractExecution({
       walletId: need("OPERATOR_WALLET_ID"),
@@ -87,17 +102,25 @@ function build() {
         a && typeof a === "object" && "operator" in a ? toTuple(a as Record<string, unknown>) : typeof a === "bigint" ? a.toString() : a,
       ),
     });
-    for (let i = 0; i < 60; i++) {
-      await sleep(3000);
-      const t = await circle.getTransaction(tx.id);
-      const s = t.transaction?.state;
-      if (s && ["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction!.txHash as Hex };
-      if (s && ["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-        throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
-      }
-    }
-    throw new Error(`${functionName}: timeout`);
+    return { txHash: await settleCircleTx(tx.id, functionName) };
   };
+
+  // Return the settlement surplus to the buyer: an EURC transfer signed by the
+  // merchant's Circle wallet (which holds the EURC after the swap). Only wired
+  // when MERCHANT_WALLET_ID is present; otherwise the SDK keeps the surplus with
+  // the seller. The live proof of this path is scripts/live-scenario.mjs.
+  const merchantWalletId = process.env.MERCHANT_WALLET_ID;
+  const payRebate = merchantWalletId
+    ? async ({ to, amountMinor }: { orderId: string; to: Address; amountMinor: bigint }) => {
+        const tx = await circle.contractExecution({
+          walletId: merchantWalletId,
+          contractAddress: EURC_ADDRESS,
+          abiFunctionSignature: "transfer(address,uint256)",
+          abiParameters: [to, amountMinor.toString()],
+        });
+        return { txHash: await settleCircleTx(tx.id, "rebate") };
+      }
+    : undefined;
 
   const escrow = createEscrow({ escrowAddress: ESCROW, publicClient: arcClient as never, operator: operatorSender });
   const fx = createSettlementFx({
@@ -162,7 +185,7 @@ function build() {
   };
 
   const kit = createRivoKit({
-    store, escrow, fx, bridge, fund: fund as never, compliance: gate,
+    store, escrow, fx, bridge, fund: fund as never, payRebate, compliance: gate,
     config: {
       chainId: ARC_TESTNET_CHAIN_ID, escrowAddress: ESCROW, operator: OPERATOR, token: USDC_ADDRESS as Address,
       refundCollector: REFUND_COLLECTOR, settlementAddress: MERCHANT,
@@ -184,8 +207,21 @@ function build() {
     return authTypedData(paymentInfoFromRecord(record) as unknown as Record<string, unknown>);
   };
 
+  // Circle signs notifications with a per-key ECDSA key fetched from its API. The
+  // webhook route resolves it here so env loading, auth, and DNS pinning stay in
+  // one place. Returns null when the key id is unknown → the webhook is rejected.
+  const resolveWebhookPublicKey = async (keyId?: string): Promise<string | null> => {
+    if (!keyId) return null;
+    try {
+      const data = await circle.request("GET", `/v2/notifications/publicKey/${keyId}`);
+      return (data?.publicKey as string | undefined) ?? null;
+    } catch {
+      return null;
+    }
+  };
+
   return {
-    kit, store, balances, addrArcUsdc, authTypedDataFor,
+    kit, store, balances, addrArcUsdc, authTypedDataFor, resolveWebhookPublicKey,
     addresses: { buyer: buyer.address as string, merchant: MERCHANT as string },
     funding: {
       bridge, ub, arcAdapter, sepAdapter, buyer: buyer.address as string, kitKey: KIT_KEY,
