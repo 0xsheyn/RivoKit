@@ -17,6 +17,7 @@ import { createPublicClient, createWalletClient, erc20Abi, formatUnits, getAddre
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
 import { createCircleClient } from "./lib/circle.mjs";
+import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { arcTransport, sleep } from "../src/lib/rpc.ts";
 import { ARC_TESTNET_CHAIN_ID, USDC_ADDRESS } from "../src/constants/arc.ts";
 import { getPaymentInfoHash, getPayerAgnosticHash, ZERO_ADDRESS } from "../src/escrow/payment-info.ts";
@@ -24,6 +25,10 @@ import { ESCROW_SIGNATURES } from "../src/escrow/abi.ts";
 import { createEscrow } from "../src/escrow/operations.ts";
 import { createOrderStore } from "../src/orchestrator/order-store.ts";
 import { expiriesFor, timeoutPolicyFor } from "../src/orchestrator/policy.ts";
+
+// This network hijacks Circle's DNS → a misleading CERT_HAS_EXPIRED on api.circle.com.
+// Pin before any Circle SDK call. Never disable TLS verification (CLAUDE.md §jebakan).
+installCircleDnsPinning();
 
 const STATE_FILE = ".live-charge.json";
 const AMOUNT = parseUnits("2", 6);
@@ -143,7 +148,12 @@ step("Langkah 2 — charge: authorize + capture dalam SATU transaksi");
 
 let ps = await escrow.getPaymentState(hash);
 if (!ps.hasCollectedPayment) {
-  await store.transition(order.id, "funding_pending");
+  // Idempotent on resume: a prior run may have already moved the order here
+  // before failing at the Circle call. funding_pending → funding_pending is not
+  // a legal transition, so only move when we are not already there.
+  if (order.state !== "funding_pending") {
+    await store.transition(order.id, "funding_pending");
+  }
   if (!state.signature) {
     state.signature = await buyerWallet.signTypedData({
       domain: { name: "USDC", version: "2", chainId: ARC_TESTNET_CHAIN_ID, verifyingContract: USDC_ADDRESS },

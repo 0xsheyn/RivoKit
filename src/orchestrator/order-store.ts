@@ -332,6 +332,27 @@ export function createOrderStore(url: string, serviceKey: string) {
       return ((data ?? []) as OrderRecord[]).map(normalizeOrder);
     },
 
+    /**
+     * Which order an on-chain tx belongs to.
+     *
+     * The payments table is the txHash→order index: every money move is recorded
+     * there with its hash, so an inbound webhook that carries a txHash can be tied
+     * back to the order that produced it. Returns null for a hash we never
+     * recorded — a notification about a transaction that isn't ours, which must be
+     * stored unattributed rather than forced onto some order.
+     */
+    async findOrderIdByTxHash(txHash: string): Promise<string | null> {
+      const { data, error } = await db
+        .from("payments")
+        .select("order_id")
+        .ilike("tx_hash", txHash)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      fail("findOrderIdByTxHash", error);
+      return (data?.order_id as string | undefined) ?? null;
+    },
+
     async deleteOrder(id: string) {
       const { error } = await db.from("orders").delete().eq("id", id);
       fail("deleteOrder", error);

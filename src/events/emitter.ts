@@ -17,7 +17,7 @@ import type { OrderState } from "../orchestrator/state-machine.ts";
 export type OrderEventMap = {
   funding_pending: { orderId: string };
   funded: { orderId: string };
-  released: { orderId: string; eurcOutMinor: bigint; rebateMinor: bigint };
+  released: { orderId: string; eurcOutMinor: bigint; rebateMinor: bigint; rebateTxHash?: string | undefined };
   refund_pending: { orderId: string };
   refunded: { orderId: string; chain: string };
   failed: { orderId: string; reason: string };
