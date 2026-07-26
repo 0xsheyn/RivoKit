@@ -27,7 +27,7 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 /**
- * The seller's multi-currency fiat cash-out, embedded in the Seller panel. Reads
+ * The seller's multi-currency fiat cash-out, shown in the seller wallet panel. Reads
  * the seller wallet's accumulated USDC and off-ramps it via CPN to the chosen
  * corridor (EUR/SEPA, BRL/PIX, MXN/SPEI, USD/WIRE) — a single USDC→fiat
  * conversion, no EURC hop. Complements the EURC-floor/StableFX path, doesn't
@@ -92,83 +92,89 @@ export default function SellerCashout() {
   };
 
   return (
-    <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-emerald-700">
-          <Banknote className="size-3.5" /> Pencairan ke fiat (CPN)
+    <div className="rounded-lg border bg-card p-3 shadow-xs">
+      <div className="flex items-center gap-2">
+        <span className="flex size-7 items-center justify-center rounded-md bg-emerald-50 text-emerald-600">
+          <Banknote className="size-4" />
         </span>
-        <span className="text-[10px] text-muted-foreground">
-          saldo <b className="tabular-nums text-foreground">{balMinor ? two(balNum) : "…"}</b> USDC
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">Cash out to fiat · CPN</div>
+          <p className="truncate text-xs text-muted-foreground">Sales proceeds in USDC → local currency in a bank</p>
+        </div>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          <b className="tabular-nums text-foreground">{balMinor ? two(balNum) : "…"}</b> USDC
         </span>
       </div>
-      <p className="mt-1 text-[10px] text-muted-foreground">
-        USDC hasil jualan → mata uang lokal di bank. Satu konversi via CPN — melengkapi jalur EUR/StableFX.
-      </p>
 
       {/* Corridor selector */}
-      <div className="mt-2 flex flex-wrap gap-1">
+      <div className="mt-3 flex flex-wrap gap-1.5">
         {corridors.map((c) => (
           <button key={c.key} onClick={() => pickCorridor(c.key)}
             className={cn(
-              "rounded-md border px-2 py-1 text-[10px] transition",
-              c.key === corridorKey ? "border-emerald-400 bg-emerald-100 text-emerald-800" : "border-border bg-card hover:bg-accent",
+              "rounded-md border px-2.5 py-1 text-xs font-medium transition",
+              c.key === corridorKey
+                ? "border-primary bg-accent text-foreground ring-1 ring-primary/20"
+                : "bg-card text-muted-foreground hover:bg-accent",
             )}>
             {c.label}
           </button>
         ))}
       </div>
 
-      <div className="mt-2 flex items-end gap-1.5">
+      <div className="mt-2 flex items-center gap-2">
         <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
-          className="h-8 flex-1 text-[11px]" placeholder="jumlah USDC" />
-        <Button size="xs" variant="outline" onClick={() => setAmount(two(balNum))}>Semua</Button>
+          className="h-8 flex-1 text-xs" placeholder="USDC amount" aria-label="USDC amount" />
+        <Button size="xs" variant="ghost" onClick={() => setAmount(two(balNum))}>Max</Button>
         <Button size="sm" disabled={busy !== null || !enough || !corridorKey} onClick={prepare}>
-          {busy === "prepare" ? <Loader2 className="size-3.5 animate-spin" /> : "Cairkan"}
+          {busy === "prepare" ? <Loader2 className="size-3.5 animate-spin" /> : "Cash out"}
         </Button>
       </div>
-      {amount !== "" && !enough && (
-        <p className="mt-1 text-[10px] text-amber-600">
-          {amtNum < minUsdc ? `Min ${minUsdc} USDC untuk ${corridor?.currency ?? "koridor ini"}.` : "Melebihi saldo penjual."}
+      {amount !== "" && balMinor != null && !enough && (
+        <p className="mt-1.5 text-xs text-amber-600">
+          {amtNum < minUsdc ? `Min ${minUsdc} USDC for ${corridor?.currency ?? "this corridor"}.` : "More than the seller holds."}
         </p>
       )}
-      {error && <p className="mt-2 text-[10px] text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
 
       {prepared && !broadcast && (
-        <div className="mt-2 space-y-2 rounded-md border bg-card p-2">
-          <div className="flex items-center justify-center gap-2 text-xs font-semibold">
+        <div className="mt-3 space-y-2 rounded-md border bg-muted/30 p-3">
+          <div className="flex items-center justify-center gap-2 text-sm font-semibold tabular-nums">
             <span>{two(prepared.source.amount)} USDC</span>
-            <ArrowRight className="size-3 text-muted-foreground" />
+            <ArrowRight className="size-3.5 text-muted-foreground" />
             <span className="text-emerald-600">{two(prepared.destination.amount)} {prepared.destination.currency}</span>
           </div>
-          <div className="text-center text-[10px] text-muted-foreground">
+          <div className="text-center text-xs text-muted-foreground">
             fee {prepared.fee} {prepared.feeCurrency} · margin {prepared.spreadBps} bps · {prepared.status}
           </div>
-          <label className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+          <label className="flex items-start gap-2 text-xs text-muted-foreground">
             <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
-            <span><TriangleAlert className="mr-0.5 inline size-3 text-amber-600" />Broadcast <strong>tak-balik</strong> — USDC penjual keluar (dana testnet).</span>
+            <span>
+              <TriangleAlert className="mr-1 inline size-3.5 text-amber-600" />
+              Broadcast is <strong className="text-foreground">irreversible</strong> — the seller's USDC leaves (testnet funds).
+            </span>
           </label>
           <Button size="sm" variant="destructive" className="w-full" disabled={!confirmed || busy !== null} onClick={doBroadcast}>
-            {busy === "broadcast" ? <><Loader2 className="size-3.5 animate-spin" /> Broadcast…</> : "Broadcast (tak-balik)"}
+            {busy === "broadcast" ? <><Loader2 className="size-3.5 animate-spin" /> Broadcasting…</> : "Broadcast (irreversible)"}
           </Button>
         </div>
       )}
 
       {broadcast && (
-        <div className="mt-2 space-y-1.5 rounded-md border bg-card p-2">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium">
+        <div className="mt-3 space-y-2 rounded-md border bg-muted/30 p-3">
+          <div className="flex items-center gap-1.5 text-xs font-medium">
             {broadcast.finalStatus === "COMPLETED"
               ? <CircleCheck className="size-3.5 text-emerald-600" />
               : <TriangleAlert className="size-3.5 text-amber-600" />}
-            Pencairan
-            <Badge variant="outline" className={cn("ml-auto text-[10px]", STATUS_TONE[broadcast.finalStatus])}>
+            Cash-out
+            <Badge variant="outline" className={cn("ml-auto", STATUS_TONE[broadcast.finalStatus])}>
               {broadcast.finalStatus || "—"}
             </Badge>
           </div>
-          <div className="flex flex-wrap items-center gap-1 text-[9px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
             {broadcast.lifecycle.map((s, i) => (
               <span key={s} className="flex items-center gap-1">
                 {i > 0 && <ArrowRight className="size-2.5" />}
-                <span className="rounded bg-muted px-1 py-0.5 font-mono">{s}</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{s}</span>
               </span>
             ))}
           </div>

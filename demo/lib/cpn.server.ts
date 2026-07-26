@@ -158,7 +158,7 @@ const arcTransport = () => fallback(ARC_TESTNET_RPC_FALLBACKS.map((u) => http(u)
  */
 function getSellerSigner() {
   const pk = process.env.RELAYER_PRIVATE_KEY as Hex | undefined;
-  if (!pk) throw new Error("RELAYER_PRIVATE_KEY (dompet penjual demo) kosong — cek .env.local");
+  if (!pk) throw new Error("RELAYER_PRIVATE_KEY (the demo seller wallet) is empty — check .env.local");
   return privateKeyToAccount(pk);
 }
 
@@ -224,7 +224,7 @@ export async function broadcastPayment(paymentId: string): Promise<{
   finalStatus: string;
 }> {
   const entry = preparedTx.get(paymentId);
-  if (!entry) throw new Error("Pembayaran belum disiapkan (atau server telah restart) — siapkan ulang.");
+  if (!entry) throw new Error("Payment was never prepared (or the server restarted) — prepare it again.");
   const ramp = getRampFor(corridorFor(entry.corridorKey));
   const signer = getSellerSigner();
 

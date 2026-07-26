@@ -138,7 +138,7 @@ export function createEscrow(config: EscrowConfig) {
       if (!payer) {
         throw new EscrowOperationError(
           "reclaim",
-          "butuh sender payer — hanya payer yang boleh reclaim, operator tidak bisa menggantikannya",
+          "needs the payer as sender — only the payer may reclaim; the operator cannot stand in",
         );
       }
       return payer({ functionName: "reclaim", args: [paymentInfo] });

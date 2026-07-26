@@ -69,7 +69,7 @@ export default function DemoPanels() {
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Demo interaktif — jalankan alur lewat SDK
+            Interactive demo — run the flow through the SDK
           </CardTitle>
           {state && (
             <Badge variant="outline" className={cn("font-mono", STATE_TONE[state] ?? "border-border bg-muted text-muted-foreground")}>
@@ -78,7 +78,7 @@ export default function DemoPanels() {
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          Testnet. Buyer ditandatangani server pakai kunci demo (di produksi buyer tandatangan di wallet-nya).
+          Testnet. The buyer is server-signed with a demo key (in production the buyer signs in their own wallet).
           Operasi on-chain butuh 1–2 menit.
         </p>
       </CardHeader>
@@ -116,7 +116,7 @@ export default function DemoPanels() {
           <div className="rounded-lg border bg-card p-4">
             <h3 className="text-sm font-medium text-foreground">Seller (penerima EURC)</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Lepas dana saat akses diberikan / milestone di-approve. Penerima dijamin ≥ priceEUR atau swap revert.
+              Release when access is granted or a milestone is approved. The recipient is guaranteed ≥ priceEUR, or the swap reverts.
             </p>
             <div className="mt-3">
               <Button size="sm" disabled={!canRelease || pending} onClick={() => run(() => releaseAction(snap!.orderId))}>

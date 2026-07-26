@@ -112,7 +112,7 @@ const operatorSender = async ({ functionName, args }) => {
 
 const escrow = createEscrow({ escrowAddress: ESCROW, publicClient: arcClient, operator: operatorSender });
 
-// ── Langkah 1: ambil order yang tadi didanai lintas-chain ──────────────
+// ── Step 1: pick up the order funded cross-chain earlier ───────────────
 
 step("Langkah 1 — muat order funded dari live-funding, siapkan refund");
 

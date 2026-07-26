@@ -15,7 +15,7 @@ describe("mockPayout", () => {
 
   it("carries a disclaimer that names the boundary", () => {
     expect(p.disclaimer).toMatch(/MOCK/);
-    expect(p.disclaimer).toMatch(/tidak mengeksekusi leg fiat/i);
+    expect(p.disclaimer).toMatch(/does not execute the fiat leg/i);
     expect(p.disclaimer).toMatch(/host/i);
   });
 

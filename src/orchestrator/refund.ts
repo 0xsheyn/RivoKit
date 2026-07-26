@@ -97,7 +97,7 @@ export async function refund(deps: RefundDeps, req: RefundRequest): Promise<Refu
   }
 
   if (!deps.bridge) {
-    throw new Error("refund: bridgeBack diminta tapi tidak ada bridge di deps");
+    throw new Error("refund: bridgeBack requested but no bridge in deps");
   }
 
   // 3. Bridge back to the origin chain, signed by the payer.

@@ -16,11 +16,11 @@ export type Product = {
 };
 
 export const CATALOG: Product[] = [
-  { id: "kbd", name: "Keyboard Mekanik Hot-Swap", blurb: "Aluminium, switch linear, PBT keycaps", seller: "TechHaus Berlin", emoji: "⌨️", priceEURMinor: "3500000" },
-  { id: "hdp", name: "Headphone Studio", blurb: "Over-ear, 40mm driver, kabel lepas", seller: "AudioLab Wien", emoji: "🎧", priceEURMinor: "4900000" },
-  { id: "cam", name: "Kamera Instan", blurb: "Cetak langsung, lensa 60mm", seller: "Retro Optics Praha", emoji: "📷", priceEURMinor: "4500000" },
-  { id: "wch", name: "Jam Tangan Otomatis", blurb: "Sapphire, water-resist 50m", seller: "Horloge Genève", emoji: "⌚", priceEURMinor: "5000000" },
-  { id: "mug", name: "Mug Keramik Enamel", blurb: "350ml, tahan panas, cetak logo", seller: "Nordic Home Oslo", emoji: "☕", priceEURMinor: "2500000" },
+  { id: "kbd", name: "Hot-Swap Mechanical Keyboard", blurb: "Aluminium case, linear switches, PBT keycaps", seller: "TechHaus Berlin", emoji: "⌨️", priceEURMinor: "3500000" },
+  { id: "hdp", name: "Studio Headphones", blurb: "Over-ear, 40mm drivers, detachable cable", seller: "AudioLab Wien", emoji: "🎧", priceEURMinor: "4900000" },
+  { id: "cam", name: "Instant Camera", blurb: "Prints on the spot, 60mm lens", seller: "Retro Optics Praha", emoji: "📷", priceEURMinor: "4500000" },
+  { id: "wch", name: "Automatic Watch", blurb: "Sapphire crystal, 50m water resistance", seller: "Horloge Genève", emoji: "⌚", priceEURMinor: "5000000" },
+  { id: "mug", name: "Enamel Ceramic Mug", blurb: "350ml, heat resistant, logo printed", seller: "Nordic Home Oslo", emoji: "☕", priceEURMinor: "2500000" },
 ];
 
 export function productById(id: string): Product | undefined {

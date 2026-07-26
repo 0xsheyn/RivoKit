@@ -35,7 +35,7 @@ export class MoneyFormatError extends Error {
  * 18_500_000n → "18.5"
  */
 export function toDecimalString(minorUnits: bigint): string {
-  if (minorUnits < 0n) throw new MoneyFormatError("jumlah uang tidak boleh negatif");
+  if (minorUnits < 0n) throw new MoneyFormatError("a money amount cannot be negative");
 
   const whole = minorUnits / SCALE;
   const fraction = minorUnits % SCALE;
@@ -56,7 +56,7 @@ export function toDecimalString(minorUnits: bigint): string {
 export function fromDecimalString(value: string): bigint {
   const trimmed = value.trim();
   if (!/^\d+(\.\d+)?$/.test(trimmed)) {
-    throw new MoneyFormatError(`bukan desimal positif yang sah: "${value}"`);
+    throw new MoneyFormatError(`not a valid positive decimal: "${value}"`);
   }
 
   // The regex above guarantees both parts, but noUncheckedIndexedAccess is
@@ -79,7 +79,7 @@ export function fromDecimalString(value: string): bigint {
  * happened.
  */
 export function deriveRate(amountInMinor: bigint, amountOutMinor: bigint): bigint {
-  if (amountInMinor <= 0n) throw new MoneyFormatError("amountIn harus > 0 untuk menurunkan rate");
+  if (amountInMinor <= 0n) throw new MoneyFormatError("amountIn must be > 0 to derive a rate");
   return (amountOutMinor * SCALE) / amountInMinor;
 }
 
@@ -105,8 +105,8 @@ export function computeUsdcAmount(
   rateEurcPerUsdc: bigint,
   bufferBps: number,
 ): bigint {
-  if (rateEurcPerUsdc <= 0n) throw new MoneyFormatError("rate harus > 0");
-  if (bufferBps < 0) throw new MoneyFormatError("bufferBps tidak boleh negatif");
+  if (rateEurcPerUsdc <= 0n) throw new MoneyFormatError("rate must be > 0");
+  if (bufferBps < 0) throw new MoneyFormatError("bufferBps cannot be negative");
 
   const base = ceilDiv(priceEURMinor * SCALE, rateEurcPerUsdc);
   return ceilDiv(base * BigInt(10_000 + bufferBps), 10_000n);
