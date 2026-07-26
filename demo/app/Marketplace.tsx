@@ -132,7 +132,7 @@ export default function Marketplace() {
       <Card>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div>
-            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Dompet Buyer (USDC)</div>
+            <div className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">Dompet Buyer (USDC)</div>
             <div className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-sm">
               <span className="text-foreground">Arc <b className="tabular-nums">{usd(bal?.buyerArcUsdc ?? null)}</b></span>
               <span className="text-muted-foreground">Sepolia <span className="tabular-nums">{usd(bal?.buyerSepUsdc ?? null)}</span></span>
@@ -140,7 +140,7 @@ export default function Marketplace() {
             </div>
           </div>
           <div className="sm:text-right">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Dompet Seller (EURC di Arc)</div>
+            <div className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">Dompet Seller (EURC di Arc)</div>
             <div className="mt-1.5 text-sm font-semibold text-emerald-600 tabular-nums">€{usd(bal?.sellerEurc ?? null)}</div>
           </div>
         </CardContent>
@@ -160,9 +160,9 @@ export default function Marketplace() {
               <div key={p.id} className="flex flex-col rounded-lg border bg-card p-3 transition-shadow hover:shadow-sm">
                 <div className="text-2xl">{p.emoji}</div>
                 <div className="mt-1 text-sm font-medium text-foreground">{p.name}</div>
-                <div className="text-[10px] text-muted-foreground">{p.blurb} · {p.seller}</div>
+                <div className="text-[12px] text-muted-foreground">{p.blurb} · {p.seller}</div>
                 <div className="mt-1 text-sm font-semibold text-emerald-600">{fmtEUR(p.priceEURMinor)}</div>
-                <Button size="sm" className="mt-2 w-full" disabled={pending}
+                <Button size="lg" className="mt-2 w-full" disabled={pending}
                   onClick={() => run(null, () => mpCheckout(p.id, isConnected ? address : undefined))}>
                   {isConnected ? "Beli (wallet-ku)" : "Beli sekarang"}
                 </Button>

@@ -58,7 +58,7 @@ function memStore(initial: OrderRecord) {
   };
 }
 
-function makeDeps(over: { store?: ReturnType<typeof memStore>; fxSwap?: unknown; initial?: OrderRecord } = {}): RivoKitDeps {
+function makeDeps(over: { store?: ReturnType<typeof memStore>; fxSwap?: unknown; initial?: OrderRecord; payRebate?: unknown } = {}): RivoKitDeps {
   const store = over.store ?? memStore(over.initial ?? mkOrder());
   const emitter = createEmitter();
   const escrow = {
@@ -82,6 +82,7 @@ function makeDeps(over: { store?: ReturnType<typeof memStore>; fxSwap?: unknown;
     fx: fx as unknown as RivoKitDeps["fx"],
     bridge: bridge as unknown as RivoKitDeps["bridge"],
     fund,
+    ...(over.payRebate !== undefined ? { payRebate: over.payRebate as RivoKitDeps["payRebate"] } : {}),
     emitter,
     config: {
       chainId: 5042002, escrowAddress: ADDR.escrow, operator: ADDR.operator, token: ADDR.token,
@@ -156,6 +157,40 @@ describe("release", () => {
     const payout = kit.payoutFor("ord_x");
     expect(payout).toMatchObject({ label: "MOCK", executed: false, target: { amountMinor: 2_030_000n } });
     expect((await kit.status("ord_x")).state).toBe("released");
+  });
+
+  it("delivers the rebate to the payer and pays the seller only the floor when payRebate is wired", async () => {
+    const payRebate = vi.fn(async () => ({ txHash: "0xrebate" }));
+    const deps = makeDeps({ initial: mkOrder({ state: "funded" }), payRebate });
+    const kit = createRivoKit(deps);
+    const released: { rebateTxHash?: string | undefined }[] = [];
+    kit.on("released", (p) => released.push(p));
+
+    await kit.release("ord_x", proof);
+
+    // Surplus (2_030_000 − 2_000_000 floor = 30_000) goes back to the payer.
+    expect(payRebate).toHaveBeenCalledWith({ orderId: "ord_x", to: ADDR.payer, amountMinor: 30_000n });
+    expect(deps.store.recordPaymentIdempotent).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "rebate", txHash: "0xrebate", amountMinor: 30_000n }),
+    );
+    // The event carries the delivery tx; the seller's payout is the floor, not floor + rebate.
+    expect(released[0]).toMatchObject({ eurcOutMinor: 2_030_000n, rebateMinor: 30_000n, rebateTxHash: "0xrebate" });
+    expect(kit.payoutFor("ord_x")).toMatchObject({ target: { amountMinor: 2_000_000n } });
+  });
+
+  it("skips the rebate transfer when the surplus is zero, and the seller keeps the full settlement", async () => {
+    const payRebate = vi.fn(async () => ({ txHash: "0xrebate" }));
+    const deps = makeDeps({
+      initial: mkOrder({ state: "funded" }),
+      fxSwap: vi.fn(async () => ({ amountOutMinor: 2_000_000n, txHash: "0xswap", rebateMinor: 0n })),
+      payRebate,
+    });
+    const kit = createRivoKit(deps);
+
+    await kit.release("ord_x", proof);
+
+    expect(payRebate).not.toHaveBeenCalled();
+    expect(kit.payoutFor("ord_x")).toMatchObject({ target: { amountMinor: 2_000_000n } });
   });
 
   it("lands in settlement_pending (not released) when the floor is missed", async () => {

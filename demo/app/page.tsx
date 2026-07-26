@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 export default function Page() {
   return (
     <main className="w-full px-5 py-8 sm:px-8 lg:px-12">
-      <div className="mx-auto max-w-[1600px]">
+      <div className="mx-auto w-full">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">

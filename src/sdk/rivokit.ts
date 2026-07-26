@@ -72,6 +72,24 @@ export type FundExecutor = (args: {
   signature?: Hex;
 }) => Promise<{ fundingTxHash?: string; authorizeTxHash: string }>;
 
+/**
+ * Deliver the settlement surplus (rebate) back to the payer.
+ *
+ * The seller was promised only the floor price; anything the swap yields above
+ * it is the buffer the payer overpaid to absorb rate drift, and it is owed back
+ * to them (PRD §10 invariant 6). This step is INJECTED because it moves EURC out
+ * of the settlement wallet and so needs that wallet's signer, which is the host's
+ * environment, not the orchestrator's (CLAUDE.md §2, §5). Omit it and the rebate
+ * is still computed, stored, and reported — just not delivered; the seller keeps
+ * the surplus, which is the prior behaviour.
+ */
+export type RebatePayer = (args: {
+  orderId: string;
+  /** The payer, who overpaid the buffer and is owed the surplus. */
+  to: Address;
+  amountMinor: bigint;
+}) => Promise<{ txHash: string }>;
+
 export type RivoKitConfig = {
   chainId: number;
   escrowAddress: Address;
@@ -95,6 +113,8 @@ export type RivoKitDeps = {
   fx: SettlementFx;
   bridge: Bridge;
   fund: FundExecutor;
+  /** Returns the settlement surplus to the payer. Omit to leave it with the seller. */
+  payRebate?: RebatePayer | undefined;
   config: RivoKitConfig;
   compliance?: ComplianceGate;
   emitter?: Emitter;
@@ -309,15 +329,37 @@ export function createRivoKit(deps: RivoKitDeps) {
             status: "confirmed", txHash: outcome.swapTxHash, chain: "Arc_Testnet", amountMinor: outcome.eurcOutMinor,
           });
         }
+
+        // Return the surplus to the payer, when a rebate payer is wired and there
+        // is a surplus. Do this BEFORE the payout so the seller's instruction
+        // reflects what they actually retain — the floor, not floor + rebate.
+        let rebateTxHash: string | undefined;
+        if (deps.payRebate && outcome.rebateMinor > 0n) {
+          const r = await deps.payRebate({
+            orderId, to: order.payer as Address, amountMinor: outcome.rebateMinor,
+          });
+          rebateTxHash = r.txHash;
+          await deps.store.recordPaymentIdempotent({
+            orderId, nonce: `${hash}:rebate`, kind: "rebate",
+            status: "confirmed", txHash: r.txHash, chain: "Arc_Testnet", amountMinor: outcome.rebateMinor,
+          });
+        }
+
         await deps.store.transition(orderId, "released", {
           eurcOutMinor: outcome.eurcOutMinor, rebateMinor: outcome.rebateMinor, settledAt: new Date(),
         });
+
+        // What the seller keeps: the full settlement when no rebate was delivered,
+        // or the floor once the surplus went back to the payer.
+        const sellerEurcMinor = rebateTxHash ? outcome.eurcOutMinor - outcome.rebateMinor : outcome.eurcOutMinor;
         const payout = mockPayout({
           orderId, beneficiary: order.receiver as Address,
-          eurcMinor: outcome.eurcOutMinor, settlementTxHash: outcome.swapTxHash, now: now(),
+          eurcMinor: sellerEurcMinor, settlementTxHash: outcome.swapTxHash, now: now(),
         });
         payouts.set(orderId, payout);
-        emitter.emit("released", { orderId, eurcOutMinor: outcome.eurcOutMinor, rebateMinor: outcome.rebateMinor });
+        emitter.emit("released", {
+          orderId, eurcOutMinor: outcome.eurcOutMinor, rebateMinor: outcome.rebateMinor, rebateTxHash,
+        });
       } else {
         // Captured but not settled — funds are with the receiver as USDC.
         await deps.store.transition(orderId, "settlement_pending");
