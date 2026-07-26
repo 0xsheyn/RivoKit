@@ -26,7 +26,12 @@ export type BridgeParams = {
   toAdapter: BridgeAdapter;
   toChain: BridgeChain;
   amountMinor: bigint;
-  kitKey: string;
+  /**
+   * Optional. CCTP bridging needs no kit key — App Kit's BridgeConfig has no
+   * such field (swap does). Leaving it out lets a browser adapter bridge with
+   * the payer's own wallet without shipping a server secret to the client.
+   */
+  kitKey?: string;
 };
 
 export type BridgeEstimate = {
@@ -132,24 +137,24 @@ function interpret(res: unknown): BridgeResult {
   if (r.state !== "success") {
     const bad = steps.find((s) => s.state === "error");
     const reason = bad
-      ? `langkah "${bad.name}" gagal${bad.errorCategory ? ` (${bad.errorCategory})` : ""}: ${bad.errorMessage ?? "tanpa pesan"}`
-      : `bridge berakhir state "${r.state}" tanpa langkah sukses`;
+      ? `step "${bad.name}" failed${bad.errorCategory ? ` (${bad.errorCategory})` : ""}: ${bad.errorMessage ?? "no message"}`
+      : `bridge ended in state "${r.state}" with no successful step`;
     const network = looksLikeNetworkFailure(`${reason} ${JSON.stringify(steps)}`);
 
     // Burn already landed → funds are in flight; carry the result as `detail`
     // so a caller can hand it to `retry` and resume from attestation.
     if (burnDone || r.state === "pending") {
       throw new BridgeStuckError(
-        `Bridge belum tuntas (${reason}). Dana mungkin sudah ter-burn di chain asal — ` +
-          "JANGAN kirim ulang; lanjutkan lewat retry (kit.retryBridge).",
+        `Bridge did not finish (${reason}). The funds may already be burned on the source chain — ` +
+          "DO NOT resend; resume through retry (kit.retryBridge).",
         res,
       );
     }
     throw new BridgeFailedError(
-      `Bridge gagal tanpa memindahkan dana: ${reason}.` +
+      `Bridge failed without moving funds: ${reason}.` +
         (network
-          ? " Ini galat jaringan (SDK tak bisa menjangkau API Circle) — " +
-            "cek DNS host *.circle.com (lihat catatan DNS dibajak), bukan revert on-chain."
+          ? " This is a network error (the SDK could not reach Circle's API) — " +
+            "check DNS for *.circle.com (see the hijacked-DNS note), not an on-chain revert."
           : ""),
       { detail: res, networkSuspected: network },
     );
@@ -177,17 +182,17 @@ function classifyThrow(e: unknown): never {
   // payment — the burn may already have happened, so funds are in flight.
   if (/attestation|timeout|pending/i.test(msg)) {
     throw new BridgeStuckError(
-      `Bridge belum tuntas: ${msg.slice(0, 160)}. ` +
-        "Dana mungkin sudah ter-burn di chain asal dan sedang menunggu atestasi — " +
-        "JANGAN kirim ulang; lanjutkan lewat retry (kit.retryBridge).",
+      `Bridge did not finish: ${msg.slice(0, 160)}. ` +
+        "The funds may already be burned on the source chain and waiting on attestation — " +
+        "DO NOT resend; resume through retry (kit.retryBridge).",
       e,
     );
   }
   // A transport failure before any burn — nothing moved, safe to retry cleanly.
   if (looksLikeNetworkFailure(msg)) {
     throw new BridgeFailedError(
-      `Bridge gagal — SDK tak bisa menjangkau API Circle: ${msg.slice(0, 160)}. ` +
-        "Cek DNS host *.circle.com (lihat catatan DNS dibajak), bukan revert on-chain.",
+      `Bridge failed — the SDK could not reach Circle's API: ${msg.slice(0, 160)}. ` +
+        "Check DNS for *.circle.com (see the hijacked-DNS note), not an on-chain revert.",
       { detail: e, networkSuspected: true },
     );
   }
@@ -199,7 +204,7 @@ function bridgeArgs(params: BridgeParams) {
     from: { adapter: params.fromAdapter, chain: params.fromChain },
     to: { adapter: params.toAdapter, chain: params.toChain },
     amount: toDecimalString(params.amountMinor),
-    config: { kitKey: params.kitKey },
+    config: params.kitKey ? { kitKey: params.kitKey } : {},
   };
 }
 
@@ -218,7 +223,7 @@ export function createBridge(kit: AppKit = new AppKit()) {
         from: { adapter: params.fromAdapter, chain: params.fromChain },
         to: { adapter: params.toAdapter, chain: params.toChain },
         amount: toDecimalString(params.amountMinor),
-        config: { kitKey: params.kitKey },
+        config: params.kitKey ? { kitKey: params.kitKey } : {},
       } as never);
 
       const e = est as Record<string, any>;
