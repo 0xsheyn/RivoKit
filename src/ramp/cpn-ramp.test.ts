@@ -3,7 +3,7 @@ import { exportJWK, generateKeyPair } from "jose";
 import { privateKeyToAccount } from "viem/accounts";
 import { createCpnRamp, type RampCorridor } from "./cpn-ramp.ts";
 import type { CpnClient, CpnQuote } from "./cpn-client.ts";
-import type { MessageToBeSigned } from "./cpn-sign.ts";
+import { signPaymentIntent, type MessageToBeSigned } from "./cpn-sign.ts";
 
 const corridor: RampCorridor = {
   senderType: "BUSINESS",
@@ -132,5 +132,39 @@ describe("createCpnRamp", () => {
     expect(rec.submit.paymentId).toBe("pay1");
     expect(rec.submit.transactionId).toBe("tx1");
     expect(rec.submit.signedTransaction).toMatch(/^0x[0-9a-fA-F]{130}$/);
+  });
+
+  it("submitSigned broadcasts a signature produced elsewhere, without an account", async () => {
+    const quote = await fakeQuote();
+    const { client, rec } = mockClient(quote);
+    const ramp = createCpnRamp({ apiKey: "k", corridor, client });
+
+    const tx = await ramp.prepare({ quote, ...prepareInput }).then((r) => r.transaction);
+    // What a browser wallet hands back: a signature, and nothing else. No
+    // Account object is reachable from where the API key lives.
+    const signature = `0x${"ab".repeat(65)}` as const;
+    const submitted = await ramp.submitSigned({ paymentId: "pay1", transaction: tx }, signature);
+
+    expect(submitted.status).toBe("PENDING");
+    expect(rec.submit).toMatchObject({ paymentId: "pay1", transactionId: "tx1", signedTransaction: signature });
+  });
+
+  it("submit and submitSigned reach the API identically — the same call, signed in two places", async () => {
+    const quote = await fakeQuote();
+    const signer = privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
+
+    const a = mockClient(quote);
+    const rampA = createCpnRamp({ apiKey: "k", corridor, client: a.client });
+    const txA = await rampA.prepare({ quote, ...prepareInput }).then((r) => r.transaction);
+    await rampA.submit({ paymentId: "pay1", transaction: txA }, signer);
+
+    // Sign separately (as the browser would), then broadcast through submitSigned.
+    const b = mockClient(quote);
+    const rampB = createCpnRamp({ apiKey: "k", corridor, client: b.client });
+    const txB = await rampB.prepare({ quote, ...prepareInput }).then((r) => r.transaction);
+    const signature = await signPaymentIntent(signer, txB.messageToBeSigned);
+    await rampB.submitSigned({ paymentId: "pay1", transaction: txB }, signature);
+
+    expect(b.rec.submit).toEqual(a.rec.submit);
   });
 });

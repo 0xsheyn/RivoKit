@@ -291,9 +291,15 @@ import { createRivoKit, createCpnRamp } from "rivokit";
 refund_pending · refunded · failed`.
 
 **Off-ramp — `createCpnRamp({apiKey, corridor})`**: `quote` · `prepare` (safe) ·
-`submit` (irreversible) · `status`. Helpers: `verifyAndInterpretCpn` (throws on
-a bad signature), `applyPaymentEvent` (forward-only reducer), `rfiEffect`,
-`isPointOfNoReturn`.
+`submit(args, signer)` (irreversible) · `submitSigned(args, signature)` ·
+`status`. Helpers: `verifyAndInterpretCpn` (throws on a bad signature),
+`applyPaymentEvent` (forward-only reducer), `rfiEffect`, `isPointOfNoReturn`.
+
+`submit` assumes the signer is reachable from wherever the API key lives — true
+for a server key, false when the funds owner signs in their own browser wallet.
+`submitSigned` takes a signature produced elsewhere, so the wallet that *holds*
+the USDC can be the one that authorizes it to leave. Build the wallet's typed
+data with `normalizeTypedData(transaction.messageToBeSigned)`.
 
 Money crosses the boundary as **`bigint` minor units** in and **strings** out —
 never a float. Signing is always **injected**; no module holds a key.
@@ -355,7 +361,7 @@ paths passes without testing anything.
 | CPN EUR/SEPA end-to-end → `COMPLETED` | ✅ twice (15 USDC → 12.92 EUR) |
 | CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
 | Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
-| Seller-signed cash-out (Permit2 approve + submit) | ❌ still a server key |
+| Seller-signed cash-out — wallet approves Permit2 and signs its own intent | ⚠️ written and wired into the panel, **not yet executed on-chain** |
 | Circle Mint redeem | ❌ wired, never run once |
 
 ## Gotchas that already cost time
@@ -414,10 +420,12 @@ Report vulnerabilities privately, not via public issues.
   `demo/app/wallet-rails.ts` lets a connected wallet reach Arc via Gateway spend
   or a CCTP bridge with no server secret involved — which is the point — but
   only the server-signed demo buyer has actually moved funds.
-- **The seller does not yet sign their own cash-out.** Two-wallet mode really
-  forwards the floor to the seller's wallet on-chain, but the Permit2 approval
-  and `ramp.submit` for that balance still use a server-held key. The seller
-  holds the EURC and not yet the authority to move it out.
+- **The seller-signed cash-out is written but unproven.** The panel now has a
+  wallet path: the connected wallet approves Permit2 and signs the CPN intent
+  itself, and only the signature reaches the server (`ramp.submitSigned`
+  broadcasts it). No server key participates. It has not been executed on-chain
+  once — the proven EUR/SEPA settlements were all signed by the demo key, which
+  remains the default when no wallet is connected.
 - **The off-ramp is not wired into `release()`.** Settlement and cash-out are
   separate surfaces; a payment record that tracks its own CPN payout is not done.
 - **The SDK's `payout` module is still a `MOCK`** instruction, labelled as such.

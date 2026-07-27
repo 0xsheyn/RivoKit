@@ -17,7 +17,7 @@
  * amount sides are supported — pass sourceAmount to fix what the payer sends, or
  * destinationAmount to fix what the beneficiary receives.
  */
-import type { Account } from "viem";
+import type { Account, Hex } from "viem";
 import {
   createCpnClient,
   quoteSpreadBps,
@@ -128,6 +128,27 @@ export function createCpnRamp(params: CreateCpnRampParams) {
       signer: Account,
     ): Promise<CpnTransaction> {
       const signature = await signPaymentIntent(signer, args.transaction.messageToBeSigned);
+      return this.submitSigned(args, signature);
+    },
+
+    /**
+     * Broadcast an intent that was signed somewhere else. IRREVERSIBLE.
+     *
+     * `submit` above assumes the signer is reachable from wherever the CPN key
+     * lives — true for a server-held key, false for the case that matters: the
+     * funds owner signing in their own browser wallet. The API key is
+     * server-only and the private key never leaves the wallet, so signing and
+     * broadcasting happen in two different places and cannot be one call.
+     *
+     * Splitting them is what lets the wallet that HOLDS the USDC be the wallet
+     * that authorizes spending it. Build the typed data for the wallet with
+     * `normalizeTypedData(transaction.messageToBeSigned)` so the recovered
+     * signer matches what the settlement contract expects.
+     */
+    submitSigned(
+      args: { paymentId: string; transaction: CpnTransaction },
+      signature: Hex,
+    ): Promise<CpnTransaction> {
       return cpn.submitTransaction(args.paymentId, args.transaction.id, signature);
     },
 
