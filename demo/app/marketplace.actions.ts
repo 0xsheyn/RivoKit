@@ -37,7 +37,7 @@ async function view(orderId: string): Promise<OrderView> {
   const order = await kit.status(orderId);
   const events = await store.listEvents(orderId);
   const rawPayments = await store.listPayments(orderId);
-  const p = kit.payoutFor(orderId);
+  const p = await kit.payoutFor(orderId);
 
   const meta = events.find((e) => e.type === "mp.order")?.payload as
     | { productId?: string; sellerAddress?: string } | undefined;
@@ -380,7 +380,7 @@ export async function mpShip(orderId: string, resi: string): Promise<MpResult> {
 
 // ── Host / Marketplace (the authority) ─────────────────────────────────
 
-/** Host settles: capture → swap ber-floor → payout MOCK. The seller gets EURC. */
+/** Host settles: capture → floored swap → MOCK payout. The seller gets EURC. */
 export async function mpRelease(orderId: string): Promise<MpResult> {
   return wrap(async () => {
     const { kit, store, sendEurc } = getRivoKit();

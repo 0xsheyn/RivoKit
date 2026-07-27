@@ -68,7 +68,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -99,7 +99,7 @@ const operatorSender = async ({ functionName, args }) => {
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction.txHash };
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${functionName}: timeout`);
@@ -122,8 +122,8 @@ const gate = createComplianceGate(
 const fundExecutor = async ({ paymentInfo, hash }) => {
   const ps = await escrow.getPaymentState(hash);
   if (ps.hasCollectedPayment) {
-    info("escrow sudah menahan pembayaran — lewati authorize (idempoten)");
-    return { authorizeTxHash: state.authorizeTxHash ?? "0xsudah" };
+    info("escrow already holds the payment — skipping authorize (idempotent)");
+    return { authorizeTxHash: state.authorizeTxHash ?? "0xalready" };
   }
   if (!state.signature) {
     // Buyer signs off-chain (no gas); the operator relays the collection.
@@ -149,7 +149,7 @@ const kit = createRivoKit({
   },
 });
 
-// ── Host handlers via kit.on (status sinkron) ──────────────────────────
+// ── Host handlers via kit.on (host status stays in sync) ──────────────────────────
 
 const events = [];
 for (const e of ["funding_pending", "funded", "released", "refund_pending", "refunded", "failed"]) {
@@ -166,7 +166,7 @@ const buyerUsdc = async () => {
 
 // ── 1. createOrder ─────────────────────────────────────────────────────
 
-step("Langkah 1 — kit.createOrder (screening + lock FX + simpan)");
+step("Step 1 — kit.createOrder (screening + lock FX + simpan)");
 
 const arcBefore = await buyerUsdc();
 info(`buyer Arc ${fmt(arcBefore)} USDC · priceEUR ${fmt(PRICE_EUR)} EURC`);
@@ -174,7 +174,7 @@ info(`buyer Arc ${fmt(arcBefore)} USDC · priceEUR ${fmt(PRICE_EUR)} EURC`);
 let order;
 if (state.orderId) {
   order = await kit.status(state.orderId);
-  ok(`lanjutkan order ${order.id} — state ${order.state}`);
+  ok(`continuing order ${order.id} — state ${order.state}`);
 } else {
   order = await kit.createOrder({
     payer: buyer.address, receiver: MERCHANT, priceEURMinor: PRICE_EUR,
@@ -184,24 +184,24 @@ if (state.orderId) {
   save();
   ok(`order ${order.id} — usdcAmount ${fmt(BigInt(order.usdcAmount))} USDC, state ${order.state}`);
 }
-record(Boolean(order.usdcAmount) && BigInt(order.usdcAmount) > 0n, "createOrder mengunci usdcAmount lewat SDK");
-record(order.receivingChain === "Arc_Testnet", "receivingChain tercatat");
+record(Boolean(order.usdcAmount) && BigInt(order.usdcAmount) > 0n, "createOrder locks usdcAmount through the SDK");
+record(order.receivingChain === "Arc_Testnet", "receivingChain recorded");
 
 // ── 2. fund ────────────────────────────────────────────────────────────
 
-step("Langkah 2 — kit.fund (authorize ke escrow)");
+step("Step 2 — kit.fund (authorize ke escrow)");
 
 if (order.state === "created") {
   await kit.fund(order.id);
 }
 order = await kit.status(order.id);
 ok(`state ${order.state}`);
-record(order.state === "funded", "order funded lewat SDK");
-record(events.includes("funded"), "event funded diterima handler host");
+record(order.state === "funded", "order funded through the SDK");
+record(events.includes("funded"), "the host handler received the funded event");
 
 // ── 3. release ─────────────────────────────────────────────────────────
 
-step("Langkah 3 — kit.release (capture → swap ber-floor → payout MOCK)");
+step("Step 3 — kit.release (capture → floored swap → MOCK payout)");
 
 if (order.state === "funded" || order.state === "shipped") {
   await kit.release(order.id, { kind: "access_granted", ref: "demo-license-key" });
@@ -210,23 +210,23 @@ order = await kit.status(order.id);
 ok(`state ${order.state}`);
 
 if (order.state === "released") {
-  record(true, "order released lewat SDK");
-  record(events.includes("released"), "event released diterima handler host");
-  const payout = kit.payoutFor(order.id);
+  record(true, "order released through the SDK");
+  record(events.includes("released"), "the host handler received the released event");
+  const payout = await kit.payoutFor(order.id);
   console.log(JSON.stringify(payout, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2));
-  record(payout?.label === "MOCK" && payout?.executed === false, "instruksi payout berlabel MOCK terbit");
-  record(payout?.target?.amountMinor >= PRICE_EUR, "payout ≥ priceEUR (floor terpenuhi)", fmt(payout?.target?.amountMinor ?? 0n));
+  record(payout?.label === "MOCK" && payout?.executed === false, "a MOCK-labelled payout instruction is issued");
+  record(payout?.target?.amountMinor >= PRICE_EUR, "payout >= priceEUR (floor met)", fmt(payout?.target?.amountMinor ?? 0n));
 } else {
-  record(false, "order released lewat SDK", `berhenti di ${order.state} (kemungkinan rute StableFX tiada — coba lagi)`);
+  record(false, "order released through the SDK", `stopped at ${order.state} (likely no StableFX route — retry)`);
 }
 
-// ── Hasil ──────────────────────────────────────────────────────────────
+// ── Result ──────────────────────────────────────────────────────────────
 
-step("Hasil");
-info(`urutan event: ${events.join(" → ")}`);
+step("Result");
+info(`event order: ${events.join(" → ")}`);
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " Alur penuh TERBUKTI hanya lewat facade RivoKit."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " Full flow PROVEN through the RivoKit facade alone."),
 );
 process.exit(failed ? 1 : 0);
