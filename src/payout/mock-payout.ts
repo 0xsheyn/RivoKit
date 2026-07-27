@@ -88,3 +88,32 @@ export function mockPayout(params: MockPayoutParams): PayoutInstruction {
 export function isMockPayout(p: PayoutInstruction): boolean {
   return p.kind === "mock" && p.label === "MOCK" && p.executed === false;
 }
+
+/**
+ * The instruction as it is persisted.
+ *
+ * Amounts become strings: JSON cannot carry a bigint at all (`JSON.stringify`
+ * throws on one), and going through a JS number would reintroduce the rounding
+ * that integer minor units exist to prevent. String in, bigint out — the same
+ * boundary rule the order store applies to its money columns.
+ */
+export type PayoutInstructionWire = Omit<PayoutInstruction, "source" | "target"> & {
+  source: Omit<PayoutInstruction["source"], "amountMinor"> & { amountMinor: string };
+  target: Omit<PayoutInstruction["target"], "amountMinor"> & { amountMinor: string };
+};
+
+export function toPayoutWire(p: PayoutInstruction): PayoutInstructionWire {
+  return {
+    ...p,
+    source: { ...p.source, amountMinor: p.source.amountMinor.toString() },
+    target: { ...p.target, amountMinor: p.target.amountMinor.toString() },
+  };
+}
+
+export function fromPayoutWire(w: PayoutInstructionWire): PayoutInstruction {
+  return {
+    ...w,
+    source: { ...w.source, amountMinor: BigInt(w.source.amountMinor) },
+    target: { ...w.target, amountMinor: BigInt(w.target.amountMinor) },
+  };
+}

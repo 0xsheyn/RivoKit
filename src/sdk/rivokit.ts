@@ -228,9 +228,6 @@ export function createRivoKit(deps: RivoKitDeps) {
   const tokenIn = config.tokenIn ?? "USDC";
   const tokenOut = config.tokenOut ?? "EURC";
 
-  /** Last payout instruction produced per order — the host reads this on `released`. */
-  const payouts = new Map<string, PayoutInstruction>();
-
   /**
    * Refuse new orders when the operator can no longer pay for the relay.
    *
@@ -256,8 +253,15 @@ export function createRivoKit(deps: RivoKitDeps) {
     on: emitter.on,
     off: emitter.off,
 
-    /** Read the mock payout instruction emitted for a settled order, if any. */
-    payoutFor: (orderId: string): PayoutInstruction | undefined => payouts.get(orderId),
+    /**
+     * Read the mock payout instruction emitted for a settled order, if any.
+     *
+     * Reads the store rather than a process-local cache: the host asks for this
+     * from a later request, and an in-memory answer would be `null` after any
+     * restart — indistinguishable from "nothing is owed".
+     */
+    payoutFor: (orderId: string): Promise<PayoutInstruction | null> =>
+      deps.store.getPayout(orderId),
 
     /** FX quote without executing. Money as strings, like every other wire value. */
     async estimateSwap(params: { address: string; amountInMinor: bigint }): Promise<{
@@ -446,7 +450,9 @@ export function createRivoKit(deps: RivoKitDeps) {
           orderId, beneficiary: order.receiver as Address,
           eurcMinor: sellerEurcMinor, settlementTxHash: outcome.swapTxHash, now: now(),
         });
-        payouts.set(orderId, payout);
+        // Persisted before the event fires: a handler that reads `payoutFor`
+        // must not race the write that makes the answer exist.
+        await deps.store.savePayout(orderId, payout);
         emitter.emit("released", {
           orderId, eurcOutMinor: outcome.eurcOutMinor, rebateMinor: outcome.rebateMinor, rebateTxHash,
         });
