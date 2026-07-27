@@ -61,4 +61,4 @@ if (!state.deposited) {
 
 const gb = await ub.getBalance(sep);
 console.log(`Gateway: confirmed ${formatUnits(gb.confirmedMinor, 6)} · pending ${formatUnits(gb.pendingMinor, 6)}`);
-console.log("Selesai. Saldo Sepolia (bridge rail) siap; Gateway akan confirmed ~13 menit setelah deposit.");
+console.log("Done. The Sepolia balance (bridge rail) is ready; Gateway confirms ~13 minutes after the deposit.");

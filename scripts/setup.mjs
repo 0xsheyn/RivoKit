@@ -67,7 +67,7 @@ const info = (msg) => console.log(`    ${msg}`);
 
 const env = readEnv();
 if (!env.CIRCLE_API_KEY || !env.CIRCLE_ENTITY_SECRET) {
-  console.error("GAGAL: .env.local belum lengkap. Jalankan: node scripts/sync-env.mjs");
+  console.error("FAILED: .env.local is incomplete. Run: node scripts/sync-env.mjs");
   process.exit(1);
 }
 
@@ -82,22 +82,22 @@ const ROLES = ["DEPLOYER", "OPERATOR", "MERCHANT"];
 
 // ── Stage 1: wallets ───────────────────────────────────────────────────
 
-step("Tahap 1 — wallet Developer-Controlled");
+step("Stage 1 — Developer-Controlled wallets");
 
 let walletSetId = env.CIRCLE_WALLET_SET_ID;
 
 if (walletSetId) {
-  ok(`wallet set sudah ada: ${walletSetId}`);
+  ok(`wallet set already exists: ${walletSetId}`);
 } else {
   const sets = await circle.listWalletSets();
   const existing = (sets?.walletSets ?? []).find((s) => s.name === WALLET_SET_NAME);
   if (existing) {
     walletSetId = existing.id;
-    ok(`wallet set ditemukan: ${walletSetId}`);
+    ok(`wallet set found: ${walletSetId}`);
   } else {
     const created = await circle.createWalletSet(WALLET_SET_NAME);
     walletSetId = created.walletSet.id;
-    ok(`wallet set dibuat: ${walletSetId}`);
+    ok(`wallet set created: ${walletSetId}`);
   }
   writeEnv({ CIRCLE_WALLET_SET_ID: walletSetId });
 }
@@ -105,10 +105,10 @@ if (walletSetId) {
 const missing = ROLES.filter((r) => !env[`${r}_WALLET_ID`]);
 
 if (missing.length === 0) {
-  ok("ketiga wallet sudah tercatat di .env.local");
+  ok("all three wallets already recorded in .env.local");
   for (const r of ROLES) info(`${r.padEnd(8)} ${env[`${r}_ADDRESS`]}`);
 } else {
-  info(`membuat ${missing.length} wallet: ${missing.join(", ")}`);
+  info(`creating ${missing.length} wallets: ${missing.join(", ")}`);
   const created = await circle.createWallets({
     walletSetId,
     blockchains: [BLOCKCHAIN],
@@ -119,7 +119,7 @@ if (missing.length === 0) {
   const wallets = created.wallets ?? [];
   if (wallets.length !== missing.length) {
     console.error(
-      `GAGAL: minta ${missing.length} wallet, dapat ${wallets.length}. Tidak menulis apa pun.`,
+      `FAILED: asked for ${missing.length} wallets, got ${wallets.length}. Writing nothing.`,
     );
     process.exit(1);
   }
@@ -138,7 +138,7 @@ if (missing.length === 0) {
 // Arc bills gas in USDC, so a wallet with no USDC cannot transact at all.
 // Funds come from the pre-existing EOA that already holds faucet USDC.
 
-step("Tahap 2 — isi gas (USDC) untuk wallet Circle");
+step("Stage 2 — top up gas (USDC) for the Circle wallets");
 
 const { createPublicClient, createWalletClient, erc20Abi, formatUnits, parseUnits } =
   await import("viem");
@@ -167,12 +167,12 @@ const usdcBalance = (address) =>
     args: [address],
   });
 
-info(`sumber dana: ${funder.address} — ${formatUnits(await usdcBalance(funder.address), 6)} USDC`);
+info(`funding source: ${funder.address} — ${formatUnits(await usdcBalance(funder.address), 6)} USDC`);
 
 for (const [role, target] of Object.entries(GAS_TARGET)) {
   const to = readEnvNow[`${role}_ADDRESS`];
   if (!to) {
-    info(`${role}: alamat belum ada, dilewati`);
+    info(`${role}: no address yet, skipped`);
     continue;
   }
   await sleep(300);
@@ -180,12 +180,12 @@ for (const [role, target] of Object.entries(GAS_TARGET)) {
   const want = parseUnits(target, 6);
 
   if (current >= want) {
-    ok(`${role} sudah cukup: ${formatUnits(current, 6)} USDC`);
+    ok(`${role} already has enough: ${formatUnits(current, 6)} USDC`);
     continue;
   }
 
   const amount = want - current;
-  info(`${role}: kirim ${formatUnits(amount, 6)} USDC → ${to}`);
+  info(`${role}: send ${formatUnits(amount, 6)} USDC → ${to}`);
 
   const hash = await wallet.writeContract({
     address: USDC_ADDRESS,
@@ -195,16 +195,16 @@ for (const [role, target] of Object.entries(GAS_TARGET)) {
   });
   const receipt = await pub.waitForTransactionReceipt({ hash });
   if (receipt.status !== "success") {
-    console.error(`GAGAL: transfer ke ${role} revert. tx ${hash}`);
+    console.error(`FAILED: transfer to ${role} reverted. tx ${hash}`);
     process.exit(1);
   }
-  ok(`${role} terisi — tx ${hash}`);
+  ok(`${role} funded — tx ${hash}`);
   await sleep(500);
 }
 
 // ── Stage 3: deploy RivoKit's own CPP instances ────────────────────────
 
-step("Tahap 3 — deploy kontrak (instance RivoKit)");
+step("Stage 3 — deploy the contracts (RivoKit instances)");
 
 const { initiateSmartContractPlatformClient } = await import(
   "@circle-fin/smart-contract-platform"
@@ -220,7 +220,7 @@ const loadArtifact = (name) => {
   const a = JSON.parse(readFileSync(resolve(ROOT, `contracts/artifacts/${name}.json`), "utf8"));
   return {
     abiJson: JSON.stringify(a.abi),
-    bytecode: typeof a.bytecode === "string" ? a.bytecode : a.bytecode.object,
+    bytescode: typeof a.bytecode === "string" ? a.bytecode : a.bytecode.object,
   };
 };
 
@@ -233,17 +233,17 @@ async function awaitAddress(contractId) {
     if (c?.status === "FAILED") throw new Error(`deploy FAILED (${contractId})`);
     await sleep(5000);
   }
-  throw new Error(`timeout menunggu alamat untuk ${contractId}`);
+  throw new Error(`timed out waiting for the address of ${contractId}`);
 }
 
 async function deploy({ name, artifact, constructorParameters, envKey }) {
   const current = readEnv();
   if (current[envKey]) {
-    ok(`${name} sudah ter-deploy: ${current[envKey]}`);
+    ok(`${name} already deployed: ${current[envKey]}`);
     return current[envKey];
   }
 
-  const { abiJson, bytecode } = loadArtifact(artifact);
+  const { abiJson, bytescode } = loadArtifact(artifact);
   info(`deploy ${name}…`);
 
   let res;
@@ -255,7 +255,7 @@ async function deploy({ name, artifact, constructorParameters, envKey }) {
       blockchain: BLOCKCHAIN,
       walletId: current.DEPLOYER_WALLET_ID,
       abiJson,
-      bytecode,
+      bytescode,
       // Omit entirely when the contract takes no constructor args — Circle
       // rejects an empty array with a bare "API parameter invalid".
       ...(constructorParameters.length ? { constructorParameters } : {}),
@@ -276,7 +276,7 @@ async function deploy({ name, artifact, constructorParameters, envKey }) {
   }
 
   const contractId = res.data?.contractId;
-  info(`contractId ${contractId} — menunggu konfirmasi on-chain…`);
+  info(`contractId ${contractId} — waiting for on-chain confirmation…`);
   const address = await awaitAddress(contractId);
   writeEnv({ [envKey]: address });
   ok(`${name} → ${address}`);
@@ -304,4 +304,4 @@ await deploy({
   envKey: "NEXT_PUBLIC_RIVO_REFUND_COLLECTOR_ADDRESS",
 });
 
-console.log("\nSetup selesai. Alamat tertulis di .env.local.");
+console.log("\nSetup complete. Addresses written to .env.local.");

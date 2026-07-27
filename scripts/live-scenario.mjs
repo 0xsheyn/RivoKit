@@ -63,7 +63,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -92,7 +92,7 @@ const circleCall = async (label, walletId, contractAddress, signature, params) =
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction.txHash };
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${label} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${label} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${label}: timeout`);
@@ -116,9 +116,9 @@ const fx = createSettlementFx({
   circleEntitySecret: env.CIRCLE_ENTITY_SECRET,
 });
 
-// ── Langkah 1: host menetapkan harga, SDK mengunci kuotasi ─────────────
+// ── Step 1: the host sets the price, the SDK locks the quote ─────────────
 
-step("Langkah 1 — host menetapkan priceEUR, SDK menurunkan usdcAmount");
+step("Step 1 — the host sets priceEUR, the SDK derives usdcAmount");
 info(`priceEUR ${fmt(PRICE_EUR)} EUR · buffer ${BUFFER_BPS} bps · wedge ${WEDGE}`);
 
 // Probe near the expected order size. A rate sampled at 1 unit is not a rate:
@@ -135,22 +135,22 @@ const { amountInMinor: usdcAmount, quote } = await fx.lockQuote({
 
 const impliedRate = Number(quote.amountOutMinor) / Number(quote.amountInMinor);
 info(`kuotasi ${fmt(quote.amountInMinor)} USDC → ${fmt(quote.amountOutMinor)} EURC (1 USDC ≈ ${impliedRate.toFixed(6)} EURC)`);
-ok(`buyer harus membayar ${fmt(usdcAmount)} USDC`);
+ok(`the buyer must pay ${fmt(usdcAmount)} USDC`);
 
 // Sanity: the derived amount must actually clear the floor at this rate.
 const projected = BigInt(Math.floor(Number(usdcAmount) * impliedRate));
-record(projected >= PRICE_EUR, "usdcAmount cukup untuk menutup floor", `proyeksi ${fmt(projected)} >= ${fmt(PRICE_EUR)}`);
-record(usdcAmount > PRICE_EUR, "buffer membuat buyer bayar di atas nilai nominal");
+record(projected >= PRICE_EUR, "usdcAmount is enough to cover the floor", `projected ${fmt(projected)} >= ${fmt(PRICE_EUR)}`);
+record(usdcAmount > PRICE_EUR, "the buffer makes the buyer pay above the nominal value");
 
 const buyerUsdc = await balanceOf(USDC_ADDRESS, buyer.address);
 if (buyerUsdc < usdcAmount) {
-  console.error(`\nGAGAL: buyer punya ${fmt(buyerUsdc)} USDC, butuh ${fmt(usdcAmount)}.`);
+  console.error(`\nFAILED: the buyer holds ${fmt(buyerUsdc)} USDC, needs ${fmt(usdcAmount)}.`);
   process.exit(1);
 }
 
-// ── Langkah 2: order tersimpan ─────────────────────────────────────────
+// ── Step 2: the order is persisted ─────────────────────────────────────────
 
-step("Langkah 2 — buat order di database");
+step("Step 2 — buat order di database");
 
 const now = Math.floor(Date.now() / 1000);
 if (!state.paymentInfo) {
@@ -192,13 +192,13 @@ if (!order) {
     paymentInfoHash: hash,
   });
 }
-ok(`order ${order.id} tersimpan — state ${order.state}`);
+ok(`order ${order.id} persisted — state ${order.state}`);
 record(order.state === "created", "order mulai di state created");
 info(`timeout policy: ${order.timeout_kind} (wedge ${WEDGE})`);
 
-// ── Langkah 3: buyer bayar ─────────────────────────────────────────────
+// ── Step 3: the buyer pays ─────────────────────────────────────────────
 
-step("Langkah 3 — buyer tanda tangan ERC-3009, operator authorize");
+step("Step 3 — buyer tanda tangan ERC-3009, operator authorize");
 
 let ps = await escrow.getPaymentState(hash);
 if (!ps.hasCollectedPayment) {
@@ -240,15 +240,15 @@ order = await store.get(order.id);
 if (order.state !== "funded") {
   order = await store.transition(order.id, "funded", { fundedAt: new Date() });
 }
-ok(`escrow menahan ${fmt(ps.capturableAmount)} USDC — state ${order.state}`);
-record(ps.capturableAmount === usdcAmount, "jumlah di escrow sama dengan yang dikunci");
+ok(`escrow holds ${fmt(ps.capturableAmount)} USDC — state ${order.state}`);
+record(ps.capturableAmount === usdcAmount, "the escrowed amount equals the locked amount");
 
 const merchantEurcBefore = await balanceOf(EURC_ADDRESS, MERCHANT);
 const buyerEurcBefore = await balanceOf(EURC_ADDRESS, buyer.address);
 
-// ── Langkah 4: rilis ───────────────────────────────────────────────────
+// ── Step 4: release ───────────────────────────────────────────────────
 
-step("Langkah 4 — penjual konfirmasi → release (capture + swap ber-floor)");
+step("Step 4 — the seller confirms → release (capture + floored swap)");
 
 const outcome = await release(
   { escrow, fx, settlementAddress: MERCHANT },
@@ -265,7 +265,7 @@ const outcome = await release(
 if (outcome.status !== "released") {
   console.log(`\n  status ${outcome.status} — ${outcome.reason}`);
   await store.transition(order.id, "failed", { failureReason: outcome.reason });
-  record(false, "release tuntas sampai EURC", outcome.reason);
+  record(false, "release completed all the way to EURC", outcome.reason);
   process.exit(1);
 }
 
@@ -285,18 +285,18 @@ order = await store.transition(order.id, "released", {
 });
 
 ok(`state ${order.state}`);
-info(`EURC keluar ${fmt(outcome.eurcOutMinor)} · floor ${fmt(PRICE_EUR)} · rebate ${fmt(outcome.rebateMinor)}`);
+info(`EURC out ${fmt(outcome.eurcOutMinor)} · floor ${fmt(PRICE_EUR)} · rebate ${fmt(outcome.rebateMinor)}`);
 
-record(outcome.eurcOutMinor >= PRICE_EUR, "penerima menerima >= priceEUR", `${fmt(outcome.eurcOutMinor)} >= ${fmt(PRICE_EUR)}`);
-record(order.eurc_out === outcome.eurcOutMinor.toString(), "eurc_out tersimpan di DB");
-record(order.rebate === outcome.rebateMinor.toString(), "rebate tersimpan di DB");
+record(outcome.eurcOutMinor >= PRICE_EUR, "the receiver receives >= priceEUR", `${fmt(outcome.eurcOutMinor)} >= ${fmt(PRICE_EUR)}`);
+record(order.eurc_out === outcome.eurcOutMinor.toString(), "eurc_out persisted in the DB");
+record(order.rebate === outcome.rebateMinor.toString(), "rebate persisted in the DB");
 
 // ── Step 5: send the rebate ────────────────────────────────────────────
 
-step("Langkah 5 — kirim rebate ke buyer");
+step("Step 5 — send the rebate to the buyer");
 
 if (outcome.rebateMinor > 0n) {
-  info(`transfer ${fmt(outcome.rebateMinor)} EURC dari merchant → buyer`);
+  info(`transfer ${fmt(outcome.rebateMinor)} EURC from merchant → buyer`);
   const rebateTx = await circleCall(
     "rebate", env.MERCHANT_WALLET_ID, EURC_ADDRESS,
     "transfer(address,uint256)",
@@ -306,14 +306,14 @@ if (outcome.rebateMinor > 0n) {
     orderId: order.id, nonce: `${hash}:rebate`, kind: "rebate",
     status: "confirmed", txHash: rebateTx.txHash, chain: "Arc_Testnet", amountMinor: outcome.rebateMinor,
   });
-  ok(`rebate terkirim — tx ${rebateTx.txHash}`);
+  ok(`rebate sent — tx ${rebateTx.txHash}`);
 } else {
-  info("tidak ada surplus; rebate nol");
+  info("no surplus; the rebate is zero");
 }
 
-// ── Verifikasi ─────────────────────────────────────────────────────────
+// ── Verification ─────────────────────────────────────────────────────────
 
-step("Verifikasi akhir");
+step("Final verification");
 
 await sleep(3000);
 const merchantEurcAfter = await balanceOf(EURC_ADDRESS, MERCHANT);
@@ -324,17 +324,17 @@ const buyerRebate = buyerEurcAfter - buyerEurcBefore;
 info(`merchant EURC ${fmt(merchantEurcBefore)} → ${fmt(merchantEurcAfter)}  (+${fmt(merchantNet)})`);
 info(`buyer    EURC ${fmt(buyerEurcBefore)} → ${fmt(buyerEurcAfter)}  (+${fmt(buyerRebate)})`);
 
-record(merchantNet >= PRICE_EUR, "merchant menahan >= priceEUR setelah rebate", `${fmt(merchantNet)} >= ${fmt(PRICE_EUR)}`);
-record(buyerRebate === outcome.rebateMinor, "buyer menerima rebate persis", fmt(buyerRebate));
+record(merchantNet >= PRICE_EUR, "the merchant keeps >= priceEUR after the rebate", `${fmt(merchantNet)} >= ${fmt(PRICE_EUR)}`);
+record(buyerRebate === outcome.rebateMinor, "the buyer receives exactly the rebate", fmt(buyerRebate));
 
 const finalOrder = await store.get(order.id);
-record(finalOrder.state === "released", "state akhir di DB adalah released");
-record(finalOrder.settled_at !== null, "settled_at tercatat");
+record(finalOrder.state === "released", "the final state in the DB is released");
+record(finalOrder.settled_at !== null, "settled_at is recorded");
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : ` Skenario utuh TERBUKTI — order ${order.id} tersimpan di DB.`),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : ` Whole scenario PROVEN — order ${order.id} persisted in the DB.`),
 );
 process.exit(failed ? 1 : 0);

@@ -25,7 +25,7 @@ async function snapshot(orderId: string): Promise<Snapshot> {
   const payments = (await store.listPayments(orderId)).map((p) => ({
     kind: p.kind, status: p.status, txHash: p.tx_hash, chain: p.chain, amount: p.amount,
   }));
-  const p = kit.payoutFor(orderId);
+  const p = await kit.payoutFor(orderId);
   const payout: PayoutView = p
     ? {
         label: p.label, executed: p.executed,

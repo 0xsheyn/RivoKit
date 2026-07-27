@@ -46,7 +46,7 @@ for (const [name, pk] of candidates) {
     console.log(`  USDC (ERC-20): ${fmt(usdc)}   ${fundedOk ? "OK" : `< ${fmt(MIN_USDC)} — perlu faucet`}`);
     console.log(`  Permit2 allowance: ${allowance === 0n ? "0" : fmt(allowance)}   ${allowOk ? "OK" : "perlu approve"}`);
     console.log(`  Native gas (USDC 18dp): ${formatUnits(native, 18)}`);
-    console.log(`  → ${fundedOk && allowOk ? "SIAP sebagai sender" : "belum siap"}\n`);
+    console.log(`  → ${fundedOk && allowOk ? "READY as sender" : "not ready"}\n`);
   } catch (e) {
     console.log(`${name}  ${account.address}\n  ERROR baca chain: ${String(e?.shortMessage ?? e?.message ?? e).slice(0, 120)}\n`);
   }

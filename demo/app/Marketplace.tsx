@@ -328,7 +328,7 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
             : await (await rails()).walletBridgeToArc(provider, BigInt(amt));
           await mpRecordWalletFunding(v.id, source === "unified" ? "gw-spend" : "bridge", txHash);
         } catch (e) {
-          return { ok: false, error: `${source === "unified" ? "Gateway spend" : "Bridge"} gagal: ${String((e as Error)?.message ?? e).slice(0, 200)}` };
+          return { ok: false, error: `${source === "unified" ? "Gateway spend" : "Bridge"} failed: ${String((e as Error)?.message ?? e).slice(0, 200)}` };
         }
         if (connectedAddress) await loadWalletRails(connectedAddress);
       }

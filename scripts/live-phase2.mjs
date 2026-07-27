@@ -46,7 +46,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -66,7 +66,7 @@ const fx = createSettlementFx({
 
 // ── Which direction actually routes? ───────────────────────────────────
 
-step("Langkah 0 — deteksi arah yang punya rute");
+step("Step 0 — detect which direction has a route");
 
 let direction = null;
 for (const [tokenIn, tokenOut] of [["USDC", "EURC"], ["EURC", "USDC"]]) {
@@ -75,14 +75,14 @@ for (const [tokenIn, tokenOut] of [["USDC", "EURC"], ["EURC", "USDC"]]) {
     ok(`${tokenIn}→${tokenOut} ADA rute — out ${fmt(q.amountOutMinor)} ${tokenOut}, stopLimit bawaan ${q.stopLimitMinor ? fmt(q.stopLimitMinor) : "-"}`);
     if (!direction) direction = { tokenIn, tokenOut, quote: q };
   } catch (e) {
-    if (e instanceof NoRouteError) info(`${tokenIn}→${tokenOut} tanpa rute`);
+    if (e instanceof NoRouteError) info(`${tokenIn}→${tokenOut} no route`);
     else info(`${tokenIn}→${tokenOut} galat lain: ${e?.code ?? ""} ${String(e?.message).slice(0, 90)}`);
   }
   await sleep(1000);
 }
 
 if (!direction) {
-  console.error("\nGAGAL: tidak ada arah yang punya rute. Fase 2 tidak bisa diuji sekarang.");
+  console.error("\nFAILED: no direction has a route. Phase 2 cannot be tested right now.");
   process.exit(1);
 }
 
@@ -92,27 +92,27 @@ const TOKEN_OUT_ADDR = tokenOut === "USDC" ? USDC_ADDRESS : EURC_ADDRESS;
 
 if (tokenIn !== "USDC") {
   console.log(
-    `\n  CATATAN: arah produksi RivoKit adalah USDC→EURC, tapi pasangan itu\n` +
-      `  tanpa rute saat ini. Mekanisme floor diuji pada ${tokenIn}→${tokenOut};\n` +
-      `  kodenya identik, hanya pasangannya terbalik.`,
+    `\n  NOTE: RivoKit's production direction is USDC→EURC, but that pair\n` +
+      `  has no route right now. The floor mechanism is tested on ${tokenIn}→${tokenOut};\n` +
+      `  the code is identical, only the pair is reversed.`,
   );
 }
 
 // ── Funding ────────────────────────────────────────────────────────────
 
-step(`Langkah 1 — pastikan wallet Circle punya ${tokenIn}`);
+step(`Step 1 — make sure the Circle wallet holds ${tokenIn}`);
 
 let inBal = await balanceOf(TOKEN_IN_ADDR, WALLET);
-info(`saldo ${tokenIn} wallet Circle: ${fmt(inBal)}`);
+info(`Circle wallet ${tokenIn} balance: ${fmt(inBal)}`);
 
 if (inBal < SWAP_SIZE * 3n) {
   const funder = privateKeyToAccount(env.DEPLOYER_PRIVATE_KEY);
   const funderBal = await balanceOf(TOKEN_IN_ADDR, funder.address);
   const need = SWAP_SIZE * 3n - inBal;
-  info(`kurang; kirim ${fmt(need)} ${tokenIn} dari EOA ${funder.address} (punya ${fmt(funderBal)})`);
+  info(`short; sending ${fmt(need)} ${tokenIn} from EOA ${funder.address} (holds ${fmt(funderBal)})`);
 
   if (funderBal < need) {
-    console.error(`GAGAL: EOA hanya punya ${fmt(funderBal)} ${tokenIn}.`);
+    console.error(`FAILED: the EOA only holds ${fmt(funderBal)} ${tokenIn}.`);
     process.exit(1);
   }
 
@@ -124,18 +124,18 @@ if (inBal < SWAP_SIZE * 3n) {
     args: [WALLET, need],
   });
   await publicClient.waitForTransactionReceipt({ hash });
-  ok(`terkirim — tx ${hash}`);
+  ok(`sent — tx ${hash}`);
   inBal = await balanceOf(TOKEN_IN_ADDR, WALLET);
 }
-ok(`siap: ${fmt(inBal)} ${tokenIn}`);
+ok(`ready: ${fmt(inBal)} ${tokenIn}`);
 
 // ── Test 1: impossible floor MUST fail safely ──────────────────────────
 
-step("Langkah 2 — floor MUSTAHIL harus gagal, dana harus utuh");
+step("Step 2 — an IMPOSSIBLE floor must fail, funds must stay intact");
 
 const beforeIn = await balanceOf(TOKEN_IN_ADDR, WALLET);
 const beforeOut = await balanceOf(TOKEN_OUT_ADDR, WALLET);
-info(`sebelum: ${fmt(beforeIn)} ${tokenIn} / ${fmt(beforeOut)} ${tokenOut}`);
+info(`before: ${fmt(beforeIn)} ${tokenIn} / ${fmt(beforeOut)} ${tokenOut}`);
 
 // Ten times the honest quote — no maker will ever fill this.
 const impossibleFloor = direction.quote.amountOutMinor * 10n;
@@ -151,7 +151,7 @@ try {
     amountInMinor: SWAP_SIZE,
     floorOutMinor: impossibleFloor,
   });
-  failureKind = "TIDAK GAGAL — swap tetap jalan meski floor mustahil";
+  failureKind = "DID NOT FAIL — the swap ran despite an impossible floor";
 } catch (e) {
   failedAsExpected = true;
   failureKind = e instanceof FloorNotMetError ? "FloorNotMetError" : `${e?.name}: ${String(e?.message).slice(0, 80)}`;
@@ -161,13 +161,13 @@ await sleep(2000);
 const afterIn = await balanceOf(TOKEN_IN_ADDR, WALLET);
 const afterOut = await balanceOf(TOKEN_OUT_ADDR, WALLET);
 
-record(failedAsExpected, "swap dengan floor mustahil DITOLAK", failureKind);
-record(afterIn === beforeIn, `${tokenIn} tidak berkurang`, `${fmt(beforeIn)} → ${fmt(afterIn)}`);
-record(afterOut === beforeOut, `${tokenOut} tidak berubah`, `${fmt(beforeOut)} → ${fmt(afterOut)}`);
+record(failedAsExpected, "a swap with an impossible floor is REJECTED", failureKind);
+record(afterIn === beforeIn, `${tokenIn} did not decrease`, `${fmt(beforeIn)} → ${fmt(afterIn)}`);
+record(afterOut === beforeOut, `${tokenOut} did not change`, `${fmt(beforeOut)} → ${fmt(afterOut)}`);
 
 // ── Test 2: achievable floor settles at or above it ────────────────────
 
-step("Langkah 3 — floor wajar harus terpenuhi");
+step("Step 3 — a reasonable floor must be met");
 
 const fresh = await fx.quote({ address: WALLET, tokenIn, tokenOut, amountInMinor: SWAP_SIZE });
 // 2% below the fresh quote: achievable, but still a real floor.
@@ -189,7 +189,7 @@ try {
   state.lastSwap = { out: result.amountOutMinor.toString(), txHash: result.txHash };
   save();
 } catch (e) {
-  console.log(` GAGAL  eksekusi swap — ${e?.name}: ${String(e?.message).slice(0, 140)}`);
+  console.log(` FAIL   swap execution — ${e?.name}: ${String(e?.message).slice(0, 140)}`);
 }
 
 if (result) {
@@ -197,8 +197,8 @@ if (result) {
   const outAfter = await balanceOf(TOKEN_OUT_ADDR, WALLET);
   const gained = outAfter - outBefore;
 
-  record(result.amountOutMinor >= achievableFloor, "hasil >= floor", `${fmt(result.amountOutMinor)} >= ${fmt(achievableFloor)}`);
-  record(gained > 0n, `${tokenOut} bertambah on-chain`, fmt(gained));
+  record(result.amountOutMinor >= achievableFloor, "output >= floor", `${fmt(result.amountOutMinor)} >= ${fmt(achievableFloor)}`);
+  record(gained > 0n, `${tokenOut} increased on-chain`, fmt(gained));
   record(
     result.rebateMinor === result.amountOutMinor - achievableFloor,
     "rebate = out − floor (invariant 6)",
@@ -208,10 +208,10 @@ if (result) {
 
 // ── Verdict ────────────────────────────────────────────────────────────
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : ` Mekanisme floor TERBUKTI pada ${tokenIn}→${tokenOut}.`),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : ` Floor mechanism PROVEN on ${tokenIn}→${tokenOut}.`),
 );
 process.exit(failed ? 1 : 0);

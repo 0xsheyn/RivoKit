@@ -63,7 +63,7 @@ export function createComplianceGate(screener: Screener) {
         result = await screener(address, chain);
       } catch (e) {
         throw new ComplianceBlockedError(address, "REVIEW", context, [
-          `screener gagal: ${String((e as Error)?.message ?? e).slice(0, 120)}`,
+          `screener failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`,
         ]);
       }
       if (result.decision !== "APPROVED") {

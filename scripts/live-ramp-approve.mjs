@@ -28,10 +28,10 @@ const APPROVE = 40n * 10n ** 6n; // 40 USDC — enough for a couple of min-size 
 
 const before = await pub.readContract({ address: USDC_ADDRESS, abi: erc20Abi, functionName: "allowance", args: [account.address, PERMIT2_ADDRESS] });
 console.log(`sender ${account.address}`);
-console.log(`allowance Permit2 sebelum: ${formatUnits(before, 6)} USDC`);
+console.log(`allowance Permit2 before: ${formatUnits(before, 6)} USDC`);
 
 if (before >= APPROVE) {
-  console.log("Sudah cukup — tidak perlu approve.");
+  console.log("Already sufficient — no approve needed.");
   process.exit(0);
 }
 
@@ -41,9 +41,9 @@ const hash = await wallet.writeContract({
   functionName: "approve",
   args: [PERMIT2_ADDRESS, APPROVE],
 });
-console.log(`approve tx: ${hash}  — menunggu konfirmasi…`);
+console.log(`approve tx: ${hash}  — waiting for confirmation…`);
 const receipt = await pub.waitForTransactionReceipt({ hash });
 console.log(`status: ${receipt.status}`);
 
 const after = await pub.readContract({ address: USDC_ADDRESS, abi: erc20Abi, functionName: "allowance", args: [account.address, PERMIT2_ADDRESS] });
-console.log(`allowance Permit2 sesudah: ${formatUnits(after, 6)} USDC`);
+console.log(`Permit2 allowance after: ${formatUnits(after, 6)} USDC`);
