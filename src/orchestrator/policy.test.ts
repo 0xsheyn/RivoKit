@@ -13,7 +13,7 @@ import {
 const NOW = 1_800_000_000;
 
 describe("timeout per-wedge (CLAUDE.md §1)", () => {
-  it("barang fisik memakai reclaim — pro-buyer", () => {
+  it("physical goods use reclaim — pro-buyer", () => {
     expect(timeoutPolicyFor("physical_demo")).toBe("reclaim");
   });
 
@@ -91,7 +91,7 @@ describe("release hook — proof injected by the host", () => {
   });
 });
 
-describe("perhitungan expiry", () => {
+describe("expiry arithmetic", () => {
   it("always satisfies the ordering the contract requires", () => {
     for (const wedge of WEDGES) {
       const e = expiriesFor(wedge, NOW);

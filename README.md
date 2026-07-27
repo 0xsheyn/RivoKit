@@ -4,7 +4,7 @@
 
 ### An embeddable cross-border settlement SDK on Arc — multi-chain USDC in, local-currency out.
 
-![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![contracts](https://img.shields.io/badge/contracts-verified%20on%20Arc-success) ![tests](https://img.shields.io/badge/tests-261%20passing-brightgreen) ![status](https://img.shields.io/badge/status-mvp%20%C2%B7%20testnet-orange) ![stack](https://img.shields.io/badge/stack-TypeScript%20%2B%20App%20Kit-3178c6) ![node](https://img.shields.io/badge/node-%3E%3D20-339933) ![license](https://img.shields.io/badge/license-Apache--2.0-green)
+![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![contracts](https://img.shields.io/badge/contracts-verified%20on%20Arc-success) ![tests](https://img.shields.io/badge/tests-280%20passing-brightgreen) ![status](https://img.shields.io/badge/status-mvp%20%C2%B7%20testnet-orange) ![stack](https://img.shields.io/badge/stack-TypeScript%20%2B%20App%20Kit-3178c6) ![node](https://img.shields.io/badge/node-%3E%3D20-339933) ![license](https://img.shields.io/badge/license-Apache--2.0-green)
 
 [Overview](#overview) · [Problem](#the-problem-it-solves) · [Why](#why-rivokit) · [How it works](#how-it-works) · [Architecture](#architecture) · [Quickstart](#quickstart) · [Contracts](#deployed-contracts-arc-testnet) · [API](#api) · [Security](#security-model) · [Limitations](#limitations--honest-boundaries)
 
@@ -44,7 +44,7 @@ Two legs, normally bought separately:
   ever touching the recipient's floor — proven in tx `0x7910f1…037420`.
 - **CPN EUR/SEPA settled end-to-end to `COMPLETED`**, twice: 15 USDC → 12.92 EUR
   into a real sandbox bank rail. The fiat leg is no longer a mock.
-- **261 unit tests** across 18 files, runnable with no credentials at all.
+- **280 unit tests** across 19 files, runnable with no credentials at all.
 
 RivoKit is **not** a marketplace, wallet, custodian, or licensed institution. It
 orchestrates; the **licensed host** that embeds it stays the party of record.
@@ -173,7 +173,7 @@ runs the same one against Arc Testnet.
 git clone https://github.com/0xsheyn/RivoKit.git && cd RivoKit
 npm install                      # runs `prepare` → builds dist/
 cp .env.example .env.local       # fill in credentials (see Environment)
-npm test                         # 261 tests / 18 files, no credentials needed
+npm test                         # 280 tests / 19 files, no credentials needed
 
 node scripts/preflight.mjs       # read-only: checks prerequisites, spends nothing
 npm run setup                    # deploy escrow + collectors, create wallets (idempotent)
@@ -184,7 +184,7 @@ npm run dev                      # marketplace demo → http://localhost:3000
 
 | Command | Does |
 |---|---|
-| `npm test` | vitest, 261 green / 18 files, no credentials |
+| `npm test` | vitest, 280 green / 19 files, no credentials |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build:lib` | SDK → `dist/` (ESM + `.d.ts`), entry `src/index.ts` |
 | `npm run setup` | deploy CPP instances + operator/merchant wallets (idempotent) |
@@ -343,7 +343,7 @@ Everything under `scripts/` hits real services and needs `.env.local`.
 
 ## Testing
 
-- **Unit** — `npm test`, 261 green / 18 files, no credentials. State machine,
+- **Unit** — `npm test`, 280 green / 19 files, no credentials. State machine,
   unit conversions, quote/rebate math, fee gross-up round-trip
   (`netOfFee(grossUpForFee(x)) ≥ x`), facade composition, compliance gating,
   webhook ECDSA verification, ERC-3009 sign+recover, the whole CPN layer.
@@ -432,8 +432,14 @@ Report vulnerabilities privately, not via public issues.
   *not* exercised is the wallet-side Permit2 approval: that wallet already held
   an unlimited Permit2 allowance, so the code skipped it. A wallet starting from
   a zero allowance still takes an untested path.
-- **The off-ramp is not wired into `release()`.** Settlement and cash-out are
-  separate surfaces; a payment record that tracks its own CPN payout is not done.
+- **A cash-out is now durable, but no webhook has ever reached it.** Every CPN
+  payout is persisted in `cpn_payments` and folded forward by the same reducer
+  the polling path uses, so an RFI or a late failure has somewhere to land. The
+  endpoint is unproven end-to-end: it needs a public URL registered as a Circle
+  notification subscription, which this project has never had.
+- **The off-ramp is still not triggered by `release()`, on purpose.** A seller
+  cashes out an accumulated balance, not one order — so `cpn_payments.order_id`
+  is a nullable link, not a foreign key the flow depends on.
 - **The SDK's `payout` module is still a `MOCK`** instruction, labelled as such.
   It is not a bank transfer.
 - **RivoKit does not verify the physical world.** The release hook is the host's

@@ -14,6 +14,18 @@
  */
 import { getRivoKit } from "@/lib/rivokit.server";
 import { handleCircleWebhook } from "../../../../../src/events/webhook-handler.ts";
+import { verifyAndInterpretCpn } from "../../../../../src/ramp/cpn-state.ts";
+import { applyCpnEventToStore } from "../../../../../src/ramp/cpn-sync.ts";
+
+/** Does this body claim to be a CPN notification? Claim only — unverified. */
+function looksLikeCpn(rawBody: string): boolean {
+  try {
+    const t = (JSON.parse(rawBody) as { notificationType?: unknown })?.notificationType;
+    return typeof t === "string" && t.startsWith("cpn.");
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(req: Request): Promise<Response> {
   const { store, resolveWebhookPublicKey } = getRivoKit();
@@ -21,6 +33,26 @@ export async function POST(req: Request): Promise<Response> {
   // RAW bytes — never req.json(). Re-serializing reorders keys and drops
   // whitespace, so the signature would no longer match what Circle signed.
   const rawBody = await req.text();
+
+  // CPN drives cash-outs on its own clock, so its events take a different path:
+  // they fold into `cpn_payments`, not into an order. The signature is still
+  // verified FIRST — `looksLikeCpn` only routes, it never grants trust.
+  if (looksLikeCpn(rawBody)) {
+    const signatureBase64 = req.headers.get("X-Circle-Signature");
+    const publicKey = await resolveWebhookPublicKey(req.headers.get("X-Circle-Key-Id") ?? undefined);
+    if (!signatureBase64 || !publicKey) {
+      return Response.json({ ok: false, reason: "unverifiable" }, { status: 401 });
+    }
+    try {
+      const event = verifyAndInterpretCpn({ rawBody, signatureBase64, publicKey });
+      if (!event) return Response.json({ ok: false, reason: "not-cpn" }, { status: 400 });
+      const result = await applyCpnEventToStore(store, event);
+      return Response.json({ ok: true, ...result });
+    } catch {
+      // verifyAndInterpretCpn throws on a bad signature, and only on that.
+      return Response.json({ ok: false, reason: "bad-signature" }, { status: 401 });
+    }
+  }
 
   const result = await handleCircleWebhook(
     { store, resolvePublicKey: resolveWebhookPublicKey },
