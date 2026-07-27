@@ -70,8 +70,13 @@ type Corridor = CorridorInfo & {
 };
 
 const CORRIDORS: Record<string, Corridor> = {
+  // `minUsdc` is a UI guardrail, not the real rule. CPN rejects amounts with
+  // 290100 "outside our supported limits" against the DESTINATION side, so the
+  // USDC figure that clears drifts with FX: 11 USDC (~9.4 EUR) is refused while
+  // 12 USDC (10.31 EUR) is accepted — verified live 2026-07-28. Keep these a
+  // little above the observed floor; the API stays the authority.
   "EUR-SEPA": {
-    key: "EUR-SEPA", label: "🇪🇺 EUR · SEPA", currency: "EUR", method: "SEPA", minUsdc: 11, country: "FR",
+    key: "EUR-SEPA", label: "🇪🇺 EUR · SEPA", currency: "EUR", method: "SEPA", minUsdc: 12, country: "FR",
     address: { street: "1 Rue de Rivoli", city: "Paris", stateProvince: "IDF", country: "FR", postalCode: "75001" },
     beneficiary: [
       { name: "IBAN", value: "FR7630006000011234567890189" },
