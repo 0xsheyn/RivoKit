@@ -21,6 +21,7 @@ import {
   fromPayoutWire, toPayoutWire,
   type PayoutInstruction, type PayoutInstructionWire,
 } from "../payout/mock-payout.ts";
+import type { CpnPaymentState } from "../ramp/cpn-state.ts";
 import { assertTransition, type OrderState } from "./state-machine.ts";
 import type { TimeoutKind, Wedge } from "./policy.ts";
 
@@ -103,6 +104,40 @@ export type TransitionPatch = Partial<{
   usdcAmountMinor: bigint;
 }>;
 
+/** A CPN cash-out as persisted. Money in integer minor units, as strings out. */
+export type CpnPaymentRecord = {
+  payment_id: string;
+  order_id: string | null;
+  corridor: string;
+  sender_address: string;
+  signed_by: "server" | "wallet";
+  source_minor: string;
+  source_currency: string;
+  destination_minor: string;
+  destination_currency: string;
+  destination_scale: number;
+  status: CpnPaymentState;
+  transaction_id: string | null;
+  failure_reason: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RecordCpnPaymentParams = {
+  paymentId: string;
+  orderId?: string | null;
+  corridor: string;
+  senderAddress: string;
+  signedBy: "server" | "wallet";
+  sourceMinor: bigint;
+  sourceCurrency: string;
+  destinationMinor: bigint;
+  destinationCurrency: string;
+  destinationScale?: number;
+  status: CpnPaymentState;
+  transactionId?: string | null;
+};
+
 /**
  * What the orchestrator needs from persistence — declared here, not inferred
  * from whichever implementation happens to exist.
@@ -138,6 +173,20 @@ export interface OrderStore {
   /** Persist the payout instruction emitted on release. */
   savePayout(orderId: string, payout: PayoutInstruction): Promise<void>;
   getPayout(orderId: string): Promise<PayoutInstruction | null>;
+
+  /** CPN cash-outs — see `cpn_payments`. A payout may span many orders, so
+   *  these stand apart from the order lifecycle rather than inside it. */
+  recordCpnPayment(params: RecordCpnPaymentParams): Promise<CpnPaymentRecord>;
+  getCpnPayment(paymentId: string): Promise<CpnPaymentRecord | null>;
+  /** Move a cash-out to a new state. The caller decides whether the move is
+   *  legal (`applyPaymentEvent`); this only writes. */
+  advanceCpnPayment(
+    paymentId: string,
+    status: CpnPaymentState,
+    patch?: { transactionId?: string; failureReason?: string },
+  ): Promise<CpnPaymentRecord>;
+  listCpnPayments(limit?: number): Promise<CpnPaymentRecord[]>;
+
   deleteOrder(id: string): Promise<void>;
 }
 
@@ -164,6 +213,17 @@ function normalizeOrder<T>(row: T): T {
   if (!row || typeof row !== "object") return row;
   const out = { ...(row as Record<string, unknown>) };
   for (const key of MONEY_COLUMNS) {
+    const v = out[key];
+    if (typeof v === "number") out[key] = BigInt(v).toString();
+  }
+  return out as T;
+}
+
+/** Same bigint-over-the-wire hazard as MONEY_COLUMNS, for the cash-out table. */
+function normalizeCpn<T>(row: T): T {
+  if (!row || typeof row !== "object") return row;
+  const out = { ...(row as Record<string, unknown>) };
+  for (const key of ["source_minor", "destination_minor"]) {
     const v = out[key];
     if (typeof v === "number") out[key] = BigInt(v).toString();
   }
@@ -455,6 +515,58 @@ export function createOrderStore(url: string, serviceKey: string): OrderStore {
       fail("getPayout", error);
       const wire = data?.payout as PayoutInstructionWire | null | undefined;
       return wire ? fromPayoutWire(wire) : null;
+    },
+
+    async recordCpnPayment(params: RecordCpnPaymentParams): Promise<CpnPaymentRecord> {
+      const { data, error } = await db
+        .from("cpn_payments")
+        .insert({
+          payment_id: params.paymentId,
+          order_id: params.orderId ?? null,
+          corridor: params.corridor,
+          sender_address: params.senderAddress,
+          signed_by: params.signedBy,
+          source_minor: params.sourceMinor.toString(),
+          source_currency: params.sourceCurrency,
+          destination_minor: params.destinationMinor.toString(),
+          destination_currency: params.destinationCurrency,
+          destination_scale: params.destinationScale ?? 2,
+          status: params.status,
+          transaction_id: params.transactionId ?? null,
+        })
+        .select()
+        .single();
+      fail("recordCpnPayment", error);
+      return normalizeCpn(data as CpnPaymentRecord);
+    },
+
+    async getCpnPayment(paymentId: string): Promise<CpnPaymentRecord | null> {
+      const { data, error } = await db
+        .from("cpn_payments").select().eq("payment_id", paymentId).maybeSingle();
+      fail("getCpnPayment", error);
+      return data ? normalizeCpn(data as CpnPaymentRecord) : null;
+    },
+
+    async advanceCpnPayment(
+      paymentId: string,
+      status: CpnPaymentState,
+      patch: { transactionId?: string; failureReason?: string } = {},
+    ): Promise<CpnPaymentRecord> {
+      const update: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
+      if (patch.transactionId !== undefined) update.transaction_id = patch.transactionId;
+      if (patch.failureReason !== undefined) update.failure_reason = patch.failureReason;
+
+      const { data, error } = await db
+        .from("cpn_payments").update(update).eq("payment_id", paymentId).select().single();
+      fail(`advanceCpnPayment →${status}`, error);
+      return normalizeCpn(data as CpnPaymentRecord);
+    },
+
+    async listCpnPayments(limit = 50): Promise<CpnPaymentRecord[]> {
+      const { data, error } = await db
+        .from("cpn_payments").select().order("created_at", { ascending: false }).limit(limit);
+      fail("listCpnPayments", error);
+      return ((data ?? []) as CpnPaymentRecord[]).map(normalizeCpn);
     },
 
     async deleteOrder(id: string) {
