@@ -21,6 +21,9 @@ import { installCircleDnsPinning } from "../../src/lib/circle-dns.ts";
 import { sleep } from "../../src/lib/rpc.ts";
 import { ARC_TESTNET_RPC_FALLBACKS, PERMIT2_ADDRESS, USDC_ADDRESS, arcTestnet } from "../../src/constants/arc.ts";
 import { createCpnRamp, type CpnRamp } from "../../src/ramp/cpn-ramp.ts";
+import { applyPaymentEvent, type CpnPaymentState } from "../../src/ramp/cpn-state.ts";
+import { fromDecimalStringScaled } from "../../src/settlement-fx/units.ts";
+import { createOrderStore, type OrderStore } from "../../src/orchestrator/order-store.ts";
 import type { CpnPayment, CpnQuote, CpnTransaction } from "../../src/ramp/cpn-client.ts";
 import type { CpnFieldValue } from "../../src/ramp/cpn-encrypt.ts";
 
@@ -118,6 +121,20 @@ export function corridorList(): CorridorInfo[] {
   }));
 }
 
+let storeSingleton: OrderStore | null = null;
+/**
+ * Own store handle. This module is driven by server actions that never go
+ * through the RivoKit facade, and a cash-out is not part of an order — so it
+ * reaches persistence directly rather than borrowing the facade's wiring.
+ */
+function cpnStore(): OrderStore {
+  storeSingleton ??= createOrderStore(
+    process.env.NEXT_PUBLIC_SUPABASE_URL as string,
+    process.env.SUPABASE_SECRET_KEY as string,
+  );
+  return storeSingleton;
+}
+
 const rampCache = new Map<string, CpnRamp>();
 
 function corridorFor(corridorKey: string): Corridor {
@@ -213,8 +230,53 @@ export async function preparePayment(
     customerRefId: `demo-${quote.id.slice(0, 8)}`,
   });
   preparedTx.set(payment.id, { transaction, corridorKey: corridor.key });
+
+  // Persist the cash-out now, not after broadcasting. CPN can report on it
+  // (RFI, delay, failure) from the moment the payment exists, and a webhook
+  // about a payment we never stored is dropped as unknown.
+  await cpnStore().recordCpnPayment({
+    paymentId: payment.id,
+    corridor: corridor.key,
+    senderAddress: sender,
+    signedBy: sellerAddress ? "wallet" : "server",
+    sourceMinor: fromDecimalStringScaled(quote.sourceAmount.amount, 6),
+    sourceCurrency: quote.sourceAmount.currency,
+    destinationMinor: fromDecimalStringScaled(quote.destinationAmount.amount, 2),
+    destinationCurrency: quote.destinationAmount.currency,
+    status: (payment.status as CpnPaymentState) ?? "CREATED",
+    transactionId: transaction.id,
+  });
+
   return { quote, fees, spreadBps, payment, transaction };
 }
+
+/**
+ * Write an observed status onto the stored cash-out, forward-only.
+ *
+ * Uses the same reducer the webhook path uses, so polling can never push the
+ * record somewhere a webhook would have refused — and a status we already hold
+ * is a silent no-op rather than a redundant write.
+ */
+async function persistStatus(paymentId: string, status: string): Promise<void> {
+  const store = cpnStore();
+  const current = await store.getCpnPayment(paymentId);
+  if (!current) return;
+  const outcome = applyPaymentEvent(current.status, {
+    component: "payment",
+    notificationType: POLL_EVENT[status] ?? "",
+    paymentId,
+    raw: { polled: status },
+  });
+  if (outcome.changed) await store.advanceCpnPayment(paymentId, outcome.state);
+}
+
+/** Poll status → the webhook notificationType that means the same thing. */
+const POLL_EVENT: Record<string, string> = {
+  CRYPTO_FUNDS_PENDING: "cpn.payment.cryptoFundsPending",
+  FIAT_PAYMENT_INITIATED: "cpn.payment.fiatPaymentInitiated",
+  COMPLETED: "cpn.payment.completed",
+  FAILED: "cpn.payment.failed",
+};
 
 /** Ensure Permit2 can pull at least `amountMinor` USDC from the seller on Arc. */
 async function ensureAllowance(amountMinor: bigint): Promise<void> {
@@ -260,6 +322,10 @@ export async function broadcastPayment(paymentId: string): Promise<{
     if (p.status !== last) {
       lifecycle.push(p.status);
       last = p.status;
+      // Polling is the fallback, not the source of truth — webhooks drive this
+      // record too. Writing what we just observed keeps the stored state honest
+      // even with no webhook endpoint registered (the demo has none).
+      await persistStatus(paymentId, p.status);
     }
     if (last === "COMPLETED" || last === "FAILED") break;
   }
@@ -296,6 +362,10 @@ export async function broadcastSignedPayment(paymentId: string, signature: Hex):
     if (p.status !== last) {
       lifecycle.push(p.status);
       last = p.status;
+      // Polling is the fallback, not the source of truth — webhooks drive this
+      // record too. Writing what we just observed keeps the stored state honest
+      // even with no webhook endpoint registered (the demo has none).
+      await persistStatus(paymentId, p.status);
     }
     if (last === "COMPLETED" || last === "FAILED") break;
   }

@@ -61,7 +61,9 @@ export {
   type Quote,
   type FlooredSwapResult,
 } from "./settlement-fx/swap.ts";
-export { computeRebate, fromDecimalString, toDecimalString, MoneyFormatError } from "./settlement-fx/units.ts";
+export {
+  computeRebate, fromDecimalString, fromDecimalStringScaled, toDecimalString, MoneyFormatError,
+} from "./settlement-fx/units.ts";
 
 /* ── Funding rails ────────────────────────────────────────────────────────── */
 export {
@@ -154,6 +156,9 @@ export {
   type CpnEvent,
   type ApplyOutcome,
 } from "./ramp/cpn-state.ts";
+/** Fold a verified CPN webhook into the stored cash-out — writes only when the
+ *  reducer says the state moved, never on a duplicate or a late arrival. */
+export { applyCpnEventToStore, type CpnSyncResult, type CpnSyncStore } from "./ramp/cpn-sync.ts";
 
 /* ── Arc constants & chain helpers ────────────────────────────────────────── */
 export {

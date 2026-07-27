@@ -5,6 +5,7 @@ import {
   computeUsdcAmount,
   deriveRate,
   fromDecimalString,
+  fromDecimalStringScaled,
   toDecimalString,
   usdcAmountFromQuote,
 } from "./units.ts";
@@ -66,7 +67,7 @@ describe("deriveRate", () => {
     expect(deriveRate(20_000_000n, 29_750_960n)).toBe(1_487_548n);
   });
 
-  it("menolak amountIn nol", () => {
+  it("rejects a zero amountIn", () => {
     expect(() => deriveRate(0n, 1n)).toThrow(MoneyFormatError);
   });
 });
@@ -119,14 +120,14 @@ describe("computeUsdcAmount", () => {
     expect(amount * rate).toBeGreaterThanOrEqual(7n * 1_000_000n);
   });
 
-  it("menolak rate nol dan buffer negatif", () => {
+  it("rejects a zero rate and a negative buffer", () => {
     expect(() => computeUsdcAmount(PRICE, 0n, 0)).toThrow(MoneyFormatError);
     expect(() => computeUsdcAmount(PRICE, 1_000_000n, -1)).toThrow(MoneyFormatError);
   });
 });
 
 describe("computeRebate (invariant 6 PRD §10)", () => {
-  it("mengembalikan surplus saat output melebihi harga", () => {
+  it("returns the surplus when the output beats the price", () => {
     expect(computeRebate(19_000_000n, 18_500_000n)).toBe(500_000n);
   });
 
@@ -137,5 +138,41 @@ describe("computeRebate (invariant 6 PRD §10)", () => {
   it("is zero — NOT negative — when the output falls short", () => {
     // A negative rebate would mean billing the buyer twice.
     expect(computeRebate(18_000_000n, 18_500_000n)).toBe(0n);
+  });
+});
+
+describe("fromDecimalStringScaled (non-USDC money, e.g. a CPN payout)", () => {
+  it("parses a 2dp fiat amount exactly, where scaling by 100 would not", () => {
+    expect(fromDecimalStringScaled("12.94", 2)).toBe(1294n);
+    expect(fromDecimalStringScaled("8.29", 2)).toBe(829n);
+    // Why this cannot go through Number: 8.29 is not representable in binary
+    // floating point, so scaling it lands just under the integer.
+    expect(8.29 * 100).toBe(828.9999999999999);
+    expect(Math.trunc(8.29 * 100)).toBe(828);   // truncating here loses a cent
+  });
+
+  it("handles a 0dp currency without inventing decimals", () => {
+    expect(fromDecimalStringScaled("1500", 0)).toBe(1500n);
+  });
+
+  it("truncates below the scale rather than rounding up", () => {
+    // Rounding up would report a payout larger than what settles.
+    expect(fromDecimalStringScaled("12.999", 2)).toBe(1299n);
+  });
+
+  it("pads a short fraction to the full scale", () => {
+    expect(fromDecimalStringScaled("12.9", 2)).toBe(1290n);
+    expect(fromDecimalStringScaled("12", 2)).toBe(1200n);
+  });
+
+  it("stays identical to the 6dp helper at scale 6", () => {
+    expect(fromDecimalStringScaled("29.750960123456789", 6)).toBe(fromDecimalString("29.750960123456789"));
+  });
+
+  it("refuses a nonsense scale or a non-decimal", () => {
+    expect(() => fromDecimalStringScaled("1.00", -1)).toThrow(MoneyFormatError);
+    expect(() => fromDecimalStringScaled("1.00", 1.5)).toThrow(MoneyFormatError);
+    expect(() => fromDecimalStringScaled("-1.00", 2)).toThrow(MoneyFormatError);
+    expect(() => fromDecimalStringScaled("12,94", 2)).toThrow(MoneyFormatError);
   });
 });

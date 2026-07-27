@@ -54,6 +54,24 @@ export function toDecimalString(minorUnits: bigint): string {
  * would make a floor check pass when it should fail.
  */
 export function fromDecimalString(value: string): bigint {
+  return fromDecimalStringScaled(value, DECIMALS);
+}
+
+/**
+ * The same conversion at an arbitrary scale, for money that is not USDC/EURC.
+ *
+ * CPN pays out in currencies with their own exponents — EUR/BRL/MXN/USD are 2dp
+ * today, and a 0dp currency would silently break anything that assumed 6. The
+ * scale therefore travels with the amount instead of being baked in.
+ *
+ * Truncation and validation are identical to the 6dp path: parse as strings,
+ * never through Number: 8.29 * 100 is 828.9999999999999, and truncating that
+ * loses a cent.
+ */
+export function fromDecimalStringScaled(value: string, scale: number): bigint {
+  if (!Number.isInteger(scale) || scale < 0 || scale > 18) {
+    throw new MoneyFormatError(`scale must be an integer in 0..18, got ${scale}`);
+  }
   const trimmed = value.trim();
   if (!/^\d+(\.\d+)?$/.test(trimmed)) {
     throw new MoneyFormatError(`not a valid positive decimal: "${value}"`);
@@ -65,8 +83,8 @@ export function fromDecimalString(value: string): bigint {
   const whole = parts[0] ?? "0";
   const fraction = parts[1] ?? "";
 
-  const truncated = fraction.slice(0, DECIMALS).padEnd(DECIMALS, "0");
-  return BigInt(whole) * SCALE + BigInt(truncated);
+  const truncated = fraction.slice(0, scale).padEnd(scale, "0");
+  return BigInt(whole) * 10n ** BigInt(scale) + BigInt(truncated || "0");
 }
 
 /**
