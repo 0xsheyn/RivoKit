@@ -131,7 +131,7 @@ export function StatusBadge({ status, label, busy }: { status: string; label: st
         busy && "animate-pulse",
       )}
     >
-      {busy ? "memproses…" : label}
+      {busy ? "working…" : label}
     </Badge>
   );
 }

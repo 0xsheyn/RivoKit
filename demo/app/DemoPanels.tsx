@@ -73,13 +73,13 @@ export default function DemoPanels() {
           </CardTitle>
           {state && (
             <Badge variant="outline" className={cn("font-mono", STATE_TONE[state] ?? "border-border bg-muted text-muted-foreground")}>
-              {pending ? "…memproses" : state}
+              {pending ? "working…" : state}
             </Badge>
           )}
         </div>
         <p className="text-xs text-muted-foreground">
           Testnet. The buyer is server-signed with a demo key (in production the buyer signs in their own wallet).
-          Operasi on-chain butuh 1–2 menit.
+          On-chain operations take 1–2 minutes.
         </p>
       </CardHeader>
 
@@ -114,7 +114,7 @@ export default function DemoPanels() {
 
           {/* Seller */}
           <div className="rounded-lg border bg-card p-4">
-            <h3 className="text-sm font-medium text-foreground">Seller (penerima EURC)</h3>
+            <h3 className="text-sm font-medium text-foreground">Seller (receives the EURC)</h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Release when access is granted or a milestone is approved. The recipient is guaranteed ≥ priceEUR, or the swap reverts.
             </p>
@@ -141,7 +141,7 @@ export default function DemoPanels() {
               <div><dt className="text-muted-foreground">priceEUR</dt><dd className="text-foreground">{EUR(snap.priceEUR)}</dd></div>
               <div><dt className="text-muted-foreground">usdcAmount</dt><dd className="text-foreground">{USDC(snap.usdcAmount)}</dd></div>
               <div><dt className="text-muted-foreground">wedge</dt><dd className="font-mono text-foreground">{snap.wedge}</dd></div>
-              <div><dt className="text-muted-foreground">refund ke</dt><dd className="text-foreground">{snap.receivingChain}</dd></div>
+              <div><dt className="text-muted-foreground">refund to</dt><dd className="text-foreground">{snap.receivingChain}</dd></div>
             </dl>
 
             {snap.payments.length > 0 && (
