@@ -70,8 +70,13 @@ type Corridor = CorridorInfo & {
 };
 
 const CORRIDORS: Record<string, Corridor> = {
+  // `minUsdc` is a UI guardrail, not the real rule. CPN rejects amounts with
+  // 290100 "outside our supported limits" against the DESTINATION side, so the
+  // USDC figure that clears drifts with FX: 11 USDC (~9.4 EUR) is refused while
+  // 12 USDC (10.31 EUR) is accepted — verified live 2026-07-28. Keep these a
+  // little above the observed floor; the API stays the authority.
   "EUR-SEPA": {
-    key: "EUR-SEPA", label: "🇪🇺 EUR · SEPA", currency: "EUR", method: "SEPA", minUsdc: 11, country: "FR",
+    key: "EUR-SEPA", label: "🇪🇺 EUR · SEPA", currency: "EUR", method: "SEPA", minUsdc: 12, country: "FR",
     address: { street: "1 Rue de Rivoli", city: "Paris", stateProvince: "IDF", country: "FR", postalCode: "75001" },
     beneficiary: [
       { name: "IBAN", value: "FR7630006000011234567890189" },
@@ -172,8 +177,21 @@ export async function sellerInfo(): Promise<{ address: string; usdcMinor: string
   return { address: signer.address, usdcMinor: usdc.toString() };
 }
 
-/** Quote + create payment + create transaction for a corridor. No broadcast. */
-export async function preparePayment(sourceAmountUsdc: string, corridorKey: string): Promise<{
+/**
+ * Quote + create payment + create transaction for a corridor. No broadcast.
+ *
+ * `sellerAddress` is who the intent will be signed BY and refunded TO. Default
+ * is the demo's server-held seller key; pass a connected wallet address to
+ * prepare an intent only that wallet can sign. It has to be decided here, not
+ * at broadcast: the sender address is baked into the payment and into the
+ * Permit2 message, so an intent prepared for one address cannot later be signed
+ * by another.
+ */
+export async function preparePayment(
+  sourceAmountUsdc: string,
+  corridorKey: string,
+  sellerAddress?: string,
+): Promise<{
   quote: CpnQuote;
   fees: { total: { amount: string; currency: string }; byType: Record<string, string> };
   spreadBps: number;
@@ -182,14 +200,14 @@ export async function preparePayment(sourceAmountUsdc: string, corridorKey: stri
 }> {
   const corridor = corridorFor(corridorKey);
   const ramp = getRampFor(corridor);
-  const signer = getSellerSigner();
+  const sender = sellerAddress ?? getSellerSigner().address;
   const { quote, fees, spreadBps } = await ramp.quote({ sourceAmount: sourceAmountUsdc });
   const { payment, transaction } = await ramp.prepare({
     quote,
     travelRule: [...buildTravelRule(corridor.address), ...(corridor.extraTravelRule ?? [])],
     beneficiaryAccount: corridor.beneficiary,
-    senderAddress: signer.address,
-    refundAddress: signer.address,
+    senderAddress: sender,
+    refundAddress: sender,
     useCase: "B2B",
     reasonForPayment: "PMT001",
     customerRefId: `demo-${quote.id.slice(0, 8)}`,
@@ -246,4 +264,52 @@ export async function broadcastPayment(paymentId: string): Promise<{
     if (last === "COMPLETED" || last === "FAILED") break;
   }
   return { transactionId: submitted.id, submittedStatus: submitted.status, lifecycle, finalStatus: last };
+}
+
+/**
+ * Broadcast an intent the SELLER signed in their own wallet — IRREVERSIBLE.
+ *
+ * No server key touches this path. The signature arrives from the browser, and
+ * the Permit2 allowance is the wallet's own transaction, so the only thing the
+ * server contributes is the CPN API key (which cannot move funds by itself).
+ * That is the whole point: the wallet holding the USDC is the wallet
+ * authorizing it to leave.
+ */
+export async function broadcastSignedPayment(paymentId: string, signature: Hex): Promise<{
+  transactionId: string;
+  submittedStatus: string;
+  lifecycle: string[];
+  finalStatus: string;
+}> {
+  const entry = preparedTx.get(paymentId);
+  if (!entry) throw new Error("Payment was never prepared (or the server restarted) — prepare it again.");
+  const ramp = getRampFor(corridorFor(entry.corridorKey));
+
+  const submitted = await ramp.submitSigned({ paymentId, transaction: entry.transaction }, signature);
+  preparedTx.delete(paymentId);
+
+  const lifecycle: string[] = [];
+  let last = "";
+  for (let i = 0; i < 12; i++) {
+    await sleep(3000);
+    const p = await ramp.status(paymentId);
+    if (p.status !== last) {
+      lifecycle.push(p.status);
+      last = p.status;
+    }
+    if (last === "COMPLETED" || last === "FAILED") break;
+  }
+  return { transactionId: submitted.id, submittedStatus: submitted.status, lifecycle, finalStatus: last };
+}
+
+/** The raw intent the browser must sign, plus what Permit2 needs approved. */
+export function preparedIntent(paymentId: string): {
+  messageToBeSigned: CpnTransaction["messageToBeSigned"];
+  permitAmountMinor: string;
+} | null {
+  const entry = preparedTx.get(paymentId);
+  if (!entry) return null;
+  const m = entry.transaction.messageToBeSigned;
+  const permitted = (m.message as Record<string, any>)?.permitted?.amount;
+  return { messageToBeSigned: m, permitAmountMinor: String(permitted ?? "0") };
 }

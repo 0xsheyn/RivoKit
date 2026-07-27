@@ -1,21 +1,30 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { ArrowRight, Banknote, CircleCheck, Loader2, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useState, useTransition } from "react";
+import { ArrowRight, Banknote, CircleCheck, Loader2, TriangleAlert, Wallet } from "lucide-react";
+import { useAccount, usePublicClient, useSignTypedData, useSwitchChain, useWriteContract } from "wagmi";
+import { erc20Abi } from "viem";
 import {
   cpnBroadcastAction,
+  cpnBroadcastSignedAction,
   cpnCorridorsAction,
+  cpnIntentAction,
   cpnPrepareAction,
   cpnSellerBalanceAction,
   type BroadcastView,
   type PreparedView,
 } from "./ramp.actions";
+import { normalizeTypedData, type MessageToBeSigned } from "../../src/ramp/cpn-sign.ts";
+import { ARC_TESTNET_CHAIN_ID, PERMIT2_ADDRESS, USDC_ADDRESS } from "../../src/constants/arc.ts";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
 type Corridor = { key: string; label: string; currency: string; method: string; minUsdc: number };
+
+/** Who signs the Permit2 intent that lets CPN pull the USDC. */
+type SignMode = "server" | "wallet";
 
 const two = (decimal: string | number) => Number(decimal).toFixed(2);
 
@@ -32,18 +41,35 @@ const STATUS_TONE: Record<string, string> = {
  * corridor (EUR/SEPA, BRL/PIX, MXN/SPEI, USD/WIRE) — a single USDC→fiat
  * conversion, no EURC hop. Complements the EURC-floor/StableFX path, doesn't
  * replace it.
+ *
+ * Two signing paths, and the difference is the whole point of the panel:
+ *
+ *   - `server` — a testnet key the server holds stands in for the seller. This
+ *     is the path proven end-to-end to COMPLETED on EUR/SEPA.
+ *   - `wallet` — the connected wallet signs its own Permit2 approval and its own
+ *     payment intent; no server key participates. This is what production looks
+ *     like, because the wallet that HOLDS the USDC is the one authorizing it to
+ *     leave. Written and wired; not yet executed on-chain.
  */
 export default function SellerCashout() {
   const [corridors, setCorridors] = useState<Corridor[]>([]);
   const [corridorKey, setCorridorKey] = useState<string>("");
   const [balMinor, setBalMinor] = useState<string | null>(null);
+  const [walletBalMinor, setWalletBalMinor] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [prepared, setPrepared] = useState<PreparedView | null>(null);
   const [broadcast, setBroadcast] = useState<BroadcastView | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<null | "prepare" | "broadcast">(null);
+  const [busy, setBusy] = useState<null | "prepare" | "approve" | "sign" | "broadcast">(null);
+  const [signMode, setSignMode] = useState<SignMode>("server");
   const [, start] = useTransition();
+
+  const { address, isConnected, chainId } = useAccount();
+  const { signTypedDataAsync } = useSignTypedData();
+  const { writeContractAsync } = useWriteContract();
+  const { switchChainAsync } = useSwitchChain();
+  const publicClient = usePublicClient({ chainId: ARC_TESTNET_CHAIN_ID });
 
   useEffect(() => {
     cpnCorridorsAction().then((cs) => {
@@ -52,44 +78,116 @@ export default function SellerCashout() {
     });
   }, []);
 
-  const loadBalance = (prefill = false) =>
+  // A connected wallet is the interesting case, so default to it — but never
+  // silently: the mode is visible and switchable.
+  useEffect(() => { if (isConnected) setSignMode("wallet"); else setSignMode("server"); }, [isConnected]);
+
+  const loadBalance = useCallback((prefill = false) =>
     cpnSellerBalanceAction().then((r) => {
       if (!r.ok) return;
       setBalMinor(r.seller.usdcMinor);
       if (prefill) setAmount(two(Number(r.seller.usdcMinor) / 1e6));
-    });
-  useEffect(() => { loadBalance(true); }, []);
+    }), []);
+  useEffect(() => { loadBalance(true); }, [loadBalance]);
+
+  // The connected wallet's own USDC on Arc — what IT can actually cash out.
+  useEffect(() => {
+    if (!address || !publicClient) { setWalletBalMinor(null); return; }
+    publicClient
+      .readContract({ address: USDC_ADDRESS, abi: erc20Abi, functionName: "balanceOf", args: [address] })
+      .then((b) => setWalletBalMinor(b.toString()))
+      .catch(() => setWalletBalMinor(null));
+  }, [address, publicClient, broadcast]);
 
   const corridor = corridors.find((c) => c.key === corridorKey);
   const minUsdc = corridor?.minUsdc ?? 11;
-  const balNum = balMinor ? Number(balMinor) / 1e6 : 0;
+  const activeBalMinor = signMode === "wallet" ? walletBalMinor : balMinor;
+  const balNum = activeBalMinor ? Number(activeBalMinor) / 1e6 : 0;
   const amtNum = Number(amount || "0");
   const enough = amtNum >= minUsdc && amtNum <= balNum;
 
-  const pickCorridor = (key: string) => {
-    setCorridorKey(key);
-    setPrepared(null); setBroadcast(null); setConfirmed(false); setError(null);
-  };
+  const reset = () => { setPrepared(null); setBroadcast(null); setConfirmed(false); setError(null); };
+  const pickCorridor = (key: string) => { setCorridorKey(key); reset(); };
+  const pickMode = (m: SignMode) => { setSignMode(m); reset(); };
 
   const prepare = () =>
     start(async () => {
       setBusy("prepare"); setError(null); setBroadcast(null); setConfirmed(false);
-      const r = await cpnPrepareAction(amount, corridorKey);
+      // The sender address is baked into the intent, so it must be decided now:
+      // an intent prepared for one address cannot later be signed by another.
+      const r = await cpnPrepareAction(amount, corridorKey, signMode === "wallet" ? address : undefined);
       if (r.ok) setPrepared(r.prepared);
       else { setPrepared(null); setError(r.error); }
       setBusy(null);
     });
 
+  /** Server-held key signs and broadcasts — the path proven to COMPLETED. */
+  const doBroadcastServer = async (paymentId: string) => {
+    setBusy("broadcast");
+    const r = await cpnBroadcastAction(paymentId);
+    if (r.ok) { setBroadcast(r.result); loadBalance(); } else setError(r.error);
+  };
+
+  /**
+   * The seller's own wallet approves Permit2, signs the intent, and only then
+   * does the server broadcast it. Three separate wallet interactions on purpose
+   * — approving a spender and authorizing a payment are different decisions.
+   */
+  const doBroadcastWallet = async (paymentId: string) => {
+    if (!address || !publicClient) { setError("Connect a wallet first."); return; }
+    if (chainId !== ARC_TESTNET_CHAIN_ID) {
+      await switchChainAsync({ chainId: ARC_TESTNET_CHAIN_ID });
+    }
+
+    const got = await cpnIntentAction(paymentId);
+    if (!got.ok) { setError(got.error); return; }
+    const permitAmount = BigInt(got.intent.permitAmountMinor || "0");
+
+    setBusy("approve");
+    const allowance = await publicClient.readContract({
+      address: USDC_ADDRESS, abi: erc20Abi, functionName: "allowance", args: [address, PERMIT2_ADDRESS],
+    });
+    if (allowance < permitAmount) {
+      // Exactly what this payment needs — not an unlimited approval.
+      const hash = await writeContractAsync({
+        address: USDC_ADDRESS, abi: erc20Abi, functionName: "approve", args: [PERMIT2_ADDRESS, permitAmount],
+        chainId: ARC_TESTNET_CHAIN_ID,
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+    }
+
+    setBusy("sign");
+    const t = normalizeTypedData(got.intent.messageToBeSigned as MessageToBeSigned);
+    // wagmi's typed-data generics cannot infer over a runtime-shaped object;
+    // `normalizeTypedData` is guarded instead by a sign→recover round-trip test.
+    const signature = await signTypedDataAsync({
+      domain: t.domain,
+      types: t.types,
+      primaryType: t.primaryType,
+      message: t.message,
+    } as unknown as Parameters<typeof signTypedDataAsync>[0]);
+
+    setBusy("broadcast");
+    const r = await cpnBroadcastSignedAction(paymentId, signature);
+    if (r.ok) setBroadcast(r.result); else setError(r.error);
+  };
+
   const doBroadcast = () => {
     if (!prepared) return;
     start(async () => {
-      setBusy("broadcast"); setError(null);
-      const r = await cpnBroadcastAction(prepared.paymentId);
-      if (r.ok) { setBroadcast(r.result); loadBalance(); }
-      else setError(r.error);
+      setError(null);
+      try {
+        if (signMode === "wallet") await doBroadcastWallet(prepared.paymentId);
+        else await doBroadcastServer(prepared.paymentId);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
       setBusy(null);
     });
   };
+
+  const busyLabel =
+    busy === "approve" ? "Approving Permit2…" : busy === "sign" ? "Waiting for signature…" : "Broadcasting…";
 
   return (
     <div className="rounded-lg border bg-card p-3 shadow-xs">
@@ -102,12 +200,31 @@ export default function SellerCashout() {
           <p className="truncate text-xs text-muted-foreground">Sales proceeds in USDC → local currency in a bank</p>
         </div>
         <span className="shrink-0 text-xs text-muted-foreground">
-          <b className="tabular-nums text-foreground">{balMinor ? two(balNum) : "…"}</b> USDC
+          <b className="tabular-nums text-foreground">{activeBalMinor ? two(balNum) : "…"}</b> USDC
+        </span>
+      </div>
+
+      {/* Who signs. The distinction is the point, so it is never implicit. */}
+      <div className="mt-3 flex items-center gap-1.5 text-xs">
+        <button onClick={() => pickMode("server")}
+          className={cn("rounded-md border px-2.5 py-1 font-medium transition",
+            signMode === "server" ? "border-primary bg-accent text-foreground ring-1 ring-primary/20" : "bg-card text-muted-foreground hover:bg-accent")}>
+          Demo key
+        </button>
+        <button onClick={() => pickMode("wallet")} disabled={!isConnected}
+          className={cn("flex items-center gap-1 rounded-md border px-2.5 py-1 font-medium transition disabled:opacity-40",
+            signMode === "wallet" ? "border-primary bg-accent text-foreground ring-1 ring-primary/20" : "bg-card text-muted-foreground hover:bg-accent")}>
+          <Wallet className="size-3" /> My wallet
+        </button>
+        <span className="ml-auto truncate text-[10px] text-muted-foreground">
+          {signMode === "wallet"
+            ? "the wallet holding the USDC signs — no server key"
+            : "a server-held testnet key stands in for the seller"}
         </span>
       </div>
 
       {/* Corridor selector */}
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-2 flex flex-wrap gap-1.5">
         {corridors.map((c) => (
           <button key={c.key} onClick={() => pickCorridor(c.key)}
             className={cn(
@@ -129,9 +246,11 @@ export default function SellerCashout() {
           {busy === "prepare" ? <Loader2 className="size-3.5 animate-spin" /> : "Cash out"}
         </Button>
       </div>
-      {amount !== "" && balMinor != null && !enough && (
+      {amount !== "" && activeBalMinor != null && !enough && (
         <p className="mt-1.5 text-xs text-amber-600">
-          {amtNum < minUsdc ? `Min ${minUsdc} USDC for ${corridor?.currency ?? "this corridor"}.` : "More than the seller holds."}
+          {amtNum < minUsdc
+            ? `Min ${minUsdc} USDC for ${corridor?.currency ?? "this corridor"}.`
+            : signMode === "wallet" ? "More than this wallet holds on Arc." : "More than the seller holds."}
         </p>
       )}
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
@@ -146,6 +265,11 @@ export default function SellerCashout() {
           <div className="text-center text-xs text-muted-foreground">
             fee {prepared.fee} {prepared.feeCurrency} · margin {prepared.spreadBps} bps · {prepared.status}
           </div>
+          {signMode === "wallet" && (
+            <p className="text-center text-[10px] text-muted-foreground">
+              Your wallet will be asked twice: approve Permit2, then sign the payment intent.
+            </p>
+          )}
           <label className="flex items-start gap-2 text-xs text-muted-foreground">
             <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
             <span>
@@ -154,7 +278,9 @@ export default function SellerCashout() {
             </span>
           </label>
           <Button size="sm" variant="destructive" className="w-full" disabled={!confirmed || busy !== null} onClick={doBroadcast}>
-            {busy === "broadcast" ? <><Loader2 className="size-3.5 animate-spin" /> Broadcasting…</> : "Broadcast (irreversible)"}
+            {busy !== null && busy !== "prepare"
+              ? <><Loader2 className="size-3.5 animate-spin" /> {busyLabel}</>
+              : "Broadcast (irreversible)"}
           </Button>
         </div>
       )}

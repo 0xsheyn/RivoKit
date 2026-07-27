@@ -135,6 +135,9 @@ export {
   type RampQuote,
   type PrepareParams,
 } from "./ramp/cpn-ramp.ts";
+/** Build the wallet-ready typed data from CPN's JSON `messageToBeSigned` — the
+ *  browser side of a seller-signed cash-out (pair with `ramp.submitSigned`). */
+export { normalizeTypedData, signPaymentIntent, type MessageToBeSigned } from "./ramp/cpn-sign.ts";
 /** Webhook path. `verifyAndInterpretCpn` checks Circle's signature BEFORE any
  *  reducer sees the body; `applyPaymentEvent` only ever moves a payment forward. */
 export {

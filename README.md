@@ -291,9 +291,15 @@ import { createRivoKit, createCpnRamp } from "rivokit";
 refund_pending · refunded · failed`.
 
 **Off-ramp — `createCpnRamp({apiKey, corridor})`**: `quote` · `prepare` (safe) ·
-`submit` (irreversible) · `status`. Helpers: `verifyAndInterpretCpn` (throws on
-a bad signature), `applyPaymentEvent` (forward-only reducer), `rfiEffect`,
-`isPointOfNoReturn`.
+`submit(args, signer)` (irreversible) · `submitSigned(args, signature)` ·
+`status`. Helpers: `verifyAndInterpretCpn` (throws on a bad signature),
+`applyPaymentEvent` (forward-only reducer), `rfiEffect`, `isPointOfNoReturn`.
+
+`submit` assumes the signer is reachable from wherever the API key lives — true
+for a server key, false when the funds owner signs in their own browser wallet.
+`submitSigned` takes a signature produced elsewhere, so the wallet that *holds*
+the USDC can be the one that authorizes it to leave. Build the wallet's typed
+data with `normalizeTypedData(transaction.messageToBeSigned)`.
 
 Money crosses the boundary as **`bigint` minor units** in and **strings** out —
 never a float. Signing is always **injected**; no module holds a key.
@@ -302,10 +308,15 @@ Corridors, read live from `GET /v1/cpn/payments/requirements`:
 
 | Corridor | Method | Beneficiary fields | Min |
 |---|---|---|---|
-| EUR | SEPA | `IBAN`, `RECIPIENT_LEGAL_NAME` | 11 USDC |
-| BRL | PIX | `RECIPIENT_ID_NUMBER`, `RECIPIENT_EVP` | 10 USDC |
-| MXN | SPEI | `CLABE` + national ID | 11 USDC |
-| USD | WIRE | `BANK_NAME`, `SWIFT_CODE`, `BANK_COUNTRY`, `ACCOUNT_NUMBER`, `RECIPIENT_LEGAL_NAME` | 61 USDC |
+| EUR | SEPA | `IBAN`, `RECIPIENT_LEGAL_NAME` | ~12 USDC |
+| BRL | PIX | `RECIPIENT_ID_NUMBER`, `RECIPIENT_EVP` | ~10 USDC |
+| MXN | SPEI | `CLABE` + national ID | ~11 USDC |
+| USD | WIRE | `BANK_NAME`, `SWIFT_CODE`, `BANK_COUNTRY`, `ACCOUNT_NUMBER`, `RECIPIENT_LEGAL_NAME` | ~61 USDC |
+
+Those minimums are approximate on purpose: CPN enforces the limit on the
+**destination** side, so the USDC amount that clears moves with FX. On EUR/SEPA,
+11 USDC (~9.4 EUR) is rejected with `290100` while 12 USDC (10.31 EUR) is
+accepted. Treat the API's answer as the authority, not a hard-coded floor.
 
 ### Invariants the SDK enforces
 
@@ -355,7 +366,8 @@ paths passes without testing anything.
 | CPN EUR/SEPA end-to-end → `COMPLETED` | ✅ twice (15 USDC → 12.92 EUR) |
 | CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
 | Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
-| Seller-signed cash-out (Permit2 approve + submit) | ❌ still a server key |
+| Seller-signed cash-out — the seller's own wallet signs the CPN intent | ✅ proven — MetaMask signed, 15 USDC → 12.94 EUR `COMPLETED`, tx [`0x51e968…f049e7f`](https://testnet.arcscan.app/tx/0x51e9681d1d23fedeb239110a2c58309912a5c82d35a20c316b3102731f049e7f) |
+| Wallet-side Permit2 **approve** branch | ⚠️ written, skipped in that run — the wallet already held an unlimited allowance |
 | Circle Mint redeem | ❌ wired, never run once |
 
 ## Gotchas that already cost time
@@ -414,10 +426,12 @@ Report vulnerabilities privately, not via public issues.
   `demo/app/wallet-rails.ts` lets a connected wallet reach Arc via Gateway spend
   or a CCTP bridge with no server secret involved — which is the point — but
   only the server-signed demo buyer has actually moved funds.
-- **The seller does not yet sign their own cash-out.** Two-wallet mode really
-  forwards the floor to the seller's wallet on-chain, but the Permit2 approval
-  and `ramp.submit` for that balance still use a server-held key. The seller
-  holds the EURC and not yet the authority to move it out.
+- **The seller-signed cash-out is proven, with one branch still untested.** A
+  connected MetaMask signed the CPN intent itself and the server only broadcast
+  it (`ramp.submitSigned`); no key for that address exists server-side. What was
+  *not* exercised is the wallet-side Permit2 approval: that wallet already held
+  an unlimited Permit2 allowance, so the code skipped it. A wallet starting from
+  a zero allowance still takes an untested path.
 - **The off-ramp is not wired into `release()`.** Settlement and cash-out are
   separate surfaces; a payment record that tracks its own CPN payout is not done.
 - **The SDK's `payout` module is still a `MOCK`** instruction, labelled as such.
