@@ -1,9 +1,12 @@
 "use server";
 
+import type { Hex } from "viem";
 import {
   broadcastPayment,
+  broadcastSignedPayment,
   corridorList,
   getCpnRamp,
+  preparedIntent,
   preparePayment,
   sellerInfo,
   type CorridorInfo,
@@ -87,9 +90,14 @@ export type PrepareResult = { ok: true; prepared: PreparedView } | { ok: false; 
  * status is CRYPTO_FUNDS_PENDING and nothing has broadcast. Feeds the panel's
  * "prepared" step.
  */
-export async function cpnPrepareAction(sourceAmountUsdc: string, corridorKey: string): Promise<PrepareResult> {
+export async function cpnPrepareAction(
+  sourceAmountUsdc: string,
+  corridorKey: string,
+  sellerAddress?: string,
+): Promise<PrepareResult> {
   try {
-    const { quote, fees, spreadBps, payment, transaction } = await preparePayment(sourceAmountUsdc, corridorKey);
+    const { quote, fees, spreadBps, payment, transaction } =
+      await preparePayment(sourceAmountUsdc, corridorKey, sellerAddress);
     const m = transaction.messageToBeSigned;
     return {
       ok: true,
@@ -124,6 +132,42 @@ export type BroadcastResult = { ok: true; result: BroadcastView } | { ok: false;
 export async function cpnBroadcastAction(paymentId: string): Promise<BroadcastResult> {
   try {
     const r = await broadcastPayment(paymentId);
+    return { ok: true, result: { transactionId: r.transactionId, lifecycle: r.lifecycle, finalStatus: r.finalStatus } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ── Seller-signed path: the wallet holding the USDC authorizes the spend ──
+
+export type IntentView = {
+  /** CPN's raw EIP-712 JSON — normalize it in the browser before signing. */
+  messageToBeSigned: unknown;
+  /** What Permit2 must be allowed to pull, in USDC minor units. */
+  permitAmountMinor: string;
+};
+export type IntentResult = { ok: true; intent: IntentView } | { ok: false; error: string };
+
+/**
+ * Hand the prepared intent to the browser so the seller's own wallet can sign
+ * it. Read-only: this reveals what will be signed, it does not sign anything.
+ */
+export async function cpnIntentAction(paymentId: string): Promise<IntentResult> {
+  const intent = preparedIntent(paymentId);
+  if (!intent) return { ok: false, error: "Payment was never prepared (or the server restarted)." };
+  return { ok: true, intent };
+}
+
+/**
+ * Broadcast an intent signed by the seller's wallet — IRREVERSIBLE.
+ *
+ * Unlike `cpnBroadcastAction`, no server-held key participates: the signature
+ * was produced in the browser and the Permit2 approval was the wallet's own
+ * transaction.
+ */
+export async function cpnBroadcastSignedAction(paymentId: string, signature: Hex): Promise<BroadcastResult> {
+  try {
+    const r = await broadcastSignedPayment(paymentId, signature);
     return { ok: true, result: { transactionId: r.transactionId, lifecycle: r.lifecycle, finalStatus: r.finalStatus } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
