@@ -19,7 +19,7 @@ for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
 }
 const key = env.CIRCLE_CPN_KEY;
 if (!key) {
-  console.error("GAGAL: CIRCLE_CPN_KEY tidak ada di .env.local");
+  console.error("FAILED: CIRCLE_CPN_KEY missing from .env.local");
   process.exit(1);
 }
 

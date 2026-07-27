@@ -4,6 +4,7 @@ import { createEmitter } from "../events/emitter.ts";
 import { FloorNotMetError } from "../settlement-fx/swap.ts";
 import { BridgeStuckError } from "../funding/bridge.ts";
 import type { OrderRecord } from "../orchestrator/order-store.ts";
+import type { PayoutInstruction } from "../payout/mock-payout.ts";
 
 const ADDR = {
   payer: "0x1111111111111111111111111111111111111111",
@@ -34,6 +35,7 @@ function mkOrder(o: Partial<OrderRecord> = {}): OrderRecord {
 /** Stateful in-memory store: get() after transition() reflects the new state. */
 function memStore(initial: OrderRecord) {
   let rec = { ...initial };
+  let payout: PayoutInstruction | null = null;
   return {
     get: vi.fn(async () => ({ ...rec })),
     create: vi.fn(async (p: { id: string; usdcAmountMinor: bigint; priceEURMinor: bigint; bufferBps: number; receivingChain: string; wedge: OrderRecord["wedge"]; mode: OrderRecord["mode"] }) => {
@@ -54,6 +56,10 @@ function memStore(initial: OrderRecord) {
       return { ...rec };
     }),
     recordPaymentIdempotent: vi.fn(async () => ({})),
+    // The payout instruction is persisted, not cached in the facade — so the
+    // fake has to hold it too, exactly like the real store does.
+    savePayout: vi.fn(async (_id: string, p: PayoutInstruction) => { payout = p; }),
+    getPayout: vi.fn(async () => payout),
     listPending: vi.fn(), recordPayment: vi.fn(), recordEvent: vi.fn(), deleteOrder: vi.fn(),
   };
 }
@@ -237,7 +243,7 @@ describe("release", () => {
 
     expect(deps.escrow.capture).toHaveBeenCalledOnce();
     expect(released).toEqual([{ orderId: "ord_x", eurcOutMinor: 2_030_000n, rebateMinor: 30_000n }]);
-    const payout = kit.payoutFor("ord_x");
+    const payout = await kit.payoutFor("ord_x");
     expect(payout).toMatchObject({ label: "MOCK", executed: false, target: { amountMinor: 2_030_000n } });
     expect((await kit.status("ord_x")).state).toBe("released");
   });
@@ -258,7 +264,7 @@ describe("release", () => {
     );
     // The event carries the delivery tx; the seller's payout is the floor, not floor + rebate.
     expect(released[0]).toMatchObject({ eurcOutMinor: 2_030_000n, rebateMinor: 30_000n, rebateTxHash: "0xrebate" });
-    expect(kit.payoutFor("ord_x")).toMatchObject({ target: { amountMinor: 2_000_000n } });
+    expect(await kit.payoutFor("ord_x")).toMatchObject({ target: { amountMinor: 2_000_000n } });
   });
 
   it("skips the rebate transfer when the surplus is zero, and the seller keeps the full settlement", async () => {
@@ -273,7 +279,7 @@ describe("release", () => {
     await kit.release("ord_x", proof);
 
     expect(payRebate).not.toHaveBeenCalled();
-    expect(kit.payoutFor("ord_x")).toMatchObject({ target: { amountMinor: 2_000_000n } });
+    expect(await kit.payoutFor("ord_x")).toMatchObject({ target: { amountMinor: 2_000_000n } });
   });
 
   it("lands in settlement_pending (not released) when the floor is missed", async () => {
@@ -291,7 +297,7 @@ describe("release", () => {
 
     expect(deps.escrow.capture).toHaveBeenCalledOnce();
     expect(released).not.toHaveBeenCalled();
-    expect(kit.payoutFor("ord_x")).toBeUndefined();
+    expect(await kit.payoutFor("ord_x")).toBeNull();
     expect((await kit.status("ord_x")).state).toBe("settlement_pending");
   });
 });

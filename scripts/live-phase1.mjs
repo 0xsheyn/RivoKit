@@ -61,7 +61,7 @@ const circle = createCircleClient({
 // ── resumable state ────────────────────────────────────────────────────
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) {
   writeFileSync(STATE_FILE, "{}");
-  console.log("State direset.\n");
+  console.log("State reset.\n");
 }
 const state = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};
 const save = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
@@ -97,7 +97,7 @@ async function operatorCall(label, abiFunctionSignature, abiParameters) {
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return t.transaction;
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${label} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${label} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${label}: timeout`);
@@ -130,7 +130,7 @@ const readPaymentState = async (hash) => {
 
 // ── Step 0: build PaymentInfo (deterministic, persisted) ───────────────
 
-step("Langkah 0 — susun PaymentInfo");
+step("Step 0 — susun PaymentInfo");
 
 if (!state.paymentInfo) {
   const now = Math.floor(Date.now() / 1000);
@@ -164,7 +164,7 @@ const nonce = getPayerAgnosticHash(pi, ARC_TESTNET_CHAIN_ID, ESCROW);
 info(`payer     ${pi.payer}`);
 info(`receiver  ${pi.receiver}`);
 info(`operator  ${pi.operator}`);
-info(`jumlah    ${fmt(AMOUNT)}`);
+info(`amount    ${fmt(AMOUNT)}`);
 ok(`hash      ${hash}`);
 ok(`nonce3009 ${nonce}`);
 
@@ -189,16 +189,16 @@ const opening = {
   merchant: await balance(MERCHANT),
   operator: await balance(OPERATOR),
 };
-info(`saldo awal — buyer ${fmt(opening.buyer)}, merchant ${fmt(opening.merchant)}, operator ${fmt(opening.operator)}`);
+info(`opening balances — buyer ${fmt(opening.buyer)}, merchant ${fmt(opening.merchant)}, operator ${fmt(opening.operator)}`);
 
 if (opening.buyer < AMOUNT) {
-  console.error(`\nGAGAL: buyer hanya punya ${fmt(opening.buyer)}, butuh ${fmt(AMOUNT)}.`);
+  console.error(`\nFAILED: the buyer only holds ${fmt(opening.buyer)}, needs ${fmt(AMOUNT)}.`);
   process.exit(1);
 }
 
 // ── Step 1: buyer signs ERC-3009 ───────────────────────────────────────
 
-step("Langkah 1 — buyer tanda tangan ERC-3009 receiveWithAuthorization");
+step("Step 1 — buyer tanda tangan ERC-3009 receiveWithAuthorization");
 
 if (!state.signature) {
   const [tokenName, tokenVersion] = await Promise.all([
@@ -243,11 +243,11 @@ if (!state.signature) {
   });
   save();
 }
-ok(`tanda tangan ${state.signature.slice(0, 26)}… (${(state.signature.length - 2) / 2} byte)`);
+ok(`tanda tangan ${state.signature.slice(0, 26)}… (${(state.signature.length - 2) / 2} bytes)`);
 
 // ── Step 2: authorize ──────────────────────────────────────────────────
 
-step("Langkah 2 — operator memanggil authorize (dana masuk escrow)");
+step("Step 2 — the operator calls authorize (funds enter escrow)");
 
 let ps = await readPaymentState(hash);
 if (!ps.hasCollected) {
@@ -260,16 +260,16 @@ if (!ps.hasCollected) {
 }
 ok(`state escrow — collected=${ps.hasCollected} capturable=${fmt(ps.capturable)} refundable=${fmt(ps.refundable)}`);
 if (!ps.hasCollected) {
-  console.error("GAGAL: authorize tidak mengubah state.");
+  console.error("FAILED: authorize did not change the state.");
   process.exit(1);
 }
 
 const afterAuth = { buyer: await balance(buyer.address), merchant: await balance(MERCHANT) };
-info(`buyer berkurang ${fmt(opening.buyer - afterAuth.buyer)}`);
+info(`buyer decreased by ${fmt(opening.buyer - afterAuth.buyer)}`);
 
 // ── Step 3: capture ────────────────────────────────────────────────────
 
-step("Langkah 3 — operator memanggil capture (dana ke merchant)");
+step("Step 3 — the operator calls capture (funds to the merchant)");
 
 if (ps.capturable > 0n) {
   await operatorCall(
@@ -283,16 +283,16 @@ ok(`state escrow — capturable=${fmt(ps.capturable)} refundable=${fmt(ps.refund
 
 const afterCapture = { merchant: await balance(MERCHANT) };
 const merchantGain = afterCapture.merchant - opening.merchant;
-ok(`merchant bertambah ${fmt(merchantGain)}`);
+ok(`merchant increased by ${fmt(merchantGain)}`);
 if (merchantGain !== AMOUNT) {
-  console.error(`GAGAL: merchant seharusnya bertambah ${fmt(AMOUNT)}.`);
+  console.error(`FAILED: the merchant should have gained ${fmt(AMOUNT)}.`);
   process.exit(1);
 }
 
 // ── Step 4: refund ─────────────────────────────────────────────────────
 
-step("Langkah 4 — operator memanggil refund (dana kembali ke buyer)");
-info("catatan: dana refund ditarik dari saldo OPERATOR, bukan dari escrow");
+step("Step 4 — the operator calls refund (funds back to the buyer)");
+info("note: refund funds are pulled from the OPERATOR balance, not from escrow");
 
 if (ps.refundable > 0n) {
   await operatorCall(
@@ -312,7 +312,7 @@ const closing = {
 
 // ── Verdict ────────────────────────────────────────────────────────────
 
-step("Hasil");
+step("Result");
 
 const buyerNet = closing.buyer - opening.buyer;
 const merchantNet = closing.merchant - opening.merchant;
@@ -323,19 +323,19 @@ info(`merchant  ${fmt(opening.merchant)} → ${fmt(closing.merchant)}  (${mercha
 info(`operator  ${fmt(opening.operator)} → ${fmt(closing.operator)}  (${operatorNet >= 0n ? "+" : ""}${formatUnits(operatorNet, 6)})`);
 
 const checks = [
-  [buyerNet === 0n, "buyer kembali utuh (bayar 1, refund 1)"],
-  [merchantNet === AMOUNT, "merchant menerima dan menahan hasil capture"],
-  [ps.refundable === 0n, "tidak ada sisa yang bisa di-refund"],
-  [ps.capturable === 0n, "tidak ada sisa yang bisa di-capture"],
+  [buyerNet === 0n, "the buyer is made whole (paid 1, refunded 1)"],
+  [merchantNet === AMOUNT, "the merchant receives and keeps the captured amount"],
+  [ps.refundable === 0n, "nothing left to refund"],
+  [ps.capturable === 0n, "nothing left to capture"],
 ];
 let failed = 0;
 for (const [pass, label] of checks) {
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}`);
   if (!pass) failed++;
 }
 
 console.log(
-  `\n${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? "" : " Kriteria keluar Fase 1 TERBUKTI: fund → capture → refund."),
+  `\n${checks.length - failed}/${checks.length} passed.` +
+    (failed ? "" : " Phase 1 exit criteria PROVEN: fund → capture → refund."),
 );
 process.exit(failed ? 1 : 0);

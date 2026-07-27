@@ -25,8 +25,8 @@ export class CircleError extends Error {
 }
 
 export function createCircleClient({ apiKey, entitySecret }) {
-  if (!apiKey) throw new Error("CIRCLE_API_KEY kosong");
-  if (!entitySecret) throw new Error("CIRCLE_ENTITY_SECRET kosong");
+  if (!apiKey) throw new Error("CIRCLE_API_KEY is empty");
+  if (!entitySecret) throw new Error("CIRCLE_ENTITY_SECRET is empty");
 
   let cachedPublicKey = null;
 
@@ -65,7 +65,7 @@ export function createCircleClient({ apiKey, entitySecret }) {
     const secretBytes = Buffer.from(entitySecret, "hex");
     if (secretBytes.length !== 32) {
       throw new Error(
-        `CIRCLE_ENTITY_SECRET harus 32 byte hex, dapat ${secretBytes.length} byte`,
+        `CIRCLE_ENTITY_SECRET must be 32 hex bytes, got ${secretBytes.length} bytes`,
       );
     }
     return publicEncrypt(

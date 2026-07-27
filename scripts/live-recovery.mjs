@@ -54,7 +54,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -88,7 +88,7 @@ const operatorSender = async ({ functionName, args }) => {
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction.txHash };
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${functionName}: timeout`);
@@ -104,7 +104,7 @@ const deps = { escrow, fx, settlementAddress: MERCHANT };
 
 // ── Setup: fund an order ───────────────────────────────────────────────
 
-step("Langkah 1 — siapkan order ter-fund");
+step("Step 1 — prepare a funded order");
 
 const now = Math.floor(Date.now() / 1000);
 if (!state.paymentInfo) {
@@ -166,11 +166,11 @@ if (!ps.hasCollectedPayment) {
 }
 order = await store.get(order.id);
 if (order.state !== "funded") order = await store.transition(order.id, "funded", { fundedAt: new Date() });
-ok(`order ${order.id} — state ${order.state}, escrow menahan ${fmt(ps.capturableAmount)} USDC`);
+ok(`order ${order.id} — state ${order.state}, escrow holds ${fmt(ps.capturableAmount)} USDC`);
 
 // ── Step 2: release with an unreachable floor ──────────────────────────
 
-step("Langkah 2 — release dengan floor MUSTAHIL (capture jalan, swap gagal)");
+step("Step 2 — release with an IMPOSSIBLE floor (capture succeeds, swap fails)");
 
 const merchantUsdcBefore = await balanceOf(USDC_ADDRESS, MERCHANT);
 const merchantEurcBefore = await balanceOf(EURC_ADDRESS, MERCHANT);
@@ -182,26 +182,26 @@ const first = await release(deps, {
   wedge: WEDGE, proof: { kind: "milestone", ref: "INV-77" }, currentState: order.state,
 });
 
-record(first.status === "settlement_pending", "release melaporkan settlement_pending", first.status);
+record(first.status === "settlement_pending", "release reports settlement_pending", first.status);
 if (first.status === "settlement_pending") info(first.reason);
 
 order = await store.transition(order.id, "settlement_pending", { failureReason: first.reason });
-record(order.state === "settlement_pending", "state tersimpan sebagai settlement_pending");
-record(isCaptured(order.state), "isCaptured menandai dana sudah keluar escrow");
+record(order.state === "settlement_pending", "the state is persisted as settlement_pending");
+record(isCaptured(order.state), "isCaptured marks the funds as having left escrow");
 
 await sleep(2000);
 const psAfterCapture = await escrow.getPaymentState(hash);
 const merchantUsdcMid = await balanceOf(USDC_ADDRESS, MERCHANT);
 const merchantEurcMid = await balanceOf(EURC_ADDRESS, MERCHANT);
 
-record(psAfterCapture.capturableAmount === 0n, "escrow kosong — capture BERHASIL");
-record(psAfterCapture.refundableAmount === AMOUNT, "jumlah ter-capture tercatat", fmt(psAfterCapture.refundableAmount));
-record(merchantUsdcMid - merchantUsdcBefore === AMOUNT, "penerima memegang USDC, bukan EURC", `+${fmt(merchantUsdcMid - merchantUsdcBefore)} USDC`);
-record(merchantEurcMid === merchantEurcBefore, "EURC penerima belum bertambah", fmt(merchantEurcMid));
+record(psAfterCapture.capturableAmount === 0n, "escrow is empty — the capture SUCCEEDED");
+record(psAfterCapture.refundableAmount === AMOUNT, "the captured amount is recorded", fmt(psAfterCapture.refundableAmount));
+record(merchantUsdcMid - merchantUsdcBefore === AMOUNT, "the receiver holds USDC, not EURC", `+${fmt(merchantUsdcMid - merchantUsdcBefore)} USDC`);
+record(merchantEurcMid === merchantEurcBefore, "the receiver's EURC has not increased", fmt(merchantEurcMid));
 
 // ── Step 3: retry with an honest floor ─────────────────────────────────
 
-step("Langkah 3 — retrySettlement dengan floor wajar");
+step("Step 3 — retrySettlement with a reasonable floor");
 
 const fresh = await fx.quote({ address: MERCHANT, tokenIn: "USDC", tokenOut: "EURC", amountInMinor: AMOUNT });
 const retryFloor = (fresh.amountOutMinor * 98n) / 100n;
@@ -209,7 +209,7 @@ info(`kuotasi baru ${fmt(fresh.amountOutMinor)}, floor ${fmt(retryFloor)}`);
 
 const second = await retrySettlement(deps, { amountMinor: AMOUNT, priceOutMinor: retryFloor });
 
-record(second.status === "released", "retrySettlement berhasil", second.status);
+record(second.status === "released", "retrySettlement succeeded", second.status);
 
 if (second.status === "released") {
   await store.recordPayment({
@@ -221,18 +221,18 @@ if (second.status === "released") {
     rebateMinor: second.rebateMinor,
     settledAt: new Date(),
   });
-  ok(`EURC keluar ${fmt(second.eurcOutMinor)} · rebate ${fmt(second.rebateMinor)}`);
+  ok(`EURC out ${fmt(second.eurcOutMinor)} · rebate ${fmt(second.rebateMinor)}`);
 
   await sleep(3000);
   const merchantEurcAfter = await balanceOf(EURC_ADDRESS, MERCHANT);
-  record(merchantEurcAfter - merchantEurcMid >= retryFloor, "penerima akhirnya menerima EURC >= floor", fmt(merchantEurcAfter - merchantEurcMid));
-  record(order.state === "released", "state akhir released");
+  record(merchantEurcAfter - merchantEurcMid >= retryFloor, "the receiver finally receives EURC >= the floor", fmt(merchantEurcAfter - merchantEurcMid));
+  record(order.state === "released", "final state is released");
 }
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " Jalur pemulihan TERBUKTI: settlement_pending → retry → released."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " Recovery path PROVEN: settlement_pending → retry → released."),
 );
 process.exit(failed ? 1 : 0);

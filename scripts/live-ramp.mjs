@@ -17,7 +17,7 @@ for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
   if (m && m[2]) env[m[1]] = m[2];
 }
 if (!env.CIRCLE_CPN_KEY) {
-  console.error("GAGAL: CIRCLE_CPN_KEY tidak ada. Jalankan: node scripts/sync-env.mjs");
+  console.error("FAILED: CIRCLE_CPN_KEY is missing. Run: node scripts/sync-env.mjs");
   process.exit(1);
 }
 
@@ -62,4 +62,4 @@ console.log(`\nPAYMENT ${payment.id}  status ${payment.status}`);
 console.log(`TRANSACTION ${transaction.id}  status ${transaction.status}`);
 console.log(`  intent: ${transaction.messageToBeSigned.primaryType} on chainId ${transaction.messageToBeSigned.domain.chainId}`);
 console.log(`  spender (settlement): ${transaction.messageToBeSigned.message?.spender}`);
-console.log(`\n(STOP — tidak submit. Broadcast = titik tak-balik; butuh wallet Arc berdana + allowance Permit2.)`);
+console.log(`\n(STOP — not submitting. Broadcast is the point of no return; it needs a funded Arc wallet + a Permit2 allowance.)`);

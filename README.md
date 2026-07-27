@@ -4,87 +4,127 @@
 
 ### An embeddable cross-border settlement SDK on Arc — multi-chain USDC in, local-currency out.
 
-Payers pay in USDC from any chain; the recipient receives **EURC on Arc** with a floor guarantee, and can cash out to **real local fiat** — EUR/SEPA, BRL/PIX, MXN/SPEI, USD/WIRE — through the Circle Payments Network. **Non-custodial**, with optional **conditional escrow**.
+![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![contracts](https://img.shields.io/badge/contracts-verified%20on%20Arc-success) ![tests](https://img.shields.io/badge/tests-261%20passing-brightgreen) ![status](https://img.shields.io/badge/status-mvp%20%C2%B7%20testnet-orange) ![stack](https://img.shields.io/badge/stack-TypeScript%20%2B%20App%20Kit-3178c6) ![node](https://img.shields.io/badge/node-%3E%3D20-339933) ![license](https://img.shields.io/badge/license-Apache--2.0-green)
 
-<br/>
-
-![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![status](https://img.shields.io/badge/status-mvp-orange) ![hackathon](https://img.shields.io/badge/built%20for-Hackathon-red)   ![stack](https://img.shields.io/badge/stack-TypeScript%20%2B%20App%20Kit-3178c6) ![node](https://img.shields.io/badge/node-%3E%3D20-339933) ![license](https://img.shields.io/badge/license-Apache--2.0-green)
-
-<br/>
-
-[Overview](#overview) · [Problem](#the-problem-it-solves) · [Why](#why-rivokit) · [How it works](#how-it-works) · [Architecture](#architecture) · [Off-ramp](#fiat-off-ramp-cpn) · [Install](#installation) · [Integration](#integration-guide) · [API](#sdk-api-reference) · [Security](#security-model) · [Limitations](#limitations--honest-boundaries) · [Roadmap](#roadmap)
+[Overview](#overview) · [Problem](#the-problem-it-solves) · [Why](#why-rivokit) · [How it works](#how-it-works) · [Architecture](#architecture) · [Quickstart](#quickstart) · [Contracts](#deployed-contracts-arc-testnet) · [API](#api) · [Security](#security-model) · [Limitations](#limitations--honest-boundaries)
 
 </div>
 
-> ⚠️ **Testnet / sandbox only — unaudited, not for production.** Do not use real funds or mainnet private keys.
->
-> The fiat leg is **no longer a mock**: USDC→EUR payouts settle through the Circle Payments Network on Arc Testnet, proven end-to-end. What each piece has and has not been shown to do is stated precisely in [Fiat off-ramp](#fiat-off-ramp-cpn) and [Limitations](#limitations--honest-boundaries) — read those before believing any claim here.
+> ⚠️ **Testnet only, unaudited.** Do not use real funds or mainnet keys.
+> The SDK's own `payout` module is still a labelled `MOCK`; the real fiat exit
+> is `createCpnRamp`. What is proven and what is not is stated exactly in
+> [Proven live vs not](#proven-live-vs-not) — read that before believing anything here.
+
+`README_v0.md` keeps the previous long-form README (full integration
+walk-through, per-step code samples).
 
 ---
 
 ## Overview
 
-RivoKit is a **money-orchestration layer** that other platforms (marketplaces, payout apps, invoicing systems) embed into their checkout/payout. It does one thing well: moving value from *"the payer pays USDC from any chain"* to *"the recipient is paid"* — with quoted FX, optional escrow, automatic refunds, gasless UX, and a fiat exit.
+RivoKit is a **money-orchestration layer** that a marketplace, payout app or
+invoicing system embeds into its checkout. It moves value from *"the payer pays
+USDC from any chain"* to *"the recipient is paid"* — with a locked FX quote,
+optional escrow, automatic refunds, gasless UX, and a fiat exit.
 
-It covers two legs that are usually bought separately:
+Two legs, normally bought separately:
 
-1. **Settlement on Arc** — multi-chain USDC → escrow → floored USDC→EURC swap, so the recipient is guaranteed **≥ €P** on-chain.
-2. **Fiat off-ramp** — USDC on Arc → a beneficiary's bank account in EUR, BRL, MXN or USD, via the Circle Payments Network (CPN).
+1. **Settlement on Arc** — multi-chain USDC → escrow → floored USDC→EURC swap,
+   so the recipient is guaranteed **≥ €P** on-chain.
+2. **Fiat off-ramp** — USDC on Arc → a beneficiary's bank account in EUR, BRL,
+   MXN or USD through the Circle Payments Network (CPN).
 
-RivoKit is **not** a marketplace, wallet, custodian, or licensed financial institution. It orchestrates; the **licensed host** that embeds it remains the party of record. In production CPN requires the host to be an onboarded **OFI** (originating financial institution), and KYB/AML plus dispute arbitration stay with the host in every configuration.
+**What actually runs today**, not a roadmap:
 
-RivoKit writes no primitives from scratch — it **composes** the Arc + Circle stack (App Kit for bridge/swap/unified balance, Commerce Payments Protocol for escrow, CPN for the fiat exit) behind a single clean API.
+- Its **own** Commerce Payments Protocol instances deployed on Arc Testnet —
+  all four contracts [source-verified, full match](#deployed-contracts-arc-testnet).
+- The escrow lifecycle, the floored swap, multi-chain funding and refund
+  bridge-back, all **proven against the real chain**, not a fork.
+- A **25 bps operator fee** grossed onto the payer and split at capture without
+  ever touching the recipient's floor — proven in tx `0x7910f1…037420`.
+- **CPN EUR/SEPA settled end-to-end to `COMPLETED`**, twice: 15 USDC → 12.92 EUR
+  into a real sandbox bank rail. The fiat leg is no longer a mock.
+- **261 unit tests** across 18 files, runnable with no credentials at all.
+
+RivoKit is **not** a marketplace, wallet, custodian, or licensed institution. It
+orchestrates; the **licensed host** that embeds it stays the party of record.
+It writes no primitives from scratch — it composes App Kit (bridge/swap/unified
+balance), the Commerce Payments Protocol (escrow) and CPN (fiat) behind one API.
 
 ## The problem it solves
 
-Cross-border stablecoin payments today are blocked by three frictions that all converge at the same point:
+Three frictions that all converge on the same point:
 
-- **The payer's balance is scattered, and the recipient doesn't want crypto.** A crypto-native business holds USDC across many EVM chains, but a European vendor/contractor only wants local currency. Bridging that today means manual off-ramps, many steps, opaque FX rates, and slow settlement.
-- **The recipient needs certainty, not volatility.** A recipient who doesn't understand crypto wants a **guaranteed local amount** (e.g. €P), on time, without exposure to hidden FX risk between the moment of payment and the moment of settlement.
-- **Platforms have to assemble the infrastructure themselves.** To offer "pay in USDC, receive local", a platform must stitch together cross-chain bridging, escrow, FX, and payout from scattered protocols — expensive, cross-chain bug-prone, and far from its core competency.
+- **The payer's balance is scattered; the recipient doesn't want crypto.** A
+  crypto-native business holds USDC across many chains, while a European
+  contractor only wants euros in a bank account. Bridging that today means
+  manual off-ramps, opaque FX, and slow settlement.
+- **The recipient needs certainty, not a rate.** They want a *guaranteed* local
+  amount on a date — not exposure to whatever FX does between checkout and
+  settlement. "Best effort" is not a payment.
+- **Platforms must assemble the plumbing themselves.** Offering "pay in USDC,
+  receive local" means stitching bridging + escrow + FX + payout across four
+  protocols, each with its own failure mode, none of them the platform's
+  core competency.
 
-RivoKit closes all three in one SDK: the payer pays from any chain, the recipient is guaranteed **≥ €P** in EURC on Arc and can cash out to their own bank account in local currency, and the platform just calls a few functions — without becoming a payment company.
+RivoKit closes all three: the payer pays from any chain, the recipient is
+guaranteed **≥ €P** in EURC on Arc and can cash out to their own bank, and the
+platform calls a handful of functions instead of becoming a payment company.
+
+The design consequence worth naming: the guarantee is enforced **on-chain**, not
+in TypeScript. The swap carries `stopLimit = priceEUR`, so a bad rate reverts
+the transaction and leaves the funds in escrow. There is no code path in which
+the recipient quietly receives less.
 
 ## Why RivoKit
 
 | | |
 |---|---|
-| 🌉 **Multi-chain by default** | Payers pay from a USDC balance on any chain (unified balance) — RivoKit routes it to Arc. |
-| 🔒 **Non-custodial** | Funds are held by the escrow contract on Arc, **never** RivoKit's servers. |
-| 🎯 **Recipient floor guarantee** | The FX swap uses `stopLimit = EUR price` → the recipient receives **at least €P or the swap reverts** (funds stay safe). |
-| 🏦 **A real fiat exit** | One USDC balance on Arc reaches EUR/SEPA, BRL/PIX, MXN/SPEI and USD/WIRE bank accounts through CPN — not a printed "payout instruction". |
-| 🔁 **Automatic refunds** | On failure/expiry → USDC is bridged back to the payer's origin chain. |
-| ⚙️ **One SDK, not a protocol assembly** | App Kit + Commerce Payments Protocol + CPN combined behind a few calls. |
-| ⛽ **Gasless-ready** | ERC-3009 `receiveWithAuthorization` + operator-relay; payers need not hold Arc gas. |
+| 🌉 **Multi-chain by default** | Payers pay from a USDC balance on any chain (unified balance / CCTP) — RivoKit routes it to Arc. |
+| 🔒 **Non-custodial** | Funds sit in the escrow contract on Arc, **never** on RivoKit's servers. |
+| 🎯 **Recipient floor guarantee** | `stopLimit = EUR price` → the recipient gets **at least €P, or the swap reverts** with funds safe. |
+| 🏦 **A real fiat exit** | One USDC balance on Arc reaches SEPA / PIX / SPEI / WIRE — proven to `COMPLETED` on EUR, not a printed instruction. |
+| 🔁 **Automatic refunds** | On failure or expiry, USDC is bridged back to the payer's origin chain. |
+| ⛽ **Gasless-ready** | ERC-3009 `receiveWithAuthorization` + operator relay; the payer never holds Arc gas. |
+| 💸 **The relay pays for itself** | The operator fee is grossed onto the payer and split at capture — it never eats the floor. |
+| ✅ **Verifiable, not asserted** | Every deployed contract is source-verified on the explorer, and `check-cpp.mjs` asserts the wiring instead of trusting it. |
 
 ## How it works
 
 ```text
-createOrder ─► funding (multi-chain USDC ─► Arc, App Kit)
-            ─► escrow  (authorize)                    [Commerce Payments Protocol]
-            ─► host release hook (milestone / SLA / confirmation)
-            ─► capture ─► settlement-FX (swap USDC→EURC, stopLimit = €P)
-            ─► rebate to buyer + payout instruction
-            ─► (on failure) refund ─► bridge-back to origin chain
+setup      ─► AuthCaptureEscrow ─► collectors (bound by immutable) ─► verify wiring
 
-cash out    ─► quote (rate + fees locked, ~60s)       [Circle Payments Network]
-            ─► prepare (payment + Permit2 intent — nothing moves yet)
-            ─► submit  (sign + broadcast — irreversible)
-            ─► CPN settles fiat to the beneficiary's bank
+settlement ─► createOrder    compliance screen → FX quote locked → stored
+           ─► fund           multi-chain USDC ─► Arc ─► gasless ERC-3009 authorize
+           ─► host release hook  (milestone / SLA / access granted)
+           ─► release        capture ─► swap USDC→EURC, stopLimit = €P ─► rebate
+           ─► refund         void/refund ─► bridge back to receivingChain
+
+off-ramp   ─► quote     rate + fees locked, ~30–60s
+           ─► prepare   encrypt PII, create payment + Permit2 intent — moves nothing
+           ─► submit    sign + broadcast — IRREVERSIBLE past BROADCASTED
+           ─► CPN settles fiat to the beneficiary's bank
 ```
 
-The two are **deliberately separate**. Settlement is per-order and synchronous with the buyer; cashing out is the recipient's own decision, made later, over an accumulated balance — so the off-ramp is driven independently rather than wired into `release()`.
+The two halves are **deliberately separate**. Settlement is per-order and
+synchronous with the buyer; cashing out is the recipient's own decision, made
+later, over an accumulated balance — so the off-ramp is driven independently
+rather than wired into `release()`.
 
-Two **modes**, mapping directly onto Commerce Payments Protocol operations:
+Two **modes**, mapping straight onto Commerce Payments Protocol operations:
 
-- **`escrow`** (default) — `Authorize → Capture`. Funds are held until the host's release hook triggers release.
-- **`direct`** — `Charge` (atomic). For trusted payouts/invoices with no hold.
+- **`escrow`** (default) — `Authorize → Capture`. Funds held until the host's
+  release hook fires.
+- **`direct`** — `Charge`, atomic. For trusted payouts and approved invoices.
 
-**Wedge-dependent timeout:** weak proof (physical goods) → `Reclaim`/refund, buyer-favouring; strong proof (B2B/digital) → `Capture`, seller-favouring.
+**Timeout is not a parameter.** It is derived from `wedge`, because the strength
+of the available proof is what should decide who an expiry favours: strong proof
+(B2B, digital) → `auto_capture`; weak proof (physical goods) → `reclaim`.
 
 ## Architecture
 
-RivoKit is a TypeScript orchestration layer. The only genuinely new code is **`orchestrator`** and **`settlement-fx`**; everything else is calls into App Kit / protocol contracts.
+The only genuinely new code is **`orchestrator`**, **`settlement-fx`** and
+**`ramp`**; the rest is calls into App Kit and protocol contracts.
 
 ```text
 ┌──────────────┐   call SDK    ┌─────────────────────────────────────┐
@@ -94,440 +134,100 @@ RivoKit is a TypeScript orchestration layer. The only genuinely new code is **`o
 └──────────────┘               │  ramp · payout · events             │
                                └──────────────┬──────────────────────┘
                                               ▼
-                        ┌─────────────────────────────────────────┐
-                        │              Arc Testnet                 │
-                        │  App Kit(Gateway/CCTP)  CPP escrow  Swap │
-                        └──────────────────┬──────────────────────┘
+                        ┌──────────────────────────────────────────┐
+                        │              Arc Testnet                  │
+                        │  App Kit (Gateway/CCTP) · CPP escrow ·    │
+                        │  Swap (stopLimit)                         │
+                        └──────────────────┬───────────────────────┘
                                            ▼
-                        ┌─────────────────────────────────────────┐
-                        │   CPN — fiat settlement to bank rails    │
-                        │   SEPA · PIX · SPEI · WIRE               │
-                        └─────────────────────────────────────────┘
+                        ┌──────────────────────────────────────────┐
+                        │   CPN — fiat settlement to bank rails     │
+                        │   SEPA · PIX · SPEI · WIRE                │
+                        └──────────────────────────────────────────┘
 ```
 
 | Module | Responsibility | Source |
 |---|---|---|
-| `orchestrator` | Order state machine, retries, cross-chain reconciliation | **New code** |
-| `settlement-fx` | Quote-lock + floored swap + rebate calc | **New code** (App Kit Swap) |
-| `ramp` | CPN off-ramp: quote, PII encryption, intent signing, payment lifecycle | **New code** (Circle Payments Network) |
+| `orchestrator` | Order state machine, retries, reconciliation | **New code** |
+| `settlement-fx` | Quote-lock + floored swap + rebate math | **New code** (App Kit Swap) |
+| `ramp` | CPN off-ramp: quote, PII encryption, intent signing, lifecycle | **New code** (CPN) |
 | `funding` | Multi-chain USDC → Arc | App Kit Unified Balance / Bridge |
-| `escrow` | authorize/capture/void/refund/reclaim | Commerce Payments Protocol |
-| `payout` | Structured payout instruction (mock) + refund bridge-back | `arc-fintech` pattern |
+| `escrow` | authorize / capture / void / refund / reclaim | Commerce Payments Protocol |
+| `payout` | Payout instruction (**MOCK**) + refund bridge-back | `arc-fintech` pattern |
 | `events` | Webhooks, signature verification, compliance | Circle webhooks + SCP |
 
-**On-chain vs off-chain:** escrowed funds, FX conversion, the off-ramp's Permit2 transfer, and release state live **on-chain** (Arc). Order metadata, UI status, notifications, and release-hook logic live **off-chain** (host). Bank settlement, KYB/AML and the OFI licence sit with **CPN and the licensed host**.
+**On-chain vs off-chain:** escrowed funds, the FX conversion, the off-ramp's
+Permit2 transfer and release state live **on-chain** (Arc). Order metadata, UI
+status, notifications and release-hook logic live **off-chain** (host). Bank
+settlement, KYB/AML and the OFI licence sit with **CPN and the licensed host**.
 
-## Fiat off-ramp (CPN)
-
-`src/ramp` turns an accumulated USDC balance on Arc into a bank payout. It is a **separate surface** from the order flow — the recipient decides when to cash out, over whatever has piled up.
-
-### The three steps, and why they are split
-
-| Step | Moves money? | What it does |
-|---|---|---|
-| `quote(amount)` | no | Locks rate + fees for the corridor. **Expires in ~30–60s** — the clock is real. |
-| `prepare(params)` | no | Encrypts travel-rule + beneficiary PII to the quote's JWK, creates the payment, and returns the **Permit2 intent** to sign. |
-| `submit(args, signer)` | **yes, irreversibly** | Signs the intent and broadcasts. Past `BROADCASTED` the sender's USDC is gone. |
-
-The split is the whole point: **preparing is safe, broadcasting is a decision**. The `signer` is injected rather than held by the module — who signs is the host's environment, exactly like the SDK's `FundExecutor`. In the demo a testnet key stands in for the seller; in production the seller signs in their own wallet.
-
-```ts
-import { createCpnRamp } from "rivokit";
-
-const ramp = createCpnRamp({
-  apiKey: process.env.CIRCLE_CPN_KEY!,
-  corridor: {
-    senderType: "BUSINESS", recipientType: "BUSINESS",
-    senderCountry: "US", destinationCountry: "FR",
-    blockchain: "ARC-TESTNET", paymentMethodType: "SEPA",
-    sourceCurrency: "USDC", destinationCurrency: "EUR",
-  },
-});
-
-const { quote, fees, spreadBps } = await ramp.quote({ sourceAmount: "15" });
-
-const { payment, transaction } = await ramp.prepare({
-  quote,
-  travelRule: [ /* ORIGINATOR_NAME, BENEFICIARY_ADDRESS, … */ ],
-  beneficiaryAccount: [{ name: "IBAN", value: "FR76…" }, { name: "RECIPIENT_LEGAL_NAME", value: "Acme SARL" }],
-  senderAddress: seller, refundAddress: seller,
-  useCase: "B2B", reasonForPayment: "PMT001", customerRefId: "ord-8842",
-});
-
-// Irreversible — gate this behind an explicit user confirmation.
-await ramp.submit({ paymentId: payment.id, transaction }, sellerAccount);
-```
-
-### Corridors
-
-Each rail demands different beneficiary and travel-rule fields. These were read live from `GET /v1/cpn/payments/requirements`, not guessed:
-
-| Corridor | Method | Beneficiary fields | Min |
-|---|---|---|---|
-| 🇪🇺 EUR | SEPA | `IBAN`, `RECIPIENT_LEGAL_NAME` | 11 USDC |
-| 🇧🇷 BRL | PIX | `RECIPIENT_ID_NUMBER`, `RECIPIENT_EVP` | 10 USDC |
-| 🇲🇽 MXN | SPEI | `CLABE` (+ beneficiary national ID) | 11 USDC |
-| 🌍 USD | WIRE | `BANK_NAME`, `SWIFT_CODE`, `BANK_COUNTRY`, `ACCOUNT_NUMBER`, `RECIPIENT_LEGAL_NAME` | 61 USDC |
-
-Postal codes are validated per country, and the beneficiary must sit in the destination country — so the beneficiary address varies by corridor while the originator stays with the OFI.
-
-### Prerequisites the flow will not do for you
-
-- The sender must **approve Permit2** on Arc USDC before `submit`, or the broadcast fails.
-- The quote expiry is short, and prepare-then-hesitate is the most common failure — it surfaces as `PAYMENT_EXPIRED` (`PM09000`). Every un-broadcast attempt during this project's CPN testing failed exactly that way.
-
-### Webhooks
-
-CPN drives payments asynchronously and reports via `cpn.payment.*`, `cpn.rfi.*`, `cpn.transaction.*`, `cpn.refund.*`. `verifyAndInterpretCpn` verifies the Circle signature **before** returning anything, and the reducers only ever move a payment forward — a duplicate or out-of-order webhook after a terminal state is ignored, not replayed.
-
-```ts
-import { verifyAndInterpretCpn, applyPaymentEvent } from "rivokit";
-
-const event = verifyAndInterpretCpn({ rawBody, signatureBase64, publicKey });  // throws on bad signature
-if (event) {
-  const outcome = applyPaymentEvent(currentState, event);
-  if (outcome.changed) persist(outcome.state);   // else: no-op | duplicate | illegal
-}
-```
-
-An open RFI (`rfiEffect`) blocks the payment; a rejection fails it.
-
-## Prerequisites
-
-- **Node.js 20+**
-- A **Circle Console** account: `CIRCLE_API_KEY` + `CIRCLE_ENTITY_SECRET` (register the entity secret once)
-- An App Kit **`KIT_KEY`** (for FX swaps / Stablecoin Service)
-- A **CPN key** (`CIRCLE_CPN_KEY`) for the fiat off-ramp — self-serve in Circle Console
-- Testnet USDC/EURC from [faucet.circle.com](https://faucet.circle.com) (select Arc Testnet)
-- *(Production)* OFI onboarding with CPN + KYB on recipients
-
-## Installation
-
-> **Not on the public npm registry, and deliberately so** — nothing here is audited and the payout leg is still `MOCK`, so the package stays `private` to make an accidental `npm publish` impossible. It is otherwise a normal installable package: it builds to `dist/` with type declarations and a single entry point.
-
-Install it into your app straight from git (the `prepare` script builds it on install):
-
-```bash
-npm install github:0xsheyn/RivoKit          # or: npm install file:../RivoKit
-```
-
-Or work on it from source:
-
-```bash
-git clone https://github.com/0xsheyn/RivoKit.git && cd RivoKit
-npm install          # runs `prepare` → builds dist/
-npm run build:lib    # rebuild the SDK on its own
-npm test             # 261 unit tests, no credentials needed
-```
-
-Everything supported is exported from the package root — deep imports into `src/` work but move without a version bump:
-
-```ts
-import {
-  createRivoKit, createEscrow, createSettlementFx, createCpnRamp,
-  verifyAndInterpretCpn, applyPaymentEvent, grossUpForFee,
-} from "rivokit";
-```
-
-Runtime dependencies of note: `@circle-fin/app-kit` + `@circle-fin/adapter-viem-v2` (bridge/swap/unified balance), `viem` (chain access and signing), `jose` (JWE encryption of CPN payment data). The order store expects Postgres/Supabase — the migrations under `infra/supabase/migrations/` ship with the package.
-
-## Configuration
-
-Copy `.env.example` to `.env.local` and fill it in — `.env.local` is gitignored and must never be committed. The variables that matter:
-
-```bash
-# Circle
-CIRCLE_API_KEY=
-CIRCLE_ENTITY_SECRET=            # 32-byte hex; register once
-CIRCLE_BLOCKCHAIN=ARC-TESTNET
-
-# App Kit (FX swap)
-KIT_KEY=KIT_KEY:<keyId>:<keySecret>
-
-# Fiat off-ramp — SERVER-ONLY, never import into a client component
-CIRCLE_CPN_KEY=
-CIRCLE_RAMP_KEY=                 # Circle Mint ("On/off ramp") — optional, see Limitations
-
-# Arc
-NEXT_PUBLIC_ARC_RPC_URL=https://rpc.testnet.arc.network
-
-# Signing keys. Deployer and relayer MUST differ — the operator is a hot key that
-# signs every payment and must not also hold deploy authority.
-DEPLOYER_PRIVATE_KEY=
-RELAYER_PRIVATE_KEY=
-BUYER_PRIVATE_KEY=
-
-# Written automatically by `npm run setup` — do not fill these by hand.
-# The collectors are bound to the escrow by immutable, so all three must come
-# from the same setup run.
-NEXT_PUBLIC_RIVO_ESCROW_ADDRESS=
-NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS=
-NEXT_PUBLIC_RIVO_REFUND_COLLECTOR_ADDRESS=
-OPERATOR_WALLET_ID=
-OPERATOR_ADDRESS=
-MERCHANT_ADDRESS=
-```
-
-Supabase holds the off-chain order state (`NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SECRET_KEY`) — see `.env.example` for the full list.
+`createRivoKit` is a composition root, not a service: it holds no keys and opens
+no connections. Every dependency that needs a credential is injected — that is
+what keeps the SDK out of custody of both funds and secrets.
+`demo/lib/rivokit.server.ts` is the reference wiring; `scripts/live-sdk.mjs`
+runs the same one against Arc Testnet.
 
 ## Quickstart
 
 ```bash
-cp .env.example .env.local     # fill in the credentials above
-npm run setup                  # deploy escrow (SCP) + create operator/merchant wallets
-npm test                       # 261 unit tests, no credentials needed
-npm run dev                    # the marketplace demo on http://localhost:3000
+git clone https://github.com/0xsheyn/RivoKit.git && cd RivoKit
+npm install                      # runs `prepare` → builds dist/
+cp .env.example .env.local       # fill in credentials (see Environment)
+npm test                         # 261 tests / 18 files, no credentials needed
+
+node scripts/preflight.mjs       # read-only: checks prerequisites, spends nothing
+npm run setup                    # deploy escrow + collectors, create wallets (idempotent)
+node scripts/check-cpp.mjs       # 8 wiring assertions on what was just deployed
+
+npm run dev                      # marketplace demo → http://localhost:3000
 ```
 
-### The demo
-
-`demo/` is a Next.js marketplace that drives the real SDK against Arc Testnet — not a screenshot mock. A storefront above **four role columns**, each holding only the authority that role actually has:
-
-- **Buyer** — connects MetaMask, signs the ERC-3009 authorization in-browser, picks a payment rail.
-- **Seller** — picks the wallet that will receive the floor (a purchase needs two distinct parties), then watches orders settle.
-- **Host / Marketplace** — the release hook: only the host releases or refunds. Shows the operator's Arc gas and the fee in bps, because that is the running cost of "gasless".
-- **Wallet Seller** — the seller's own balances on Arc and the exits from them: the CPN cash-out panel (corridor picker, live quote with fees and spread, prepare, then an explicitly-gated broadcast) and the Circle Mint redeem panel.
-
-`/sdk` is a second page: the same SDK driven as a bare state machine, with an execution inspector over one order — useful for reading `createOrder → fund → release/refund` without the marketplace framing.
-
-Two boundaries worth stating, because the demo does not hide them: the demo buyer is **server-signed** with a testnet key (in production the buyer signs in their own wallet), and the seller's cash-out is likewise signed server-side even though the EURC sits in the seller's wallet — see [Limitations](#limitations--honest-boundaries).
-
-### Minimal integration
-
-```ts
-import { createRivoKit } from "rivokit";
-
-// RivoKit composes injected modules — it holds no keys and moves nothing itself.
-const rivokit = createRivoKit({
-  store, escrow, fx, bridge,   // your OrderStore + the proven domain modules
-  fund,                        // FundExecutor: your environment signs & relays
-  compliance,                  // optional: screens payer/receiver before storing
-  config: {
-    chainId: 5042002,
-    escrowAddress, operator, token, refundCollector, settlementAddress,
-    screeningChain: "ARC-TESTNET",
-  },
-});
-
-// 1) Create an order — the FX quote is locked here, after compliance screening
-const order = await rivokit.createOrder({
-  payer, receiver,
-  priceEURMinor: 18_500_000n,    // micro-EURC (€18.50) — GUARANTEED to the recipient
-  receivingChain: "Ethereum_Sepolia",
-  mode: "escrow",                // "escrow" | "direct"
-  wedge: "digital_goods",
-});
-
-// 2) Fund the escrow — multi-chain USDC → Arc (async, event-driven).
-//    Pass a signature when the buyer signed ERC-3009 in their own browser wallet.
-await rivokit.fund(order.id, { signature });
-
-// 3) Release from your business logic (milestone approved, access granted, etc.)
-await rivokit.release(order.id, { kind: "access_granted", ref: "LIC-8842" });
-```
-
-## Integration guide
-
-### What RivoKit does vs what you (the host) provide
-
-| RivoKit (in the flow) | Host (out of the flow) |
+| Command | Does |
 |---|---|
-| Multi-chain USDC funding → Arc | Catalog, identity, product UX |
-| Non-custodial escrow + release/refund | **Release hook** (milestone/SLA/confirmation) |
-| Floored USDC→EURC FX + rebate | **Beneficiary data** (IBAN/CLABE/PIX key) + travel-rule fields |
-| CPN off-ramp: quote → prepare → submit | **KYB/AML**, merchant of record, dispute/arbitration |
-| Status events + verified CPN webhooks | Being the licensed **OFI**/PSP (production) |
+| `npm test` | vitest, 261 green / 18 files, no credentials |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run build:lib` | SDK → `dist/` (ESM + `.d.ts`), entry `src/index.ts` |
+| `npm run setup` | deploy CPP instances + operator/merchant wallets (idempotent) |
+| `npm run dev` | Next.js demo (`next dev demo`) |
+| `npm run build` | `next build demo` — **never** while `npm run dev` is running (corrupts `.next`) |
 
-### 0. Wire the composition root
+Install into another app straight from git — the package is `private` (never on
+the npm registry, deliberately) but otherwise normal:
 
-`createRivoKit` is a composition root, not a service: it holds no keys and opens no connections. Every dependency that needs a credential is injected, which is what keeps the SDK out of custody of both funds and secrets. A minimal server-side wiring:
-
-```ts
-import {
-  createRivoKit, createEscrow, createSettlementFx, createBridge,
-  createUnifiedBalance, createOrderStore, createComplianceGate, createCircleScreener,
-  ARC_TESTNET_CHAIN_ID, USDC_ADDRESS, installCircleDnsPinning,
-} from "rivokit";
-
-installCircleDnsPinning();                        // never disable TLS verification instead
-
-const kit = createRivoKit({
-  store:  createOrderStore(SUPABASE_URL, SUPABASE_SECRET_KEY),
-  escrow: createEscrow({ escrowAddress, publicClient, operator: sendViaYourOperatorWallet }),
-  fx:     createSettlementFx({ kitKey, circleApiKey, circleEntitySecret }),
-  bridge: createBridge(),
-  fund:   async ({ paymentInfo, hash, signature }) => { /* your ERC-3009 relay → { authorizeTxHash } */ },
-  payRebate,                                      // optional: returns the buffer surplus to the payer
-  compliance: createComplianceGate(createCircleScreener(request, uuid)),
-  operatorGas: () => publicClient.getBalance({ address: operator }),
-  config: {
-    chainId: ARC_TESTNET_CHAIN_ID, escrowAddress, operator, token: USDC_ADDRESS,
-    refundCollector, settlementAddress,
-    feeBps: 25, feeReceiver: operator,            // cost recovery for the gasless relay
-    minOperatorGasWei: 5n * 10n ** 17n,           // refuse new orders below 0.5 USDC of gas
-  },
-});
+```bash
+npm install github:0xsheyn/RivoKit     # or: npm install file:../RivoKit
 ```
 
-Two of those are worth stating plainly, because they are the running cost of "gasless":
+The demo is a Next.js marketplace over **four role columns**, each holding only
+the authority that role really has: Buyer (signs ERC-3009 in MetaMask), Seller
+(picks the wallet that receives the floor), Host (the release hook — only the
+host releases or refunds), Wallet Seller (the CPN cash-out panel). `/sdk` is a
+second page driving the same SDK as a bare state machine with an execution
+inspector.
 
-- **`feeBps` / `feeReceiver`** — the operator pays Arc gas (which *is* USDC) for authorize, capture, void and refund. The fee is withheld by the escrow at capture and **grossed onto what the payer authorizes**, never subtracted from the receiver's floor; taking it out of the captured amount would shrink the swap input below `priceEUR` and the floored swap would revert. Default `0` = you subsidise every order.
-- **`operatorGas` + `minOperatorGasWei`** — without this, an operator that runs out of gas fails *after* the payer has signed, leaving the order in `funding_pending` with nothing on-chain to explain it. With it, `createOrder` throws `OperatorGasLowError` before anything is quoted or stored.
+## Deployed contracts (Arc Testnet)
 
-`demo/lib/rivokit.server.ts` is the reference composition; `scripts/live-sdk.mjs` runs the same one against Arc Testnet.
+RivoKit's **own** Commerce Payments Protocol instances, pinned to
+`base/commerce-payments@3f77761`, built with solc `0.8.29`, `via_ir`,
+`optimizer_runs=100000`, `evm_version=cancun`. All four are **source-verified,
+full match** — on-chain creation bytecode reproduces byte-for-byte.
 
-### 1. Lock the payment amount (inside `createOrder`)
-
-`createOrder` inverts a settlement quote to lock the USDC amount the buyer must pay, using the checkout-time rate plus a buffer. To read a rate without creating an order:
-
-```ts
-const est = await rivokit.estimateSwap({
-  address: payer,
-  amountInMinor: 1_000_000n,           // 1 USDC to read the rate
-});
-// est.amountOutMinor / est.stopLimitMinor / est.fees — all strings at the boundary
-// usdcAmount = priceEUR / rate × (1 + bufferBps)
-```
-
-The buyer is locked to `order.usdcAmount`; the seller's settlement rate floats within a window and is guaranteed by `stopLimit` (see step 3).
-
-### 2. Fund the escrow (multi-chain → Arc)
-
-```ts
-await rivokit.fund(order.id);                 // host-held key signs the ERC-3009 authorization
-await rivokit.fund(order.id, { signature });  // …or relay one the buyer signed in their browser wallet
-// primary:  kit.unifiedBalance.spend({ to:{ chain:"Arc_Testnet", recipientAddress: payer }})
-// fallback: kit.bridge / kit.estimateBridge
-// then:     escrow.authorize(PaymentInfo)  ← gasless: payer signs ERC-3009, operator relays
-```
-
-> Funding mints/bridges USDC to the **payer** on Arc, then `authorize` pulls it into escrow via a gasless ERC-3009 signature — minting straight to the escrow would move tokens with no payment recorded against them.
->
-> Cross-chain funding is **async** — a Gateway deposit waits on source-chain finality, and CCTP attestation can take several minutes. The order passes through `funding_pending` before `funded`. Design your UI to await the event, not block.
-
-### 3. Inject the release hook
-
-RivoKit does **not** verify the physical world — you decide when funds are released:
-
-```ts
-await rivokit.release(order.id, { kind: "milestone",      ref: "M-42" });   // B2B
-await rivokit.release(order.id, { kind: "access_granted", ref: "LIC-1" });  // digital
-await rivokit.release(order.id, { kind: "delivery",       ref: "TRK-9" });  // physical (trusted input)
-```
-
-On release, RivoKit runs `capture`, then swaps USDC→EURC with `stopLimit = priceEUR` — the recipient receives **≥ €P or the swap reverts** (funds safe in escrow). Any positive surplus is rebated to the buyer.
-
-### 4. Refund
-
-```ts
-await rivokit.refund(order.id);   // escrow.void/refund → bridge USDC back to receivingChain
-```
-
-### 5. Webhooks & status
-
-```ts
-rivokit.on("funded",   ({ orderId })                               => notifyReceiver(orderId));
-rivokit.on("released", ({ orderId, eurcOutMinor, rebateMinor })    => updateUI(orderId, eurcOutMinor));
-rivokit.on("refunded", ({ orderId, chain })                        => updateUI(orderId));
-
-const order = await rivokit.status(order.id);
-const payout = rivokit.payoutFor(order.id);   // the MOCK instruction emitted on release
-```
-
-Register the Circle webhook endpoints (`transactions.*`, `gateway.deposit.finalized`, `cpn.*`) and **verify their signatures**.
-
-### 6. Cash out to fiat
-
-The SDK's own `payout` module still emits a **`MOCK`** instruction on release — it is labelled as such and is not a bank transfer. The real fiat exit is the [CPN off-ramp](#fiat-off-ramp-cpn), driven separately over the recipient's accumulated balance.
-
-## SDK API reference
-
-### Settlement — `createRivoKit(deps)`
-
-| Method | Returns | Description |
-|---|---|---|
-| `createRivoKit(deps)` | `RivoKit` | Compose the SDK from injected modules (see `RivoKitDeps` below) |
-| `createOrder(params)` | `Promise<Order>` | Screen payer/receiver, lock the FX quote, store the order |
-| `fund(orderId, opts?)` | `Promise<void>` | Multi-chain USDC → Arc → `escrow.authorize`. `opts.signature` relays a browser-signed ERC-3009 |
-| `release(orderId, proof)` | `Promise<void>` | `capture` → floored swap → payout instruction |
-| `refund(orderId)` | `Promise<void>` | `void`/`refund` + bridge-back to `receivingChain` |
-| `status(orderId)` | `Promise<Order>` | Current order |
-| `payoutFor(orderId)` | `PayoutInstruction \| undefined` | The MOCK instruction emitted on release |
-| `on/off(event, handler)` | `void` | Subscribe / unsubscribe to status events |
-| `estimateSwap(params)` | `Promise<SwapEstimate>` | FX quote without executing |
-
-Money crosses the SDK boundary as **`bigint` minor units** going in and **strings** coming out (the `Order` wire type) — never a float, in either direction.
-
-```ts
-type RivoKitDeps = {
-  store: OrderStore; escrow: Escrow; fx: SettlementFx; bridge: Bridge;
-  fund: FundExecutor;              // injected: the host's environment signs & relays
-  config: RivoKitConfig;
-  payRebate?: RebatePayer;         // returns the surplus to the payer; omit → it stays with the seller
-  compliance?: ComplianceGate;     // screens BEFORE an order is stored
-  emitter?: Emitter;
-  operatorGas?: () => Promise<bigint>;   // paired with config.minOperatorGasWei
-  refundBridgeParams?: (order: OrderRecord) => BridgeParams | undefined;  // omit → refund stays on Arc
-  now?: () => number;              // injected for deterministic tests
-  salt?: () => bigint;
-};
-
-type CreateOrderParams = {
-  payer: Address; receiver: Address;
-  priceEURMinor: bigint;               // micro-EURC — guaranteed ≥ this to the recipient
-  receivingChain: string;              // refund destination
-  wedge: "contractor_payout" | "digital_goods" | "invoice" | "physical_demo";
-  mode?: "escrow" | "direct";          // default "escrow"
-  bufferBps?: number;                  // default 150 (1.5%) — FX cushion + rebate source
-  feeBps?: number;                     // per-order override of config.feeBps
-  feeReceiver?: Address;               // per-order override of config.feeReceiver
-};
-
-type OrderState =
-  | "created" | "funding_pending" | "funded"
-  | "settlement_pending" | "shipped" | "released"
-  | "refund_pending" | "refunded" | "failed";
-```
-
-The timeout policy is **not** a parameter — it is derived from the `wedge`, because the strength of the available proof is what should decide who an expiry favours: strong proof (B2B, digital) → `auto_capture`; weak proof (physical) → `reclaim`.
-
-### Events
-
-| Event | Payload |
+| Contract | Address |
 |---|---|
-| `funding_pending` / `funded` | `{ orderId }` |
-| `released` | `{ orderId, eurcOutMinor, rebateMinor }` |
-| `refund_pending` / `refunded` | `{ orderId, chain }` |
+| `AuthCaptureEscrow` | [`0x6bfd1895…700253`](https://testnet.arcscan.app/address/0x6bfd1895d519d2ec936038824b8c7ab4ff700253) |
+| `ERC3009PaymentCollector` | [`0x1a9cb462…fb77b0`](https://testnet.arcscan.app/address/0x1a9cb4622e0b2985a6e2a6a3f5be613309fb77b0) |
+| `OperatorRefundCollector` | [`0x6d6d512e…70ab32`](https://testnet.arcscan.app/address/0x6d6d512e3a0d26d22a69127b98460001ef70ab32) |
+| `TokenStore` (deployed by the escrow) | [`0x5f903018…52997D`](https://testnet.arcscan.app/address/0x5f9030187dc31551E7B37d5343207FaeC752997D) |
 
-### Off-ramp — `createCpnRamp(params)`
+RivoKit writes no Solidity of its own. `contracts/` holds only the compiled
+artifacts plus the provenance and re-verification recipe — see
+[`contracts/README.md`](contracts/README.md).
 
-| Method | Returns | Description |
-|---|---|---|
-| `quote(amount)` | `Promise<RampQuote>` | Lock rate + fees. Fix exactly one side: `sourceAmount` or `destinationAmount` |
-| `prepare(params)` | `Promise<{ payment, transaction }>` | Encrypt PII, create payment + Permit2 intent. **Moves nothing** |
-| `submit(args, signer)` | `Promise<CpnTransaction>` | Sign + broadcast. **Irreversible** |
-| `status(paymentId)` | `Promise<CpnPayment>` | Poll the async lifecycle |
+Collectors bind the escrow as an `immutable`: one pointed at the wrong escrow
+**still deploys** and is then permanently useless. `check-cpp.mjs` asserts the
+wiring rather than assuming it.
 
-| Helper | Description |
-|---|---|
-| `verifyAndInterpretCpn(params)` | Verify the Circle signature, then normalize the webhook. Throws on a bad signature |
-| `applyPaymentEvent(state, event)` | Forward-only reducer; reports `no-op \| duplicate \| illegal` instead of regressing |
-| `rfiEffect(event)` | Whether an RFI blocks or fails the payment |
-| `isPointOfNoReturn(txState)` | `BROADCASTED` or later — funds have irreversibly left |
-
-### Invariants enforced by the SDK
-
-1. The recipient receives **≥ `priceEURMinor`** or the swap reverts (funds safe).
-2. Refunds always go to the recorded `receivingChain`.
-3. `rebate = max(0, actualOutput − priceEURMinor)`.
-4. ERC-3009 nonce is single-use (anti-replay).
-5. Money is always **integer minor units** — never a float.
-6. Illegal state sequences are unrepresentable: the machine refuses a `capture` on an unfunded order before it can reach the escrow and revert.
-7. A CPN payment only ever moves forward; a duplicate or late webhook after a terminal state is ignored, not replayed.
-
-## Chains, tokens & constants
-
-> Testnet addresses may change — verify at `docs.arc.io/arc/references/contract-addresses`.
+## Chain constants
 
 | Item | Value |
 |---|---|
@@ -535,113 +235,230 @@ The timeout policy is **not** a parameter — it is derived from the `wedge`, be
 | RPC | `https://rpc.testnet.arc.network` |
 | Explorer | `https://testnet.arcscan.app` |
 | Faucet | `https://faucet.circle.com` |
-| USDC | `0x3600000000000000000000000000000000000000` (6 decimals, native gas) |
-| EURC | `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a` (6 decimals) |
-| Gateway Wallet | `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` (same on all chains) |
-| Permit2 | `0x000000000022D473030F116dDEE9F6B43aC78BA3` (CPN pulls the off-ramp amount through this) |
+| USDC | `0x3600…0000` — 6 decimals as ERC-20, **18 as native gas** |
+| EURC | `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a` |
+| Gateway Wallet | `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` |
+| Permit2 | `0x000000000022D473030F116dDEE9F6B43aC78BA3` |
 
-Note that Arc's USDC is the **native gas token**, with 18 decimals as gas and 6 as an ERC-20 — a distinction that has to be respected in both directions.
+## Environment
+
+Copy `.env.example` → `.env.local` (gitignored, never commit). These are the
+names the code actually reads.
+
+```bash
+CIRCLE_API_KEY=            CIRCLE_ENTITY_SECRET=      CIRCLE_BLOCKCHAIN=ARC-TESTNET
+KIT_KEY=                   # App Kit — FX swap
+CIRCLE_CPN_KEY=            # fiat off-ramp — SERVER-ONLY, never import client-side
+CIRCLE_RAMP_KEY=           # Circle Mint redeem — optional, unproven path
+NEXT_PUBLIC_ARC_RPC_URL=https://rpc.testnet.arc.network
+DEPLOYER_PRIVATE_KEY=      RELAYER_PRIVATE_KEY=       BUYER_PRIVATE_KEY=
+NEXT_PUBLIC_SUPABASE_URL=  SUPABASE_SECRET_KEY=
+
+# written by `npm run setup` — do not fill by hand
+NEXT_PUBLIC_RIVO_ESCROW_ADDRESS=  NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS=
+NEXT_PUBLIC_RIVO_REFUND_COLLECTOR_ADDRESS=
+OPERATOR_WALLET_ID=  OPERATOR_ADDRESS=  MERCHANT_ADDRESS=
+
+# demo knobs (optional, read by demo/lib/rivokit.server.ts)
+RIVO_FEE_BPS=25            # operator fee at capture; 0 = fully subsidised
+RIVO_FEE_RECEIVER=         # default: OPERATOR_ADDRESS
+MIN_OPERATOR_GAS_USDC=0.5  # createOrder is refused below this operator gas float
+```
+
+The deployer and the operator must be **different** keys — the operator is hot,
+signs every payment, and must not also hold deploy authority.
+
+## API
+
+```ts
+import { createRivoKit, createCpnRamp } from "rivokit";
+```
+
+**Settlement — `createRivoKit(deps)`**, deps: `{store, escrow, fx, bridge, fund, config, compliance?, emitter?, payRebate?, operatorGas?, refundBridgeParams?}`
+
+| Method | Description |
+|---|---|
+| `createOrder({payer, receiver, priceEURMinor, receivingChain, wedge, mode?, bufferBps?})` | screen → lock quote → store |
+| `fund(orderId, opts?)` | multi-chain USDC → Arc → `authorize`. `opts.signature` relays a browser-signed ERC-3009 |
+| `release(orderId, proof)` | `capture` → floored swap → payout instruction (MOCK) |
+| `refund(orderId)` | `void`/`refund` + bridge-back to `receivingChain` |
+| `status(orderId)` · `payoutFor(orderId)` | current order · the MOCK instruction (both async; the instruction is persisted, so it survives a restart) |
+| `estimateSwap({address, amountInMinor})` | FX quote without executing |
+| `on/off(event, handler)` | `funding_pending` · `funded` · `released` · `refund_pending` · `refunded` |
+
+`released` carries `{orderId, eurcOutMinor, rebateMinor}`. `OrderState`:
+`created · funding_pending · funded · settlement_pending · shipped · released ·
+refund_pending · refunded · failed`.
+
+**Off-ramp — `createCpnRamp({apiKey, corridor})`**: `quote` · `prepare` (safe) ·
+`submit` (irreversible) · `status`. Helpers: `verifyAndInterpretCpn` (throws on
+a bad signature), `applyPaymentEvent` (forward-only reducer), `rfiEffect`,
+`isPointOfNoReturn`.
+
+Money crosses the boundary as **`bigint` minor units** in and **strings** out —
+never a float. Signing is always **injected**; no module holds a key.
+
+Corridors, read live from `GET /v1/cpn/payments/requirements`:
+
+| Corridor | Method | Beneficiary fields | Min |
+|---|---|---|---|
+| EUR | SEPA | `IBAN`, `RECIPIENT_LEGAL_NAME` | 11 USDC |
+| BRL | PIX | `RECIPIENT_ID_NUMBER`, `RECIPIENT_EVP` | 10 USDC |
+| MXN | SPEI | `CLABE` + national ID | 11 USDC |
+| USD | WIRE | `BANK_NAME`, `SWIFT_CODE`, `BANK_COUNTRY`, `ACCOUNT_NUMBER`, `RECIPIENT_LEGAL_NAME` | 61 USDC |
+
+### Invariants the SDK enforces
+
+1. The recipient receives **≥ `priceEURMinor`** or the swap reverts, funds safe.
+2. Refunds always go to the recorded `receivingChain`.
+3. `rebate = max(0, actualOutput − priceEURMinor)`.
+4. ERC-3009 nonces are single-use (anti-replay).
+5. Money is always integer minor units — never a float.
+6. Illegal state sequences are unrepresentable: a `capture` on an unfunded order
+   is refused before it can reach the escrow and revert.
+7. A CPN payment only moves forward; a duplicate or late webhook after a
+   terminal state is ignored, not replayed.
+
+## Scripts
+
+Everything under `scripts/` hits real services and needs `.env.local`.
+
+| Group | Scripts |
+|---|---|
+| **Setup / health** | `preflight` (read-only prereq check) · `setup` (deploy, idempotent) · `check-cpp` (escrow↔collector wiring, 8 assertions) · `check-hash` (off-chain `getPaymentInfoHash` vs on-chain `getHash`) · `check-operator` (grants + proves the operator's USDC allowance to the refund collector) · `sync-env` |
+| **Live proofs** | `live-phase1/1b/2/2-chain` · `live-funding` · `live-bridge` · `live-unified` · `live-refund` · `live-recovery` (capture ok, swap misses floor, retry wins) · `live-charge` (direct mode) · `live-compliance` · `live-sdk` (full flow through the facade) · `live-scenario` · `live-ramp*` |
+| **API probes** | `probe-cpn*` (quote, payment, status, magic values) · `probe-swap` · `probe-mint*` |
+| **Demo utils** | `demo-topup` (fund the buyer on Sepolia + Gateway) · `reset-demo` (wipe orders) |
 
 ## Testing
 
-Three layers, because Arc cannot be faithfully forked:
+- **Unit** — `npm test`, 261 green / 18 files, no credentials. State machine,
+  unit conversions, quote/rebate math, fee gross-up round-trip
+  (`netOfFee(grossUpForFee(x)) ≥ x`), facade composition, compliance gating,
+  webhook ECDSA verification, ERC-3009 sign+recover, the whole CPN layer.
+- **Live proofs** — `scripts/live-*.mjs` against Arc Testnet itself.
+- **API probes** — `scripts/probe-*.mjs` map real service behaviour instead of
+  assuming it (CPN response shapes, per-corridor requirements, sandbox magic
+  values).
 
-- **Unit tests** — `npm test`, **261 green across 18 files**, no credentials required. Cover the pure logic: the order state machine, unit conversions, quote/rebate math, the operator-fee gross-up (round-trip property: `netOfFee(grossUpForFee(x)) ≥ x`), the SDK facade's composition, event routing, compliance gating, webhook ECDSA verification, the gasless ERC-3009 authorization (signed and recovered against a real key), and the CPN layer (client, JWE encryption, EIP-712 witness signing, and the forward-only payment reducer).
-- **Live proofs** (`scripts/live-*.mjs`) exercise every contract-touching path against **Arc Testnet itself** — fund → capture → floored swap → payout, refund with bridge-back, multi-chain funding via bridge and unified balance, and the full flow end-to-end through the SDK.
-- **API probes** (`scripts/probe-*.mjs`) map real service behaviour rather than assuming it: CPN quote/payment/status shapes, the per-corridor requirements, and the sandbox magic values (`ORIGINATOR_NAME: "Failed"` / `"AsyncSuccess"`) used to confirm the state model in `cpn-state.ts` matches the statuses CPN actually emits.
+Foundry **fork tests prove nothing here**: Arc's USDC-as-gas and its
+compliance precompiles do not exist on a local EVM, so a fork test of those
+paths passes without testing anything.
 
-Foundry **fork** tests are deliberately not the source of truth here: Arc's USDC-as-gas and its blocklist/compliance precompiles do not exist on a local EVM, so a fork test of those paths passes without testing anything. The live scripts run against the real chain instead — slower, but they actually prove the behaviour.
-
-### What is proven live
+### Proven live vs not
 
 | Path | Status |
 |---|---|
-| Escrow lifecycle — authorize / capture / void / refund / reclaim | ✅ proven on Arc Testnet |
-| Floored USDC→EURC swap (`stopLimit`) | ✅ proven |
-| Multi-chain funding — CCTP bridge + Gateway unified balance (server-held key) | ✅ proven |
-| Refund with bridge-back to origin chain | ✅ proven |
-| Full flow end-to-end through the SDK facade | ✅ proven |
-| Operator fee (25 bps) split at capture, floor still met | ✅ proven — capture split `0.008784` → operator and `3.504835` → merchant in tx `0x7910f1…037420`, with the €2.50 floor intact |
-| Two-wallet mode — the floor forwarded merchant → the seller's own wallet | ✅ proven — €2.50 EURC forwarded in tx `0x11bf41…559bf4` |
-| **CPN off-ramp EUR/SEPA — quote → prepare → broadcast → `COMPLETED`** | ✅ **proven**, twice (15 USDC → 12.92 EUR, on-chain tx `COMPLETED`) |
-| CPN corridors BRL/PIX, MXN/SPEI, USD/WIRE | ⚠️ requirements + quote + prepare verified live; **no completed settlement** |
-| Browser-wallet funding rails — Gateway spend / CCTP bridge signed by the connected wallet | ❌ `demo/app/wallet-rails.ts` is written but **never executed on-chain** |
-| CPN cash-out signed by the seller's own wallet (Permit2 approve + submit) | ❌ still a server key — see Limitations |
-| Circle Mint redeem (`CIRCLE_RAMP_KEY`) | ❌ wired, **never executed** — see Limitations |
+| Escrow lifecycle · floored swap · multi-chain funding · refund bridge-back · full flow via the facade | ✅ proven on Arc |
+| Operator fee 25 bps split at capture, floor intact | ✅ `0x7910f1…037420` |
+| Two-wallet mode — floor forwarded merchant → seller wallet | ✅ `0x11bf41…559bf4` |
+| CPN EUR/SEPA end-to-end → `COMPLETED` | ✅ twice (15 USDC → 12.92 EUR) |
+| CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
+| Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
+| Seller-signed cash-out (Permit2 approve + submit) | ❌ still a server key |
+| Circle Mint redeem | ❌ wired, never run once |
+
+## Gotchas that already cost time
+
+- **Arc USDC is the gas token** — 18 decimals as gas, 6 as ERC-20. Factor `1e12`.
+- **The operator's USDC allowance is bound to the refund collector address.**
+  Redeploy the collector → allowance is 0 → `refund` reverts. Re-run
+  `node scripts/check-operator.mjs` after any redeploy.
+- **Public Arc RPCs rate-limit hard** (~3rd call). Use the rotation in
+  `src/lib/rpc.ts`; design scripts to be *resumable*, not *repeatable*.
+- **CPN quotes expire in ~30–60s.** Prepare-then-hesitate → `PAYMENT_EXPIRED`
+  (`PM09000`). The sender must **approve Permit2** first or the broadcast fails.
+- **`submit` cannot be cancelled** past `BROADCASTED`. Always gate it behind an
+  explicit confirmation.
+- **`api.circle.com` has been DNS-hijacked here**, surfacing as a bare
+  `fetch failed` or a misleading `CERT_HAS_EXPIRED`. Call
+  `installCircleDnsPinning()` — **never** disable TLS verification.
+- Meta-transactions that fully drain a nonce-zero Arc account revert.
 
 ## Security model
 
-- **Non-custodial** — funds are held by the escrow contract (Commerce Payments Protocol); the operator only submits txs & earns a fee, and **cannot redirect funds**.
-- **Floor guarantee** — `stopLimit` ensures the recipient gets ≥ €P or a safe revert.
-- **Anti-replay** — single-use ERC-3009 authorization nonces; unique idempotency keys off-chain.
-- **Injected signing** — no module holds a key. Both money-moving steps (`FundExecutor`, `ramp.submit`) take the signer from the host, so broadcasting is always an explicit decision, never a side effect.
-- **PII never travels in the clear** — travel-rule and beneficiary data are JWE-encrypted to the quote's certificate key before leaving the process.
-- **Unverified webhooks reach nothing** — `verifyAndInterpretCpn` checks the Circle signature before any reducer sees a body, and the reducers refuse to regress out of a terminal state.
-- **Server-side policy** — validation & screening (Circle Compliance Engine) on the server, not the client. `CIRCLE_CPN_KEY` is server-only and must never be imported into a client component.
-- **Secrets** — credentials via environment variables; **never** committed.
+- **Non-custodial** — funds are held by the escrow contract (Commerce Payments
+  Protocol). The operator only submits transactions and earns a fee, and
+  **cannot redirect funds**.
+- **Floor guarantee** — `stopLimit` ensures the recipient gets ≥ €P or a safe
+  revert. It is enforced by the chain, not by application code.
+- **Anti-replay** — single-use ERC-3009 authorization nonces; unique
+  idempotency keys off-chain.
+- **Injected signing** — no module holds a key. Both money-moving steps
+  (`FundExecutor`, `ramp.submit`) take the signer from the host, so broadcasting
+  is always an explicit decision, never a side effect.
+- **PII never travels in the clear** — travel-rule and beneficiary data are
+  JWE-encrypted to the quote's certificate key before leaving the process.
+- **Unverified webhooks reach nothing** — `verifyAndInterpretCpn` checks the
+  Circle signature before any reducer sees a body, and the reducers refuse to
+  regress out of a terminal state.
+- **Server-side policy** — validation and screening (Circle Compliance Engine)
+  run on the server, never the client. `CIRCLE_CPN_KEY` is server-only and must
+  never be imported into a client component.
+- **Separated authority** — deployer, operator and merchant are three distinct
+  wallets; the hot operator key holds no deploy authority.
+- **Secrets** — credentials via environment variables, **never** committed.
 
 Report vulnerabilities privately, not via public issues.
 
 ## Limitations & honest boundaries
 
 - **Testnet / sandbox only**, unaudited — do not use real funds.
-- **The off-ramp is real, but its reach is uneven.** EUR/SEPA is proven to `COMPLETED`. BRL, MXN and USD are verified only as far as `prepare` — their requirements and quotes are live, but no payment has settled on those rails.
-- **Circle Mint redeem has never been run.** `demo/lib/mint.server.ts` and the MintRedeem panel are wired against the sandbox API but have not been executed once, so treat that path as unproven code, not a feature.
-- **The browser-wallet funding rails have never been executed on-chain.** `demo/app/wallet-rails.ts` lets a connected wallet reach Arc itself via Gateway spend or a CCTP bridge from Sepolia — no server secret involved, which is the point — but only the server-signed demo buyer has actually moved funds. The code compiles and is wired into the Buyer panel; it is not proven.
-- **The seller does not yet sign their own cash-out.** Two-wallet mode really does forward the floor to the seller's wallet on-chain, but the Permit2 approval and `ramp.submit` for that balance are still made with a server-held key. The seller holds the EURC and not yet the authority to move it out — closing that gap means the approve and the submit are signed in the seller's browser.
-- **The off-ramp is not wired into `release()`.** Settlement and cash-out are separate surfaces; joining them (a payment record that tracks its own CPN payout) is not done.
-- **The SDK's `payout` module is still a `MOCK`** instruction, clearly labelled as such. It is not a bank transfer.
-- **In production the host must be an onboarded OFI** with CPN, plus KYB/AML on recipients. RivoKit is not a licensed operator and cannot be one for you.
-- **CPN quotes expire in ~30–60 seconds.** Any UI that lets a user pause between prepare and broadcast will produce `PAYMENT_EXPIRED` failures.
-- Depends on Circle: USDC/EURC can be frozen by the issuer; CCTP attestation is centralized; the public Arc RPC rate-limits aggressively, and Arc Testnet may experience downtime.
+- **The off-ramp is real, but its reach is uneven.** EUR/SEPA is proven to
+  `COMPLETED`. BRL, MXN and USD are verified only as far as `prepare` — their
+  requirements and quotes are live, but no payment has settled on those rails.
+- **Circle Mint redeem has never been run.** `demo/lib/mint.server.ts` and the
+  MintRedeem panel are wired against the sandbox API but have not been executed
+  once. Treat it as unproven code, not a feature.
+- **The browser-wallet funding rails have never been executed on-chain.**
+  `demo/app/wallet-rails.ts` lets a connected wallet reach Arc via Gateway spend
+  or a CCTP bridge with no server secret involved — which is the point — but
+  only the server-signed demo buyer has actually moved funds.
+- **The seller does not yet sign their own cash-out.** Two-wallet mode really
+  forwards the floor to the seller's wallet on-chain, but the Permit2 approval
+  and `ramp.submit` for that balance still use a server-held key. The seller
+  holds the EURC and not yet the authority to move it out.
+- **The off-ramp is not wired into `release()`.** Settlement and cash-out are
+  separate surfaces; a payment record that tracks its own CPN payout is not done.
+- **The SDK's `payout` module is still a `MOCK`** instruction, labelled as such.
+  It is not a bank transfer.
+- **RivoKit does not verify the physical world.** The release hook is the host's
+  judgement call; RivoKit checks consistency, it does not prove delivery.
+- **In production the host must be an onboarded OFI** with CPN, plus KYB/AML on
+  recipients. RivoKit is not a licensed operator and cannot be one for you.
+- Depends on Circle: USDC/EURC can be frozen by the issuer, CCTP attestation is
+  centralized, the public Arc RPC rate-limits aggressively, and Arc Testnet can
+  go down.
+- **Mainnet is out of scope** — gated on audit, key timelock/multisig, legal
+  review and OFI onboarding.
 
-## Project structure
+## Structure
 
 ```text
 rivokit/
 ├── src/
-│   ├── sdk/              # RivoKit facade — the one object the flow runs through
-│   ├── orchestrator/     # order state machine + reconciliation (new code)
-│   ├── settlement-fx/    # quote-lock + stopLimit swap + rebate (new code)
-│   ├── ramp/             # CPN off-ramp: client · encrypt · sign · state (new code)
-│   ├── funding/          # App Kit unified balance / bridge
-│   ├── escrow/           # Commerce Payments Protocol + gasless ERC-3009
-│   ├── payout/           # payout instruction (MOCK) + refund bridge-back
-│   ├── events/           # webhooks + signature verification + compliance
-│   ├── constants/        # verified Arc addresses & chain config
-│   └── lib/              # RPC rotation, Circle DNS pinning
-├── scripts/              # live proofs (live-*.mjs) + API probes (probe-*.mjs)
-├── demo/                 # Next.js marketplace driving the SDK + off-ramp panels
-└── README.md
+│   ├── sdk/            # RivoKit facade
+│   ├── orchestrator/   # order state machine (new code)
+│   ├── settlement-fx/  # quote-lock + stopLimit swap + rebate (new code)
+│   ├── ramp/           # CPN off-ramp: client · encrypt · sign · state (new code)
+│   ├── funding/        # App Kit unified balance / bridge
+│   ├── escrow/         # Commerce Payments Protocol + gasless ERC-3009
+│   ├── payout/         # payout instruction (MOCK) + refund bridge-back
+│   ├── events/         # webhooks + signature verification + compliance
+│   ├── constants/      # verified Arc addresses & chain config
+│   └── lib/            # RPC rotation, Circle DNS pinning
+├── contracts/          # pinned CPP artifacts + provenance & verification recipe
+├── infra/supabase/     # order-store migrations (shipped with the package)
+├── scripts/            # setup · health checks · live proofs · API probes
+├── demo/               # Next.js marketplace driving the SDK
+└── README_v0.md        # the long-form original README
 ```
 
-## Roadmap
+## License
 
-**Done, proven live on Arc:** setup → escrow lifecycle → settlement-FX → multi-chain funding + refund → events/compliance → SDK surface → browser-signed funding + marketplace demo → **CPN fiat off-ramp (EUR/SEPA settled end-to-end)** → grossed-up operator fee split at capture → two-wallet mode forwarding the floor to the seller's own wallet.
+Apache-2.0. Testnet-stage sample software for demonstration and education — not
+a licensed financial product, not legal or financial advice. The embedding host
+is fully responsible for the fiat leg, KYB/AML and compliance in its
+jurisdiction.
 
-**Next:**
-
-- Settle the remaining corridors (BRL/PIX, MXN/SPEI, USD/WIRE) past `prepare`.
-- Execute the browser-wallet funding rails on-chain — the code is written, the proof is missing.
-- Move the seller's Permit2 approval and `ramp.submit` into the seller's own browser, so the wallet that holds the EURC is the wallet that spends it.
-- Wire the off-ramp into the order record, so a payment tracks its own CPN payout and webhook-driven state.
-- Exercise or drop the Circle Mint redeem path — unproven code should not ship as a feature.
-- Hardening: retries and reconciliation across the CPN lifecycle.
-
-Mainnet stays out of scope — gated on audit + key timelock/multisig + legal review + OFI onboarding.
-
-## Contributing
-
-Contributions follow phase discipline (read the internal build guide before writing code). Ordinary bugs → issues; security vulnerabilities → report privately. Non-negotiable rules: non-custodial, money as integer minor units, swaps must carry a `stopLimit`, mocks must be labeled, and no credentials/internal docs committed.
-
-## License & disclaimer
-
-Apache-2.0 (following the referenced Circle samples).
-
-RivoKit is testnet-stage sample software for demonstration and educational purposes. It is **not** a licensed financial product and **not** legal/financial advice. The embedding host is fully responsible for the fiat leg, KYB/AML, and compliance in its jurisdiction.
-
----
-
-<div align="center">
-Built for the <b>Build on Arc</b> hackathon — DeFi track.
-</div>
+<div align="center">Built for the <b>Build on Arc</b> hackathon — DeFi track.</div>

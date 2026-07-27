@@ -17,6 +17,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Address, Hex } from "viem";
 import type { PaymentInfo } from "../escrow/payment-info.ts";
+import {
+  fromPayoutWire, toPayoutWire,
+  type PayoutInstruction, type PayoutInstructionWire,
+} from "../payout/mock-payout.ts";
 import { assertTransition, type OrderState } from "./state-machine.ts";
 import type { TimeoutKind, Wedge } from "./policy.ts";
 
@@ -67,6 +71,76 @@ export type RecordPaymentParams = {
   errorReason?: string;
 };
 
+/** A `payments` row as it comes back out — `amount` normalised to string. */
+export type PaymentRecord = {
+  kind: PaymentKind;
+  status: string;
+  tx_hash: string | null;
+  chain: string | null;
+  amount: string | null;
+};
+
+export type CreateOrderParams = {
+  id: string;
+  paymentInfo: PaymentInfo;
+  priceEURMinor: bigint;
+  usdcAmountMinor: bigint | null;
+  bufferBps: number;
+  receivingChain: string;
+  mode: "escrow" | "direct";
+  wedge: Wedge;
+  timeoutKind: TimeoutKind;
+  timeoutDeadline: number;
+  paymentInfoHash: Hex;
+};
+
+export type TransitionPatch = Partial<{
+  eurcOutMinor: bigint;
+  rebateMinor: bigint;
+  failureReason: string;
+  fundedAt: Date;
+  settledAt: Date;
+  usdcAmountMinor: bigint;
+}>;
+
+/**
+ * What the orchestrator needs from persistence — declared here, not inferred
+ * from whichever implementation happens to exist.
+ *
+ * `createOrderStore` below is the Supabase/Postgres implementation, and it is
+ * the only one shipped. Anything else that satisfies this interface can be
+ * injected into `createRivoKit`, with one caveat worth stating in the type's
+ * own documentation rather than discovering later: the shipped implementation
+ * leans on database CHECK constraints as a SECOND guard (released without
+ * `eurc_out`, a rebate that is not the surplus, a duplicate payment nonce). A
+ * store without those constraints keeps the application-level guard in
+ * `assertTransition` but silently loses the one that survives an application
+ * bug. Implement the constraints, or accept a weaker guarantee knowingly.
+ */
+export interface OrderStore {
+  create(params: CreateOrderParams): Promise<OrderRecord>;
+  get(id: string): Promise<OrderRecord | null>;
+  transition(id: string, to: OrderState, patch?: TransitionPatch): Promise<OrderRecord>;
+  recordPayment(params: RecordPaymentParams): Promise<unknown>;
+  /** Returns the existing row on a nonce collision instead of throwing. */
+  recordPaymentIdempotent(params: RecordPaymentParams): Promise<unknown>;
+  recordEvent(params: {
+    orderId?: string;
+    type: string;
+    payload: unknown;
+    sigVerified?: boolean;
+  }): Promise<void>;
+  listPayments(orderId: string): Promise<PaymentRecord[]>;
+  listOrders(limit?: number): Promise<OrderRecord[]>;
+  listEvents(orderId: string): Promise<Array<{ type: string; payload: unknown; received_at: string }>>;
+  listPending(): Promise<OrderRecord[]>;
+  findOrderIdByTxHash(txHash: string): Promise<string | null>;
+  /** Persist the payout instruction emitted on release. */
+  savePayout(orderId: string, payout: PayoutInstruction): Promise<void>;
+  getPayout(orderId: string): Promise<PayoutInstruction | null>;
+  deleteOrder(id: string): Promise<void>;
+}
+
 const iso = (unixSeconds: number) => new Date(unixSeconds * 1000).toISOString();
 
 /**
@@ -103,7 +177,7 @@ function normalizeAmount<T>(row: T): T {
   return out as T;
 }
 
-export function createOrderStore(url: string, serviceKey: string) {
+export function createOrderStore(url: string, serviceKey: string): OrderStore {
   // Service role: RLS is deny-all with no policies, so only this key can read
   // or write. It must never reach a browser.
   const db: SupabaseClient = createClient(url, serviceKey, {
@@ -353,6 +427,36 @@ export function createOrderStore(url: string, serviceKey: string) {
       return (data?.order_id as string | undefined) ?? null;
     },
 
+    /**
+     * Persist the payout instruction emitted on release.
+     *
+     * It lives on the order rather than in process memory because the host
+     * reads it later, from another request and possibly another instance — an
+     * in-memory copy answers `null` after any restart, which reads as "no
+     * payout was ever owed" rather than "this process forgot".
+     *
+     * The `MOCK` label is re-asserted by a CHECK constraint in the schema, so a
+     * future caller cannot store an instruction that claims to be real.
+     */
+    async savePayout(orderId: string, payout: PayoutInstruction): Promise<void> {
+      const { error } = await db
+        .from("orders")
+        .update({ payout: toPayoutWire(payout) })
+        .eq("id", orderId);
+      fail("savePayout", error);
+    },
+
+    async getPayout(orderId: string): Promise<PayoutInstruction | null> {
+      const { data, error } = await db
+        .from("orders")
+        .select("payout")
+        .eq("id", orderId)
+        .maybeSingle();
+      fail("getPayout", error);
+      const wire = data?.payout as PayoutInstructionWire | null | undefined;
+      return wire ? fromPayoutWire(wire) : null;
+    },
+
     async deleteOrder(id: string) {
       const { error } = await db.from("orders").delete().eq("id", id);
       fail("deleteOrder", error);
@@ -360,5 +464,4 @@ export function createOrderStore(url: string, serviceKey: string) {
   };
 }
 
-export type OrderStore = ReturnType<typeof createOrderStore>;
 export type { Address };

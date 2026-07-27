@@ -15,6 +15,11 @@ import { arcTestnet } from "viem/chains";
 import { createCircleClient } from "./lib/circle.mjs";
 import { arcTransport, sleep } from "../src/lib/rpc.ts";
 import { USDC_ADDRESS } from "../src/constants/arc.ts";
+import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
+
+// Without this, api.circle.com resolves to an ISP interception host here and
+// every Circle call dies as a bare "fetch failed".
+installCircleDnsPinning();
 
 const env = {};
 for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
@@ -39,10 +44,10 @@ const allowance = () =>
     args: [OPERATOR, REFUND_COLLECTOR],
   });
 
-console.log("Uji jalur operator Circle DCW\n");
+console.log("Circle DCW operator path test\n");
 console.log(`  operator          ${OPERATOR}`);
 console.log(`  refund collector  ${REFUND_COLLECTOR}`);
-console.log(`  saldo USDC        ${formatUnits(
+console.log(`  USDC balance      ${formatUnits(
   await client.readContract({
     address: USDC_ADDRESS,
     abi: erc20Abi,
@@ -51,7 +56,7 @@ console.log(`  saldo USDC        ${formatUnits(
   }),
   6,
 )}`);
-console.log(`  allowance awal    ${formatUnits(await allowance(), 6)}\n`);
+console.log(`  initial allowance  ${formatUnits(await allowance(), 6)}\n`);
 
 let tx;
 try {
@@ -61,10 +66,10 @@ try {
     abiFunctionSignature: "approve(address,uint256)",
     abiParameters: [REFUND_COLLECTOR, maxUint256.toString()],
   });
-  console.log(`  contractExecution diterima — id ${tx.id}, state ${tx.state}`);
+  console.log(`  contractExecution accepted — id ${tx.id}, state ${tx.state}`);
 } catch (e) {
-  console.error("  GAGAL contractExecution:", e.message);
-  console.error("\n  => Jalur Circle DCW tidak bisa dipakai untuk operator.");
+  console.error("  FAILED contractExecution:", e.message);
+  console.error("\n  => The Circle DCW path cannot be used for the operator.");
   process.exit(1);
 }
 
@@ -82,20 +87,20 @@ for (let i = 0; i < 40; i++) {
 }
 
 if (!final) {
-  console.error("  GAGAL: timeout menunggu transaksi.");
+  console.error("  FAILED: timed out waiting for the transaction.");
   process.exit(1);
 }
 
-console.log(`  state akhir       ${final.state}`);
-console.log(`  txHash            ${final.txHash ?? "(tidak ada)"}`);
+console.log(`  final state        ${final.state}`);
+console.log(`  txHash            ${final.txHash ?? "(none)"}`);
 if (final.errorReason) console.log(`  errorReason       ${final.errorReason}`);
 
 await sleep(1000);
 const after = await allowance();
 const granted = after > 0n;
-console.log(`  allowance akhir   ${after === maxUint256 ? "tak terbatas" : formatUnits(after, 6)}`);
+console.log(`  final allowance   ${after === maxUint256 ? "unlimited" : formatUnits(after, 6)}`);
 
 console.log(
-  `\n${granted ? "BERHASIL — operator Circle DCW bisa memanggil kontrak." : "GAGAL — allowance tidak berubah."}`,
+  `\n${granted ? "SUCCESS — a Circle DCW operator can call the contract." : "FAILED — the allowance did not change."}`,
 );
 process.exit(granted ? 0 : 1);

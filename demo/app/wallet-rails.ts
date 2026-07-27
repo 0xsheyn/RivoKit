@@ -102,6 +102,6 @@ export async function walletBridgeToArc(provider: Eip1193, amountMinor: bigint):
     toChain: BridgeChain.Arc_Testnet,
     amountMinor,
   });
-  if (!res.mintTxHash) throw new Error("bridge tak menghasilkan mint");
+  if (!res.mintTxHash) throw new Error("bridge produced no mint");
   return res.mintTxHash;
 }

@@ -62,13 +62,13 @@ console.log(`PAYMENT ${payment.id} (${payment.status})  |  TX ${transaction.id} 
 console.log(`  sender ${sender}  → settlement ${transaction.messageToBeSigned.message?.spender}`);
 
 if (!CONFIRM) {
-  console.log("\nDRY RUN — tidak submit. Untuk broadcast (TAK-BALIK):");
+  console.log("\nDRY RUN — not submitting. To broadcast (IRREVERSIBLE):");
   console.log("  CONFIRM=BROADCAST node scripts/live-ramp-submit.mjs");
   process.exit(0);
 }
 
 // 3. Sign + submit — POINT OF NO RETURN.
-console.log("\n⚠️  BROADCAST — menandatangani & mengirim. USDC sender akan keluar tak-balik.");
+console.log("\n⚠️  BROADCAST — signing and sending. The sender's USDC leaves irreversibly.");
 const submitted = await ramp.submit({ paymentId: payment.id, transaction }, signer);
 console.log(`SUBMITTED tx ${submitted.id}: ${submitted.status}`);
 
@@ -85,4 +85,4 @@ for (let i = 0; i < 12; i++) {
   }
   if (["COMPLETED", "FAILED"].includes(cur.status)) break;
 }
-console.log(`\nStatus akhir: ${last}`);
+console.log(`\nFinal status: ${last}`);

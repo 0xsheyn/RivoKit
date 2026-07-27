@@ -29,6 +29,7 @@
   "sideEffects": false,
   "scripts": {
     "dev": "next dev demo",
+    "setup": "node scripts/setup.mjs",
     "build": "next build demo",
     "build:lib": "tsc -p tsconfig.build.json",
     "prepack": "npm run build:lib",

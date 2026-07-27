@@ -6,9 +6,9 @@
  *      address and a known OFAC-sanctioned one — through the same
  *      createCircleScreener the SDK uses (so the module is exercised, not mocked).
  *   2. The lifecycle emitter delivering a state change to a host handler
- *      (US-06 "status host sinkron").
+ *      (US-06 "host status stays in sync").
  *   3. A mock payout instruction for a settled order — structured, and stamped
- *      MOCK end to end (exit criterion: "instruksi payout berlabel mock terbit").
+ *      MOCK end to end (exit criterion: "a mock-labelled payout instruction is issued").
  *
  *   node scripts/live-compliance.mjs
  */
@@ -41,7 +41,7 @@ const info = (m) => console.log(`    ${m}`);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 const circle = createCircleClient({ apiKey: env.CIRCLE_API_KEY, entitySecret: env.CIRCLE_ENTITY_SECRET });
@@ -51,20 +51,20 @@ const gate = createComplianceGate(screener);
 
 // ── 1. Compliance screening (live) ─────────────────────────────────────
 
-step("Langkah 1 — screening alamat via Circle Compliance Engine (LIVE)");
+step("Step 1 — address screening via the Circle Compliance Engine (LIVE)");
 
 info(`chain ${CHAIN}`);
 let goodResult;
 try {
   goodResult = await gate.assertAllowed(GOOD, CHAIN, "funding");
-  ok(`alamat baik ${GOOD} → ${goodResult.decision}`);
-  record(goodResult.decision === "APPROVED", "alamat merchant lolos screening (APPROVED)");
+  ok(`clean address ${GOOD} → ${goodResult.decision}`);
+  record(goodResult.decision === "APPROVED", "the merchant address passes screening (APPROVED)");
 } catch (e) {
-  console.log(`    alamat baik diblok tak terduga: ${e.message}`);
-  record(false, "alamat merchant lolos screening", e.message?.slice(0, 80));
+  console.log(`    a clean address was unexpectedly blocked: ${e.message}`);
+  record(false, "the merchant address passes screening", e.message?.slice(0, 80));
 }
 
-step("Langkah 2 — screening alamat tersanksi (round-trip live)");
+step("Step 2 — screening a sanctioned address (live round-trip)");
 
 // The proof here is connectivity + a real decision from the engine, NOT the
 // verdict itself: Circle's SANDBOX screening dataset is limited and approves
@@ -73,23 +73,23 @@ step("Langkah 2 — screening alamat tersanksi (round-trip live)");
 // live engine answers.
 try {
   const raw = await screener(SANCTIONED, CHAIN);
-  info(`engine (sandbox) → ${raw.decision} untuk alamat tersanksi ${SANCTIONED}`);
+  info(`engine (sandbox) → ${raw.decision} for sanctioned address ${SANCTIONED}`);
   if (raw.decision === "APPROVED") {
-    info("catatan: sandbox tak menandai alamat ini; di mainnet gate akan memblokir DENIED.");
+    info("note: the sandbox does not flag this address; on mainnet the gate would block on DENIED.");
   }
-  record(typeof raw.decision === "string", "engine live mengembalikan keputusan (konektivitas + parse)", raw.decision);
+  record(typeof raw.decision === "string", "the live engine returns a decision (connectivity + parse)", raw.decision);
 } catch (e) {
   if (e instanceof ComplianceBlockedError) {
-    ok(`gate memblokir: ${e.decision}`);
-    record(true, "alamat tersanksi diblokir gate (COMPLIANCE_BLOCKED)", e.decision);
+    ok(`gate blocked: ${e.decision}`);
+    record(true, "the gate blocks a sanctioned address (COMPLIANCE_BLOCKED)", e.decision);
   } else {
     throw e;
   }
 }
 
-// ── 3. Emitter — status host sinkron ───────────────────────────────────
+// ── 3. Emitter — host status stays in sync ───────────────────────────────────
 
-step("Langkah 3 — emitter menyampaikan perubahan state ke handler host (US-06)");
+step("Step 3 — the emitter delivers a state change to the host handler (US-06)");
 
 const emitter = createEmitter();
 const received = [];
@@ -103,14 +103,14 @@ const emittedReleased = emitter.emitForState("released", {
 });
 const emittedSilent = emitter.emitForState("settlement_pending", { orderId: "ord_demo" });
 
-info(`event terkirim: ${received.map(([n]) => n).join(", ")}`);
-record(emittedFunded === "funded" && emittedReleased === "released", "state → event nama cocok");
-record(received.length === 2, "handler host menerima kedua event", String(received.length));
-record(emittedSilent === null, "state tanpa-event tidak memancarkan apa pun (settlement_pending)");
+info(`events emitted: ${received.map(([n]) => n).join(", ")}`);
+record(emittedFunded === "funded" && emittedReleased === "released", "state → event name matches");
+record(received.length === 2, "the host handler received both events", String(received.length));
+record(emittedSilent === null, "an event-less state emits nothing (settlement_pending)");
 
-// ── 4. Payout instruction — berlabel MOCK ──────────────────────────────
+// ── 4. Payout instruction — labelled MOCK ──────────────────────────────
 
-step("Langkah 4 — instruksi payout terbit, berlabel MOCK (exit criterion)");
+step("Step 4 — the payout instruction is issued, labelled MOCK (exit criterion)");
 
 const payout = mockPayout({
   orderId: "ord_demo",
@@ -121,17 +121,17 @@ const payout = mockPayout({
 });
 
 console.log(JSON.stringify(payout, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2));
-record(isMockPayout(payout), "instruksi payout dikenali sebagai MOCK");
+record(isMockPayout(payout), "the payout instruction is recognised as MOCK");
 record(payout.label === "MOCK" && payout.executed === false, "label MOCK + executed=false");
-record(payout.target.amountMinor === payout.source.amountMinor, "EUR nominal 1:1 dengan EURC (estimasi)");
-record(/tidak mengeksekusi leg fiat/i.test(payout.disclaimer), "disclaimer menyatakan batas (tak eksekusi fiat)");
+record(payout.target.amountMinor === payout.source.amountMinor, "EUR nominal is 1:1 with EURC (estimate)");
+record(/does not execute the fiat leg/i.test(payout.disclaimer), "the disclaimer states the boundary (no fiat execution)");
 
-// ── Hasil ──────────────────────────────────────────────────────────────
+// ── Result ──────────────────────────────────────────────────────────────
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " Fase 4 TERBUKTI: screening live + status sinkron + payout MOCK."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " Phase 4 PROVEN: live screening + synced status + MOCK payout."),
 );
 process.exit(failed ? 1 : 0);

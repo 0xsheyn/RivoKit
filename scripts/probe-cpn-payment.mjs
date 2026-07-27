@@ -98,7 +98,7 @@ if (payment?.id) {
     console.log("  domain:", JSON.stringify(m?.domain));
     console.log("  types:", Object.keys(m?.types ?? {}).join(", "));
     console.log("  message.spender:", m?.message?.spender, "| witness.to:", m?.message?.witness?.to);
-    console.log("\n(STOP — tidak menandatangani/submit. Broadcast = titik tak-balik.)");
+    console.log("\n(STOP — not signing or submitting. Broadcast is the point of no return.)");
   } catch (e) {
     console.log("\ncreateTransaction:", e?.status ?? "ERR", JSON.stringify(e?.body ?? String(e)).slice(0, 300));
   }
