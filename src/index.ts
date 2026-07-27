@@ -128,8 +128,29 @@ export { handleCircleWebhook } from "./events/webhook-handler.ts";
 export { mockPayout, isMockPayout, type PayoutInstruction } from "./payout/mock-payout.ts";
 
 /* ── Fiat off-ramp (CPN) — separate from the facade on purpose ────────────── */
-export { createCpnRamp, type CpnRamp } from "./ramp/cpn-ramp.ts";
-export { interpretCpnEvent, isPaymentTerminal, type CpnPaymentState } from "./ramp/cpn-state.ts";
+export {
+  createCpnRamp,
+  type CpnRamp,
+  type RampCorridor,
+  type RampQuote,
+  type PrepareParams,
+} from "./ramp/cpn-ramp.ts";
+/** Webhook path. `verifyAndInterpretCpn` checks Circle's signature BEFORE any
+ *  reducer sees the body; `applyPaymentEvent` only ever moves a payment forward. */
+export {
+  verifyAndInterpretCpn,
+  interpretCpnEvent,
+  applyPaymentEvent,
+  canTransitionPayment,
+  isPaymentTerminal,
+  isPointOfNoReturn,
+  rfiEffect,
+  type CpnPaymentState,
+  type CpnTransactionState,
+  type CpnRfiState,
+  type CpnEvent,
+  type ApplyOutcome,
+} from "./ramp/cpn-state.ts";
 
 /* ── Arc constants & chain helpers ────────────────────────────────────────── */
 export {

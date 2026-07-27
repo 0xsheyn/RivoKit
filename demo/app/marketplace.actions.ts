@@ -318,7 +318,7 @@ export async function mpPay(orderId: string, source: PaySource = "arc"): Promise
     if (!order) throw new Error("no such order");
     const amount = BigInt(order.max_amount);
 
-    // Record the intent before moving cross-chain funds so the UI shows "memproses".
+    // Record the intent before moving cross-chain funds so the UI shows it as working.
     if (source !== "arc" && order.state === "created") await store.transition(orderId, "funding_pending");
 
     if (source === "unified") {

@@ -132,7 +132,7 @@ RivoKit is a TypeScript orchestration layer. The only genuinely new code is **`o
 The split is the whole point: **preparing is safe, broadcasting is a decision**. The `signer` is injected rather than held by the module — who signs is the host's environment, exactly like the SDK's `FundExecutor`. In the demo a testnet key stands in for the seller; in production the seller signs in their own wallet.
 
 ```ts
-import { createCpnRamp } from "./src/ramp/cpn-ramp.ts";
+import { createCpnRamp } from "rivokit";
 
 const ramp = createCpnRamp({
   apiKey: process.env.CIRCLE_CPN_KEY!,
@@ -181,7 +181,7 @@ Postal codes are validated per country, and the beneficiary must sit in the dest
 CPN drives payments asynchronously and reports via `cpn.payment.*`, `cpn.rfi.*`, `cpn.transaction.*`, `cpn.refund.*`. `verifyAndInterpretCpn` verifies the Circle signature **before** returning anything, and the reducers only ever move a payment forward — a duplicate or out-of-order webhook after a terminal state is ignored, not replayed.
 
 ```ts
-import { verifyAndInterpretCpn, applyPaymentEvent } from "./src/ramp/cpn-state.ts";
+import { verifyAndInterpretCpn, applyPaymentEvent } from "rivokit";
 
 const event = verifyAndInterpretCpn({ rawBody, signatureBase64, publicKey });  // throws on bad signature
 if (event) {
@@ -223,7 +223,10 @@ npm test             # 261 unit tests, no credentials needed
 Everything supported is exported from the package root — deep imports into `src/` work but move without a version bump:
 
 ```ts
-import { createRivoKit, createEscrow, createSettlementFx, createCpnRamp } from "rivokit";
+import {
+  createRivoKit, createEscrow, createSettlementFx, createCpnRamp,
+  verifyAndInterpretCpn, applyPaymentEvent, grossUpForFee,
+} from "rivokit";
 ```
 
 Runtime dependencies of note: `@circle-fin/app-kit` + `@circle-fin/adapter-viem-v2` (bridge/swap/unified balance), `viem` (chain access and signing), `jose` (JWE encryption of CPN payment data). The order store expects Postgres/Supabase — the migrations under `infra/supabase/migrations/` ship with the package.
@@ -272,22 +275,27 @@ Supabase holds the off-chain order state (`NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_
 ```bash
 cp .env.example .env.local     # fill in the credentials above
 npm run setup                  # deploy escrow (SCP) + create operator/merchant wallets
-npm test                       # 240 unit tests, no credentials needed
+npm test                       # 261 unit tests, no credentials needed
 npm run dev                    # the marketplace demo on http://localhost:3000
 ```
 
 ### The demo
 
-`demo/` is a Next.js marketplace that drives the real SDK against Arc Testnet — not a screenshot mock. One page, three panels, each with the authority that role actually has:
+`demo/` is a Next.js marketplace that drives the real SDK against Arc Testnet — not a screenshot mock. A storefront above **four role columns**, each holding only the authority that role actually has:
 
 - **Buyer** — connects MetaMask, signs the ERC-3009 authorization in-browser, picks a payment rail.
-- **Seller** — watches orders settle, then cashes out through the CPN off-ramp panel (corridor picker, live quote with fees and spread, prepare, then an explicitly-gated broadcast).
-- **Host** — the release hook: the platform decides when funds are released.
+- **Seller** — picks the wallet that will receive the floor (a purchase needs two distinct parties), then watches orders settle.
+- **Host / Marketplace** — the release hook: only the host releases or refunds. Shows the operator's Arc gas and the fee in bps, because that is the running cost of "gasless".
+- **Wallet Seller** — the seller's own balances on Arc and the exits from them: the CPN cash-out panel (corridor picker, live quote with fees and spread, prepare, then an explicitly-gated broadcast) and the Circle Mint redeem panel.
+
+`/sdk` is a second page: the same SDK driven as a bare state machine, with an execution inspector over one order — useful for reading `createOrder → fund → release/refund` without the marketplace framing.
+
+Two boundaries worth stating, because the demo does not hide them: the demo buyer is **server-signed** with a testnet key (in production the buyer signs in their own wallet), and the seller's cash-out is likewise signed server-side even though the EURC sits in the seller's wallet — see [Limitations](#limitations--honest-boundaries).
 
 ### Minimal integration
 
 ```ts
-import { createRivoKit } from "./src/sdk/rivokit.ts";
+import { createRivoKit } from "rivokit";
 
 // RivoKit composes injected modules — it holds no keys and moves nothing itself.
 const rivokit = createRivoKit({
@@ -455,8 +463,13 @@ type RivoKitDeps = {
   store: OrderStore; escrow: Escrow; fx: SettlementFx; bridge: Bridge;
   fund: FundExecutor;              // injected: the host's environment signs & relays
   config: RivoKitConfig;
+  payRebate?: RebatePayer;         // returns the surplus to the payer; omit → it stays with the seller
   compliance?: ComplianceGate;     // screens BEFORE an order is stored
   emitter?: Emitter;
+  operatorGas?: () => Promise<bigint>;   // paired with config.minOperatorGasWei
+  refundBridgeParams?: (order: OrderRecord) => BridgeParams | undefined;  // omit → refund stays on Arc
+  now?: () => number;              // injected for deterministic tests
+  salt?: () => bigint;
 };
 
 type CreateOrderParams = {
@@ -466,6 +479,8 @@ type CreateOrderParams = {
   wedge: "contractor_payout" | "digital_goods" | "invoice" | "physical_demo";
   mode?: "escrow" | "direct";          // default "escrow"
   bufferBps?: number;                  // default 150 (1.5%) — FX cushion + rebate source
+  feeBps?: number;                     // per-order override of config.feeBps
+  feeReceiver?: Address;               // per-order override of config.feeReceiver
 };
 
 type OrderState =
@@ -531,7 +546,7 @@ Note that Arc's USDC is the **native gas token**, with 18 decimals as gas and 6 
 
 Three layers, because Arc cannot be faithfully forked:
 
-- **Unit tests** — `npm test`, **240 green across 16 files**, no credentials required. Cover the pure logic: the order state machine, unit conversions, quote/rebate math, the SDK facade's composition, event routing, compliance gating, webhook ECDSA verification, the gasless ERC-3009 authorization (signed and recovered against a real key), and the CPN layer (client, JWE encryption, EIP-712 witness signing, and the forward-only payment reducer).
+- **Unit tests** — `npm test`, **261 green across 18 files**, no credentials required. Cover the pure logic: the order state machine, unit conversions, quote/rebate math, the operator-fee gross-up (round-trip property: `netOfFee(grossUpForFee(x)) ≥ x`), the SDK facade's composition, event routing, compliance gating, webhook ECDSA verification, the gasless ERC-3009 authorization (signed and recovered against a real key), and the CPN layer (client, JWE encryption, EIP-712 witness signing, and the forward-only payment reducer).
 - **Live proofs** (`scripts/live-*.mjs`) exercise every contract-touching path against **Arc Testnet itself** — fund → capture → floored swap → payout, refund with bridge-back, multi-chain funding via bridge and unified balance, and the full flow end-to-end through the SDK.
 - **API probes** (`scripts/probe-*.mjs`) map real service behaviour rather than assuming it: CPN quote/payment/status shapes, the per-corridor requirements, and the sandbox magic values (`ORIGINATOR_NAME: "Failed"` / `"AsyncSuccess"`) used to confirm the state model in `cpn-state.ts` matches the statuses CPN actually emits.
 
@@ -543,11 +558,15 @@ Foundry **fork** tests are deliberately not the source of truth here: Arc's USDC
 |---|---|
 | Escrow lifecycle — authorize / capture / void / refund / reclaim | ✅ proven on Arc Testnet |
 | Floored USDC→EURC swap (`stopLimit`) | ✅ proven |
-| Multi-chain funding — CCTP bridge + Gateway unified balance | ✅ proven |
+| Multi-chain funding — CCTP bridge + Gateway unified balance (server-held key) | ✅ proven |
 | Refund with bridge-back to origin chain | ✅ proven |
 | Full flow end-to-end through the SDK facade | ✅ proven |
+| Operator fee (25 bps) split at capture, floor still met | ✅ proven — capture split `0.008784` → operator and `3.504835` → merchant in tx `0x7910f1…037420`, with the €2.50 floor intact |
+| Two-wallet mode — the floor forwarded merchant → the seller's own wallet | ✅ proven — €2.50 EURC forwarded in tx `0x11bf41…559bf4` |
 | **CPN off-ramp EUR/SEPA — quote → prepare → broadcast → `COMPLETED`** | ✅ **proven**, twice (15 USDC → 12.92 EUR, on-chain tx `COMPLETED`) |
 | CPN corridors BRL/PIX, MXN/SPEI, USD/WIRE | ⚠️ requirements + quote + prepare verified live; **no completed settlement** |
+| Browser-wallet funding rails — Gateway spend / CCTP bridge signed by the connected wallet | ❌ `demo/app/wallet-rails.ts` is written but **never executed on-chain** |
+| CPN cash-out signed by the seller's own wallet (Permit2 approve + submit) | ❌ still a server key — see Limitations |
 | Circle Mint redeem (`CIRCLE_RAMP_KEY`) | ❌ wired, **never executed** — see Limitations |
 
 ## Security model
@@ -568,6 +587,8 @@ Report vulnerabilities privately, not via public issues.
 - **Testnet / sandbox only**, unaudited — do not use real funds.
 - **The off-ramp is real, but its reach is uneven.** EUR/SEPA is proven to `COMPLETED`. BRL, MXN and USD are verified only as far as `prepare` — their requirements and quotes are live, but no payment has settled on those rails.
 - **Circle Mint redeem has never been run.** `demo/lib/mint.server.ts` and the MintRedeem panel are wired against the sandbox API but have not been executed once, so treat that path as unproven code, not a feature.
+- **The browser-wallet funding rails have never been executed on-chain.** `demo/app/wallet-rails.ts` lets a connected wallet reach Arc itself via Gateway spend or a CCTP bridge from Sepolia — no server secret involved, which is the point — but only the server-signed demo buyer has actually moved funds. The code compiles and is wired into the Buyer panel; it is not proven.
+- **The seller does not yet sign their own cash-out.** Two-wallet mode really does forward the floor to the seller's wallet on-chain, but the Permit2 approval and `ramp.submit` for that balance are still made with a server-held key. The seller holds the EURC and not yet the authority to move it out — closing that gap means the approve and the submit are signed in the seller's browser.
 - **The off-ramp is not wired into `release()`.** Settlement and cash-out are separate surfaces; joining them (a payment record that tracks its own CPN payout) is not done.
 - **The SDK's `payout` module is still a `MOCK`** instruction, clearly labelled as such. It is not a bank transfer.
 - **In production the host must be an onboarded OFI** with CPN, plus KYB/AML on recipients. RivoKit is not a licensed operator and cannot be one for you.
@@ -596,11 +617,13 @@ rivokit/
 
 ## Roadmap
 
-**Done, proven live on Arc:** setup → escrow lifecycle → settlement-FX → multi-chain funding + refund → events/compliance → SDK surface → browser-signed funding + marketplace demo → **CPN fiat off-ramp (EUR/SEPA settled end-to-end)**.
+**Done, proven live on Arc:** setup → escrow lifecycle → settlement-FX → multi-chain funding + refund → events/compliance → SDK surface → browser-signed funding + marketplace demo → **CPN fiat off-ramp (EUR/SEPA settled end-to-end)** → grossed-up operator fee split at capture → two-wallet mode forwarding the floor to the seller's own wallet.
 
 **Next:**
 
 - Settle the remaining corridors (BRL/PIX, MXN/SPEI, USD/WIRE) past `prepare`.
+- Execute the browser-wallet funding rails on-chain — the code is written, the proof is missing.
+- Move the seller's Permit2 approval and `ramp.submit` into the seller's own browser, so the wallet that holds the EURC is the wallet that spends it.
 - Wire the off-ramp into the order record, so a payment tracks its own CPN payout and webhook-driven state.
 - Exercise or drop the Circle Mint redeem path — unproven code should not ship as a feature.
 - Hardening: retries and reconciliation across the CPN lifecycle.
