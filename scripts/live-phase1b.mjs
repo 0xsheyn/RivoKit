@@ -85,7 +85,7 @@ const operatorSender = async ({ functionName, args }) => {
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction.txHash };
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${functionName}: timeout`);
@@ -167,12 +167,12 @@ async function signErc3009(pi, nonce) {
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 // ── Payment A: authorize → void ────────────────────────────────────────
 
-step("Pembayaran A — authorize lalu void (batal sebelum capture)");
+step("Payment A — authorize, then void (cancelled before capture)");
 
 const piA = buildPaymentInfo("paymentA", 7200);
 const hashA = getPaymentInfoHash(piA, ARC_TESTNET_CHAIN_ID, ESCROW);
@@ -193,28 +193,28 @@ if (!stateA.hasCollectedPayment) {
 ok(`ter-authorize — capturable ${fmt(stateA.capturableAmount)}`);
 
 const buyerAfterAuthA = await balance(buyer.address);
-record(buyerBeforeA - buyerAfterAuthA === AMOUNT, "buyer terdebit saat authorize", fmt(buyerBeforeA - buyerAfterAuthA));
+record(buyerBeforeA - buyerAfterAuthA === AMOUNT, "the buyer is debited at authorize", fmt(buyerBeforeA - buyerAfterAuthA));
 
 if (stateA.capturableAmount > 0n) {
   await escrow.void(piA);
   stateA = await escrow.getPaymentState(hashA);
 }
-ok(`setelah void — capturable ${fmt(stateA.capturableAmount)}`);
+ok(`after the void — capturable ${fmt(stateA.capturableAmount)}`);
 
 const buyerAfterVoid = await balance(buyer.address);
 const operatorAfterVoid = await balance(OPERATOR);
 
-record(stateA.capturableAmount === 0n, "void mengosongkan capturable");
-record(buyerAfterVoid === buyerBeforeA, "buyer kembali utuh setelah void", fmt(buyerAfterVoid));
+record(stateA.capturableAmount === 0n, "void empties capturable");
+record(buyerAfterVoid === buyerBeforeA, "the buyer is made whole after the void", fmt(buyerAfterVoid));
 record(
   operatorBeforeA - operatorAfterVoid < AMOUNT,
-  "void TIDAK menguras operator (beda dari refund)",
-  `operator hanya keluar ${fmt(operatorBeforeA - operatorAfterVoid)} untuk gas`,
+  "void does NOT drain the operator (unlike refund)",
+  `the operator only spent ${fmt(operatorBeforeA - operatorAfterVoid)} on gas`,
 );
 
 // ── Payment B: authorize → reclaim ─────────────────────────────────────
 
-step(`Pembayaran B — authorize lalu reclaim oleh payer (tunggu ${RECLAIM_WINDOW_SECONDS} detik)`);
+step(`Payment B — authorize, then reclaim by the payer (waits ${RECLAIM_WINDOW_SECONDS}s)`);
 
 const piB = buildPaymentInfo("paymentB", RECLAIM_WINDOW_SECONDS);
 const hashB = getPaymentInfoHash(piB, ARC_TESTNET_CHAIN_ID, ESCROW);
@@ -245,13 +245,13 @@ if (Math.floor(Date.now() / 1000) < piB.authorizationExpiry) {
   } catch {
     reverted = true;
   }
-  record(reverted, "reclaim SEBELUM expiry ditolak kontrak");
+  record(reverted, "reclaim BEFORE expiry is rejected by the contract");
 }
 
 // Wait out the authorization window.
 while (Math.floor(Date.now() / 1000) < piB.authorizationExpiry + 5) {
   const left = piB.authorizationExpiry + 5 - Math.floor(Date.now() / 1000);
-  info(`menunggu expiry… ${left} detik`);
+  info(`waiting for expiry… ${left}s`);
   await sleep(Math.min(left, 30) * 1000);
 }
 
@@ -259,22 +259,22 @@ if (stateB.capturableAmount > 0n) {
   await escrow.reclaim(piB);
   stateB = await escrow.getPaymentState(hashB);
 }
-ok(`setelah reclaim — capturable ${fmt(stateB.capturableAmount)}`);
+ok(`after the reclaim — capturable ${fmt(stateB.capturableAmount)}`);
 
 const buyerAfterReclaim = await balance(buyer.address);
-record(stateB.capturableAmount === 0n, "reclaim mengosongkan capturable");
+record(stateB.capturableAmount === 0n, "reclaim empties capturable");
 record(
   buyerAfterReclaim >= buyerBeforeB - parseUnits("0.05", 6),
-  "buyer memulihkan dananya sendiri tanpa operator",
+  "the buyer recovers their own funds without the operator",
   fmt(buyerAfterReclaim),
 );
 
 // ── verdict ────────────────────────────────────────────────────────────
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " void dan reclaim TERBUKTI live."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " void and reclaim PROVEN live."),
 );
 process.exit(failed ? 1 : 0);

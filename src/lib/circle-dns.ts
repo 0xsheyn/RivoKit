@@ -6,7 +6,7 @@
  * CCTP fee/attestation API (`iris-api-sandbox.circle.com`) and the wallet API
  * (`api.circle.com`) then fail with a bare "fetch failed" after the SDK's own
  * retries — a network fault dressed up as an SDK error. See the memory note
- * `dns-api-circle-dibajak`.
+ * observed live on at least one network, so this is not hypothetical.
  *
  * The fix is to resolve those hosts ourselves, out of band, and pin the result:
  *

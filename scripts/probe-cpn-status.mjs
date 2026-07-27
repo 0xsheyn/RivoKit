@@ -16,7 +16,7 @@ const cpn = createCpnClient({ apiKey: env.CIRCLE_CPN_KEY });
 const res = await cpn.request("GET", "/v1/cpn/payments?pageSize=8");
 const payments = Array.isArray(res) ? res : res?.payments ?? res?.data ?? [];
 
-console.log(`${payments.length} pembayaran terbaru:\n`);
+console.log(`${payments.length} most recent payments:\n`);
 for (const p of payments) {
   const txs = p.onChainTransactions ?? [];
   console.log(`${p.createDate ?? "?"}  ${p.id}`);
@@ -25,7 +25,7 @@ for (const p of payments) {
   if (txs.length) {
     for (const t of txs) console.log(`  tx ${t.id ?? "?"}: ${t.status}${t.txHash ? `  ${t.txHash}` : ""}${t.failureReason ? `  ${t.failureReason}` : ""}`);
   } else {
-    console.log(`  onChainTransactions: [] (belum ada tx menempel)`);
+    console.log(`  onChainTransactions: [] (no tx attached yet)`);
   }
   if ((p.rfis ?? []).length) console.log(`  rfis: ${p.rfis.map((r) => r.status).join(", ")}`);
   console.log();

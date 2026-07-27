@@ -68,7 +68,7 @@ const randInt = (max) => Math.floor(Math.random() * max);
 /** Deliberately includes edge cases: zero fields, max-width values. */
 const CASES = [
   {
-    label: "nilai realistis demo",
+    label: "realistic demo values",
     info: {
       operator: getAddress(env.OPERATOR_ADDRESS),
       payer: getAddress(env.DEPLOYER_ADDRESS),
@@ -85,7 +85,7 @@ const CASES = [
     },
   },
   {
-    label: "semua nol / minimum",
+    label: "all zeros / minimum",
     info: {
       operator: ZERO_ADDRESS,
       payer: ZERO_ADDRESS,
@@ -154,7 +154,7 @@ for (const { label, info } of CASES) {
   });
   const match = local.toLowerCase() === onchain.toLowerCase();
   if (!match) failures++;
-  console.log(`${match ? "  OK  " : " GAGAL"}  ${label}`);
+  console.log(`${match ? "  OK  " : " FAIL "}  ${label}`);
   if (!match) {
     console.log(`         lokal   ${local}`);
     console.log(`         onchain ${onchain}`);
@@ -174,15 +174,15 @@ const agnosticOnchain = await client.readContract({
 });
 const agnosticMatch = agnosticLocal.toLowerCase() === agnosticOnchain.toLowerCase();
 if (!agnosticMatch) failures++;
-console.log(`${agnosticMatch ? "  OK  " : " GAGAL"}  nonce ERC-3009 (payer dinolkan)`);
+console.log(`${agnosticMatch ? "  OK  " : " FAIL "}  ERC-3009 nonce (payer zeroed)`);
 
 // And it must DIFFER from the payer-bound hash, or zeroing achieved nothing.
 const distinct = agnosticLocal.toLowerCase() !== getPaymentInfoHash(base, ARC_TESTNET_CHAIN_ID, ESCROW).toLowerCase();
 if (!distinct) failures++;
-console.log(`${distinct ? "  OK  " : " GAGAL"}  nonce berbeda dari hash ber-payer`);
+console.log(`${distinct ? "  OK  " : " FAIL "}  nonce differs from the payer-bound hash`);
 
 console.log(
-  `\n${CASES.length + 2 - failures}/${CASES.length + 2} lolos.` +
-    (failures ? " Perhitungan hash TIDAK cocok — jangan lanjut." : " Hash off-chain terverifikasi."),
+  `\n${CASES.length + 2 - failures}/${CASES.length + 2} passed.` +
+    (failures ? " Hash computation does NOT match — do not proceed." : " Off-chain hashes verified."),
 );
 process.exit(failures ? 1 : 0);

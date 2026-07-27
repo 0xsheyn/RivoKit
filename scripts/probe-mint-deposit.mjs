@@ -35,11 +35,11 @@ const usdBalance = (bal) => Number((bal?.available ?? []).find((b) => b.currency
 // 1. Mint deposit address for the ETH (Sepolia) chain.
 const addrs = await mintCall("/v1/businessAccount/wallets/addresses/deposit");
 const dep = (addrs ?? []).find((a) => a.chain === "ETH");
-if (!dep) { console.error("Tak ada alamat deposit ETH."); process.exit(1); }
-console.log(`Alamat deposit Mint (ETH/Sepolia): ${dep.address}`);
+if (!dep) { console.error("No ETH deposit address."); process.exit(1); }
+console.log(`Mint deposit address (ETH/Sepolia): ${dep.address}`);
 
 const before = usdBalance(await mintCall("/v1/businessAccount/balances"));
-console.log(`Saldo Mint sebelum: ${before} USD`);
+console.log(`Mint balance before: ${before} USD`);
 
 // 2. Send 5 USDC from the buyer on Sepolia to the deposit address.
 const account = privateKeyToAccount(env.BUYER_PRIVATE_KEY);
@@ -57,7 +57,7 @@ const receipt = await pub.waitForTransactionReceipt({ hash });
 console.log(`konfirmasi on-chain: ${receipt.status}`);
 
 // 3. Poll the Mint balance for the credit (async — may take minutes).
-console.log("Menunggu Circle mengkredit deposit (poll ~3 mnt)…");
+console.log("Waiting for Circle to credit the deposit (polling ~3 min)…");
 for (let i = 0; i < 12; i++) {
   await new Promise((r) => setTimeout(r, 15000));
   const now = usdBalance(await mintCall("/v1/businessAccount/balances"));
@@ -65,6 +65,6 @@ for (let i = 0; i < 12; i++) {
     console.log(`  ✅ ter-kredit: ${before} → ${now} USD (+${(now - before).toFixed(2)})`);
     process.exit(0);
   }
-  console.log(`  poll ${i}: masih ${now} USD`);
+  console.log(`  poll ${i}: still ${now} USD`);
 }
-console.log("Belum ter-kredit di window ini — deposit diproses async, cek saldo lagi nanti.");
+console.log("Not credited within this window — deposits are processed async, check the balance again later.");

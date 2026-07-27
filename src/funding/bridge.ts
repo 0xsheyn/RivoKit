@@ -103,7 +103,7 @@ export class BridgeFailedError extends Error {
 /**
  * A bridge step can fail because the SDK could not reach Circle's fee/attestation
  * API rather than because a chain reverted. On this network that has meant an
- * ISP hijacking Circle's DNS — see the `dns-api-circle-dibajak` note. The signal
+ * ISP hijacking Circle's DNS — observed live on at least one network. The signal
  * is a transport error, not a revert: retries exhausted, a failed fetch, or a
  * name-resolution code.
  */

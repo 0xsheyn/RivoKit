@@ -50,11 +50,11 @@ async function makePayment(originatorName) {
 
 // 1. Synchronous failure.
 const failed = await makePayment("Failed");
-console.log(`"Failed"      → sync status: ${failed.status}  (harap FAILED)`);
+console.log(`"Failed"      → sync status: ${failed.status}  (expect FAILED)`);
 
 // 2. Async success — poll until it leaves CREATED.
 const p = await makePayment("AsyncSuccess");
-console.log(`"AsyncSuccess" → sync status: ${p.status}  (harap CREATED)`);
+console.log(`"AsyncSuccess" → sync status: ${p.status}  (expect CREATED)`);
 let last = p.status;
 for (let i = 0; i < 6; i++) {
   await new Promise((r) => setTimeout(r, 2000));
@@ -67,5 +67,5 @@ for (let i = 0; i < 6; i++) {
     last = cur.status;
     break;
   }
-  console.log(`  poll ${i}: masih ${cur.status}`);
+  console.log(`  poll ${i}: still ${cur.status}`);
 }

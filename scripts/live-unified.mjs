@@ -77,7 +77,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -123,7 +123,7 @@ const operatorSender = async ({ functionName, args }) => {
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction.txHash };
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${functionName}: timeout`);
@@ -133,7 +133,7 @@ const escrow = createEscrow({ escrowAddress: ESCROW, publicClient: arcClient, op
 
 // ── Step 1: order + starting balances ──────────────────────────────────
 
-step("Langkah 1 — order dengan receivingChain, saldo awal");
+step("Step 1 — order with receivingChain, opening balances");
 
 const now = Math.floor(Date.now() / 1000);
 if (!state.paymentInfo) {
@@ -164,7 +164,7 @@ if (!order) {
   });
 }
 ok(`order ${order.id} — receivingChain ${order.receiving_chain}`);
-record(order.receiving_chain === RECEIVING_CHAIN, "receivingChain tercatat (invariant 5)");
+record(order.receiving_chain === RECEIVING_CHAIN, "receivingChain recorded (invariant 5)");
 
 const sepBefore = await sepUsdc(buyer.address);
 const arcBefore = await arcUsdc(buyer.address);
@@ -175,17 +175,17 @@ info(`unified balance: confirmed ${fmt(ub0.confirmedMinor)} · pending ${fmt(ub0
 
 // ── Step 2: deposit into Gateway (when there is no balance yet) ────────
 
-step("Langkah 2 — deposit Sepolia → Gateway (unified balance)");
+step("Step 2 — deposit Sepolia → Gateway (unified balance)");
 
 // Recorded before the irreversible deposit, same discipline as bridge funding.
 if (order.state === "created") {
   order = await store.transition(order.id, "funding_pending");
-  ok(`state ${order.state} — dicatat SEBELUM deposit`);
+  ok(`state ${order.state} — recorded BEFORE the deposit`);
 }
 
 if (!state.deposited && ub0.confirmedMinor < AMOUNT) {
   if (sepBefore < DEPOSIT) {
-    console.error(`\nGAGAL: buyer hanya punya ${fmt(sepBefore)} USDC di Sepolia untuk deposit.`);
+    console.error(`\nFAILED: the buyer only holds ${fmt(sepBefore)} USDC on Sepolia for the deposit.`);
     process.exit(1);
   }
   const dep = await ub.deposit({ adapter: sepAdapter, chain: "Ethereum_Sepolia", amountMinor: DEPOSIT });
@@ -198,12 +198,12 @@ if (!state.deposited && ub0.confirmedMinor < AMOUNT) {
   });
   ok(`deposit ter-mine — ${dep.txHash}`);
 } else {
-  ok(state.deposited ? "deposit sudah dilakukan di run sebelumnya" : "unified balance sudah cukup, lewati deposit");
+  ok(state.deposited ? "the deposit was made in an earlier run" : "unified balance already sufficient, skipping deposit");
 }
 
-// ── Langkah 3: tunggu finalisasi ───────────────────────────────────────
+// ── Step 3: wait for finality ───────────────────────────────────────
 
-step("Langkah 3 — tunggu saldo Gateway terkonfirmasi (finalisasi off-chain)");
+step("Step 3 — wait for the Gateway balance to confirm (off-chain finality)");
 
 let confirmed = 0n;
 for (let i = 0; i < FINALIZE_POLLS; i++) {
@@ -214,15 +214,15 @@ for (let i = 0; i < FINALIZE_POLLS; i++) {
   await sleep(POLL_MS);
 }
 if (confirmed < AMOUNT) {
-  console.log(`\n  BELUM FINAL — saldo Gateway ${fmt(confirmed)} < ${fmt(AMOUNT)} setelah ${FINALIZE_POLLS} poll.`);
-  console.log("  Deposit sudah tercatat; jalankan ulang skrip ini untuk melanjutkan begitu finalisasi selesai.");
+  console.log(`\n  NOT FINAL YET — Gateway balance ${fmt(confirmed)} < ${fmt(AMOUNT)} after ${FINALIZE_POLLS} polls.`);
+  console.log("  The deposit is recorded; re-run this script to continue once finality lands.");
   process.exit(1);
 }
-record(confirmed >= AMOUNT, "saldo Gateway terkonfirmasi", fmt(confirmed));
+record(confirmed >= AMOUNT, "Gateway balance confirmed", fmt(confirmed));
 
-// ── Langkah 4: spend ke Arc (mint ke payer) ────────────────────────────
+// ── Step 4: spend to Arc (mint to the payer) ────────────────────────────
 
-step("Langkah 4 — spend unified balance → mint ke payer di Arc");
+step("Step 4 — spend unified balance → mint ke payer di Arc");
 
 if (!state.spent) {
   const spend = await ub.spend({
@@ -242,16 +242,16 @@ if (!state.spent) {
   });
   ok(`spend mint di Arc → ${spend.recipientAddress} — ${spend.txHash}`);
 } else {
-  ok("spend sudah dilakukan di run sebelumnya");
+  ok("the spend was made in an earlier run");
 }
 
 await sleep(4000);
 const arcAfterSpend = await arcUsdc(buyer.address);
 record(arcAfterSpend > arcBefore, "USDC ter-mint ke payer di Arc", `+${fmt(arcAfterSpend - arcBefore)}`);
 
-// ── Langkah 5: authorize ke escrow ─────────────────────────────────────
+// ── Step 5: authorize into escrow ─────────────────────────────────────
 
-step("Langkah 5 — authorize: USDC hasil unified balance masuk escrow");
+step("Step 5 — authorize: the unified-balance USDC enters escrow");
 
 let ps = await escrow.getPaymentState(hash);
 if (!ps.hasCollectedPayment) {
@@ -277,14 +277,14 @@ order = await store.get(order.id);
 if (order.state === "funding_pending") {
   order = await store.transition(order.id, "funded", { fundedAt: new Date() });
 }
-ok(`escrow menahan ${fmt(ps.capturableAmount)} USDC — state ${order.state}`);
-record(ps.capturableAmount === AMOUNT, "jumlah di escrow benar");
-record(order.state === "funded", "order funded lewat unified balance");
+ok(`escrow holds ${fmt(ps.capturableAmount)} USDC — state ${order.state}`);
+record(ps.capturableAmount === AMOUNT, "the escrowed amount is correct");
+record(order.state === "funded", "order funded via the unified balance");
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " Funding via unified balance TERBUKTI: Gateway → escrow Arc."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " Funding via unified balance PROVEN: Gateway → escrow Arc."),
 );
 process.exit(failed ? 1 : 0);

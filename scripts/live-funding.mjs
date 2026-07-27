@@ -33,7 +33,7 @@ import { createBridge, BridgeStuckError, BridgeFailedError } from "../src/fundin
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 
 // Resolve *.circle.com out of band before any SDK call — this network hijacks
-// Circle's DNS (see dns-api-circle-dibajak). Must run before AppKit/Circle use.
+// Circle's DNS (observed live). Must run before any AppKit/Circle use.
 installCircleDnsPinning();
 
 const STATE_FILE = ".live-funding.json";
@@ -68,7 +68,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -112,7 +112,7 @@ const operatorSender = async ({ functionName, args }) => {
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction.txHash };
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${functionName}: timeout`);
@@ -122,7 +122,7 @@ const escrow = createEscrow({ escrowAddress: ESCROW, publicClient: arcClient, op
 
 // ── Step 1: order with receivingChain recorded ─────────────────────────
 
-step("Langkah 1 — buat order, catat receivingChain untuk refund");
+step("Step 1 — create the order, record receivingChain for the refund");
 
 const now = Math.floor(Date.now() / 1000);
 if (!state.paymentInfo) {
@@ -154,26 +154,26 @@ if (!order) {
   });
 }
 ok(`order ${order.id} — receivingChain ${order.receiving_chain}`);
-record(order.receiving_chain === RECEIVING_CHAIN, "receivingChain tercatat di order (invariant 5)");
+record(order.receiving_chain === RECEIVING_CHAIN, "receivingChain recorded on the order (invariant 5)");
 
 const buyerSepBefore = await sepUsdc(buyer.address);
 const buyerArcBefore = await arcUsdc(buyer.address);
 info(`buyer: Sepolia ${fmt(buyerSepBefore)} · Arc ${fmt(buyerArcBefore)} USDC`);
 
 if (buyerSepBefore < AMOUNT) {
-  console.error(`\nGAGAL: buyer hanya punya ${fmt(buyerSepBefore)} USDC di Sepolia.`);
+  console.error(`\nFAILED: the buyer only holds ${fmt(buyerSepBefore)} USDC di Sepolia.`);
   process.exit(1);
 }
 
-// ── Langkah 2: funding lintas-chain ────────────────────────────────────
+// ── Step 2: cross-chain funding ────────────────────────────────────
 
-step("Langkah 2 — bridge Sepolia → Arc (funding lintas-chain)");
+step("Step 2 — bridge Sepolia → Arc (funding lintas-chain)");
 
 // Recorded BEFORE the bridge: the burn is irreversible, so a crash must not
 // leave money in flight with no order to attach it to.
 if (order.state === "created") {
   order = await store.transition(order.id, "funding_pending");
-  ok(`state ${order.state} — dicatat SEBELUM burn`);
+  ok(`state ${order.state} — recorded BEFORE the burn`);
 }
 
 if (!state.bridged) {
@@ -200,7 +200,7 @@ if (!state.bridged) {
       ? await bridge.retry(bridgeParams, state.bridgePrevious)
       : await bridge.execute(bridgeParams);
     if (res.state !== "success" || !res.mintTxHash) {
-      throw new BridgeFailedError(`bridge tak sukses: state ${res.state}, mint ${res.mintTxHash ?? "-"}`);
+      throw new BridgeFailedError(`bridge did not succeed: state ${res.state}, mint ${res.mintTxHash ?? "-"}`);
     }
     state.bridged = true;
     state.bridgeStuck = false;
@@ -218,7 +218,7 @@ if (!state.bridged) {
       amountMinor: AMOUNT,
     });
 
-    ok(`bridge ${resuming ? "dilanjutkan" : "selesai"} dalam ${Math.round((Date.now() - t0) / 1000)} detik — ${res.state}`);
+    ok(`bridge ${resuming ? "resumed" : "completed"} in ${Math.round((Date.now() - t0) / 1000)}s — ${res.state}`);
     info(`burn (Sepolia) ${res.burnTxHash ?? "-"}`);
     info(`mint (Arc)     ${res.mintTxHash ?? "-"}`);
     record(res.state === "success", "bridge sukses");
@@ -231,7 +231,7 @@ if (!state.bridged) {
       state.bridgePrevious = e.detail ?? state.bridgePrevious ?? null;
       save();
       console.log(`\n  TERTAHAN — ${e.message}`);
-      console.log("  Jalankan ulang: skrip MELANJUTKAN via retry (kit.retryBridge), TAK akan burn ulang. JANGAN reset.");
+      console.log("  Re-run: the script CONTINUES via retry (kit.retryBridge), it will NOT burn again. DO NOT reset.");
       process.exit(1);
     }
     if (e instanceof BridgeFailedError) {
@@ -239,24 +239,24 @@ if (!state.bridged) {
       // flight — keep it stuck so the next run retries, never falls back to a
       // burn. If not resuming, nothing moved and a clean re-run is safe.
       save();
-      console.log(`\n  GAGAL — ${e.message}`);
-      if (e.networkSuspected) console.log("  Penyebab jaringan (bukan on-chain). Perbaiki DNS Circle lalu ulangi.");
-      if (resuming) console.log("  (Masih mode resume — run berikutnya tetap retry, tak akan burn ulang.)");
+      console.log(`\n  FAILED — ${e.message}`);
+      if (e.networkSuspected) console.log("  Network cause (not on-chain). Fix the Circle DNS, then retry.");
+      if (resuming) console.log("  (Still in resume mode — the next run retries, it will not burn again.)");
       process.exit(1);
     }
     throw e;
   }
 } else {
-  ok("bridge sudah tuntas di run sebelumnya");
+  ok("bridge already completed in an earlier run");
 }
 
 await sleep(4000);
 const buyerArcAfterBridge = await arcUsdc(buyer.address);
-record(buyerArcAfterBridge > buyerArcBefore, "USDC tiba di Arc", `+${fmt(buyerArcAfterBridge - buyerArcBefore)}`);
+record(buyerArcAfterBridge > buyerArcBefore, "USDC arrived on Arc", `+${fmt(buyerArcAfterBridge - buyerArcBefore)}`);
 
 // ── Step 3: funds land in escrow ───────────────────────────────────────
 
-step("Langkah 3 — authorize: USDC yang baru tiba masuk escrow");
+step("Step 3 — authorize: the newly arrived USDC enters escrow");
 
 let ps = await escrow.getPaymentState(hash);
 if (!ps.hasCollectedPayment) {
@@ -283,25 +283,25 @@ if (order.state === "funding_pending") {
   order = await store.transition(order.id, "funded", { fundedAt: new Date() });
 }
 
-ok(`escrow menahan ${fmt(ps.capturableAmount)} USDC — state ${order.state}`);
-record(ps.capturableAmount === AMOUNT, "jumlah di escrow benar");
-record(order.state === "funded", "order mencapai funded lewat jalur lintas-chain");
+ok(`escrow holds ${fmt(ps.capturableAmount)} USDC — state ${order.state}`);
+record(ps.capturableAmount === AMOUNT, "the escrowed amount is correct");
+record(order.state === "funded", "the order reached funded via the cross-chain path");
 
-// ── Verifikasi ─────────────────────────────────────────────────────────
+// ── Verification ─────────────────────────────────────────────────────────
 
-step("Verifikasi");
+step("Verification");
 
 const buyerSepAfter = await sepUsdc(buyer.address);
 info(`buyer Sepolia ${fmt(buyerSepBefore)} → ${fmt(buyerSepAfter)}  (${fmt(buyerSepAfter - buyerSepBefore)})`);
-record(buyerSepBefore - buyerSepAfter >= AMOUNT, "USDC keluar dari chain asal", fmt(buyerSepBefore - buyerSepAfter));
+record(buyerSepBefore - buyerSepAfter >= AMOUNT, "USDC left the origin chain", fmt(buyerSepBefore - buyerSepAfter));
 
 const finalOrder = await store.get(order.id);
-record(finalOrder.receiving_chain === RECEIVING_CHAIN, "receivingChain tetap tercatat untuk refund");
+record(finalOrder.receiving_chain === RECEIVING_CHAIN, "receivingChain is still recorded for the refund");
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " Funding lintas-chain TERBUKTI: Ethereum Sepolia → escrow Arc."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " Funding lintas-chain PROVEN: Ethereum Sepolia → escrow Arc."),
 );
 process.exit(failed ? 1 : 0);

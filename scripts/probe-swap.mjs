@@ -34,7 +34,7 @@ const setups = [
   ["EOA viem (buyer)", viemAdapter, "0x08C695b2eaccfb2Da60687eA7B92D9E5e220Bb71"],
 ];
 
-console.log("Rute swap per tipe wallet asal — amountIn dalam satuan UTUH\n");
+console.log("Swap routes per source wallet type — amountIn in WHOLE units\n");
 
 for (const [label, adapter, address] of setups) {
   console.log(`  ${label}  ${address}`);
@@ -55,7 +55,7 @@ for (const [label, adapter, address] of setups) {
           `  stopLimit=${est.stopLimit?.amount ?? "-"}`,
       );
     } catch (e) {
-      console.log(`     GAGAL  ${tokenIn}→${tokenOut}  ${short(e)}`);
+      console.log(`     FAIL   ${tokenIn}→${tokenOut}  ${short(e)}`);
     }
     await new Promise((r) => setTimeout(r, 1200));
   }
