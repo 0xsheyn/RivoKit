@@ -57,7 +57,7 @@ describe("fromDecimalString", () => {
 });
 
 describe("deriveRate", () => {
-  it("kurs 1:1 menghasilkan 1_000_000", () => {
+  it("a 1:1 rate yields 1_000_000", () => {
     expect(deriveRate(1_000_000n, 1_000_000n)).toBe(1_000_000n);
   });
 

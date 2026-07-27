@@ -27,7 +27,7 @@ import { createOrderStore } from "../src/orchestrator/order-store.ts";
 import { expiriesFor, timeoutPolicyFor } from "../src/orchestrator/policy.ts";
 
 // This network hijacks Circle's DNS → a misleading CERT_HAS_EXPIRED on api.circle.com.
-// Pin before any Circle SDK call. Never disable TLS verification (CLAUDE.md §jebakan).
+// Pin before any Circle SDK call. Never disable TLS verification (CLAUDE.md, pitfalls).
 installCircleDnsPinning();
 
 const STATE_FILE = ".live-charge.json";
@@ -59,7 +59,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -93,7 +93,7 @@ const operatorSender = async ({ functionName, args }) => {
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction.txHash };
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${functionName}: timeout`);
@@ -103,7 +103,7 @@ const escrow = createEscrow({ escrowAddress: ESCROW, publicClient, operator: ope
 
 // ── Setup ──────────────────────────────────────────────────────────────
 
-step("Langkah 1 — susun order mode direct");
+step("Step 1 — susun order mode direct");
 
 const now = Math.floor(Date.now() / 1000);
 if (!state.paymentInfo) {
@@ -136,7 +136,7 @@ if (!order) {
   });
 }
 ok(`order ${order.id} — mode ${order.mode}, state ${order.state}`);
-record(order.mode === "direct", "order tercatat mode direct");
+record(order.mode === "direct", "the order is recorded in direct mode");
 
 const buyerBefore = await balanceOf(buyer.address);
 const merchantBefore = await balanceOf(MERCHANT);
@@ -144,7 +144,7 @@ info(`buyer ${fmt(buyerBefore)} · merchant ${fmt(merchantBefore)} USDC`);
 
 // ── charge ─────────────────────────────────────────────────────────────
 
-step("Langkah 2 — charge: authorize + capture dalam SATU transaksi");
+step("Step 2 — charge: authorize + capture in ONE transaction");
 
 let ps = await escrow.getPaymentState(hash);
 if (!ps.hasCollectedPayment) {
@@ -179,7 +179,7 @@ if (!ps.hasCollectedPayment) {
     orderId: order.id, nonce: `${hash}:charge`, kind: "capture",
     status: "confirmed", txHash: tx.txHash, chain: "Arc_Testnet", amountMinor: AMOUNT,
   });
-  ok(`charge tuntas — tx ${tx.txHash}`);
+  ok(`charge completed — tx ${tx.txHash}`);
   state.chargeTx = tx.txHash;
   save();
   ps = await escrow.getPaymentState(hash);
@@ -187,7 +187,7 @@ if (!ps.hasCollectedPayment) {
 
 // ── Verify ─────────────────────────────────────────────────────────────
 
-step("Langkah 3 — verifikasi");
+step("Step 3 — verify");
 
 await sleep(2000);
 const buyerAfter = await balanceOf(buyer.address);
@@ -197,11 +197,11 @@ info(`buyer    ${fmt(buyerBefore)} → ${fmt(buyerAfter)}`);
 info(`merchant ${fmt(merchantBefore)} → ${fmt(merchantAfter)}`);
 info(`escrow state: collected=${ps.hasCollectedPayment} capturable=${fmt(ps.capturableAmount)} refundable=${fmt(ps.refundableAmount)}`);
 
-record(ps.hasCollectedPayment, "pembayaran tercatat terkumpul");
-record(ps.capturableAmount === 0n, "capturable NOL — tidak ada yang tertahan di escrow");
-record(ps.refundableAmount === AMOUNT, "langsung masuk refundable — capture sudah terjadi", fmt(ps.refundableAmount));
-record(buyerBefore - buyerAfter === AMOUNT, "buyer terdebit tepat", fmt(buyerBefore - buyerAfter));
-record(merchantAfter - merchantBefore === AMOUNT, "merchant menerima langsung", fmt(merchantAfter - merchantBefore));
+record(ps.hasCollectedPayment, "the payment is recorded as collected");
+record(ps.capturableAmount === 0n, "capturable is ZERO — nothing is held in escrow");
+record(ps.refundableAmount === AMOUNT, "straight into refundable — the capture already happened", fmt(ps.refundableAmount));
+record(buyerBefore - buyerAfter === AMOUNT, "the buyer was debited exactly", fmt(buyerBefore - buyerAfter));
+record(merchantAfter - merchantBefore === AMOUNT, "the merchant is paid directly", fmt(merchantAfter - merchantBefore));
 
 order = await store.get(order.id);
 if (order.state === "funding_pending") {
@@ -216,12 +216,12 @@ if (order.state === "funded") {
     settledAt: new Date(),
   });
 }
-record(order.state === "released", "order selesai di state released", order.state);
+record(order.state === "released", "the order finished in the released state", order.state);
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " Mode direct-settle (charge) TERBUKTI — satu tx, tanpa hold."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " Direct-settle mode (charge) PROVEN — one tx, no hold."),
 );
 process.exit(failed ? 1 : 0);

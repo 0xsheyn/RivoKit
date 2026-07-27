@@ -31,7 +31,7 @@ import { createBridge, BridgeStuckError, BridgeFailedError } from "../src/fundin
 import { refund } from "../src/orchestrator/refund.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 
-// This network hijacks Circle's DNS (see dns-api-circle-dibajak); pin before use.
+// This network hijacks Circle's DNS (observed live); pin before use.
 installCircleDnsPinning();
 
 const FUNDING_STATE = ".live-funding.json";
@@ -60,7 +60,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -104,7 +104,7 @@ const operatorSender = async ({ functionName, args }) => {
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction.txHash };
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${functionName}: timeout`);
@@ -114,10 +114,10 @@ const escrow = createEscrow({ escrowAddress: ESCROW, publicClient: arcClient, op
 
 // ── Step 1: pick up the order funded cross-chain earlier ───────────────
 
-step("Langkah 1 — muat order funded dari live-funding, siapkan refund");
+step("Step 1 — load the funded order from live-funding, prepare the refund");
 
 if (!existsSync(FUNDING_STATE)) {
-  console.error(`GAGAL: ${FUNDING_STATE} tak ada. Jalankan live-funding.mjs dulu.`);
+  console.error(`FAILED: ${FUNDING_STATE} is missing. Run live-funding.mjs first.`);
   process.exit(1);
 }
 const funding = JSON.parse(readFileSync(FUNDING_STATE, "utf8"));
@@ -131,34 +131,34 @@ const hash = getPaymentInfoHash(pi, ARC_TESTNET_CHAIN_ID, ESCROW);
 
 let order = await store.get(funding.orderId);
 if (!order) {
-  console.error(`GAGAL: order ${funding.orderId} tak ada di DB.`);
+  console.error(`FAILED: order ${funding.orderId} is not in the DB.`);
   process.exit(1);
 }
 const RECEIVING_CHAIN = order.receiving_chain;
 ok(`order ${order.id} — state ${order.state}, receivingChain ${RECEIVING_CHAIN}`);
-record(RECEIVING_CHAIN === "Ethereum_Sepolia", "receivingChain adalah chain asal (invariant 5)", RECEIVING_CHAIN);
+record(RECEIVING_CHAIN === "Ethereum_Sepolia", "receivingChain is the origin chain (invariant 5)", RECEIVING_CHAIN);
 
 const buyerArcBefore = await arcUsdc(buyer.address);
 const buyerSepBefore = await sepUsdc(buyer.address);
 info(`buyer: Arc ${fmt(buyerArcBefore)} · Sepolia ${fmt(buyerSepBefore)} USDC`);
 
 const ps0 = await escrow.getPaymentState(hash);
-info(`escrow menahan ${fmt(ps0.capturableAmount)} USDC (belum di-capture)`);
+info(`escrow holds ${fmt(ps0.capturableAmount)} USDC (not yet captured)`);
 
-// ── Langkah 2: catat niat refund SEBELUM menyentuh chain ───────────────
+// ── Step 2: record the refund intent BEFORE touching the chain ───────────────
 
-step("Langkah 2 — refund_pending dicatat sebelum void");
+step("Step 2 — refund_pending recorded before the void");
 
 if (order.state === "funded" || order.state === "shipped") {
   order = await store.transition(order.id, "refund_pending");
-  ok(`state ${order.state} — dicatat SEBELUM void`);
+  ok(`state ${order.state} — recorded BEFORE the void`);
 } else {
-  ok(`state sudah ${order.state} (lanjutan run sebelumnya)`);
+  ok(`state is already ${order.state} (continuing an earlier run)`);
 }
 
-// ── Langkah 3: void + bridge-back ke receivingChain ────────────────────
+// ── Step 3: void + bridge-back to receivingChain ────────────────────
 
-step("Langkah 3 — void escrow lalu bridge Arc → Sepolia (invariant 5)");
+step("Step 3 — void the escrow, then bridge Arc → Sepolia (invariant 5)");
 
 const arcAdapter = createViemAdapterFromPrivateKey({ privateKey: env.BUYER_PRIVATE_KEY, chain: BridgeChain.Arc_Testnet });
 const sepAdapter = createViemAdapterFromPrivateKey({ privateKey: env.BUYER_PRIVATE_KEY, chain: BridgeChain.Ethereum_Sepolia });
@@ -197,7 +197,7 @@ if (stillEscrowed) {
   // Resume: the void already happened; the payer holds USDC on Arc. Finish only
   // the bridge leg — and if it was stuck (burn landed), RESUME via retry, which
   // never burns again. bridgeStuck gates the execute (burn) path out entirely.
-  ok("escrow sudah kosong — void tuntas di run sebelumnya; lanjutkan bridge saja");
+  ok("escrow is already empty — the void completed in an earlier run; just continue the bridge");
   try {
     const res = state.bridgeStuck
       ? await bridge.retry(bridgeBack, state.bridgePrevious)
@@ -228,42 +228,42 @@ if (outcome.mintTxHash && !state.bridgeRecorded) {
 }
 info(`burn (Arc)     ${outcome.burnTxHash ?? "-"}`);
 info(`mint (Sepolia) ${outcome.mintTxHash ?? "-"}`);
-record(Boolean(outcome.escrowTxHash) || !stillEscrowed, "escrow dikembalikan ke payer (void)");
-record(outcome.status === "refunded", "bridge-back tuntas ke chain asal", outcome.status);
+record(Boolean(outcome.escrowTxHash) || !stillEscrowed, "escrow returned to the payer (void)");
+record(outcome.status === "refunded", "bridge-back completed to the origin chain", outcome.status);
 
 if (outcome.status !== "refunded") {
-  console.log(`\n  TERTAHAN — ${outcome.reason ?? "bridge belum tuntas"}`);
-  console.log("  Payer sudah pegang USDC di Arc. Jalankan ulang: skrip MELANJUTKAN via retry, TAK burn ulang. JANGAN reset.");
+  console.log(`\n  TERTAHAN — ${outcome.reason ?? "the bridge has not completed"}`);
+  console.log("  The payer already holds USDC on Arc. Re-run: the script CONTINUES via retry, it does NOT burn again. DO NOT reset.");
   process.exit(1);
 }
 
-// ── Langkah 4: tandai refunded ─────────────────────────────────────────
+// ── Step 4: mark it refunded ─────────────────────────────────────────
 
-step("Langkah 4 — tandai order refunded");
+step("Step 4 — tandai order refunded");
 
 order = await store.get(order.id);
 if (order.state === "refund_pending") {
   order = await store.transition(order.id, "refunded");
 }
 ok(`order ${order.state}`);
-record(order.state === "refunded", "order mencapai refunded (state terminal)");
+record(order.state === "refunded", "the order reached refunded (terminal state)");
 
-// ── Verifikasi ─────────────────────────────────────────────────────────
+// ── Verification ─────────────────────────────────────────────────────────
 
-step("Verifikasi — dana kembali ke chain asal");
+step("Verification — funds returned to the origin chain");
 
 await sleep(4000);
 const buyerSepAfter = await sepUsdc(buyer.address);
 info(`buyer Sepolia ${fmt(buyerSepBefore)} → ${fmt(buyerSepAfter)}  (+${fmt(buyerSepAfter - buyerSepBefore)})`);
 
 const gained = buyerSepAfter - buyerSepBefore;
-record(gained > 0n, "USDC tiba kembali di chain asal (Sepolia)", fmt(gained));
-record(gained <= AMOUNT, "yang kembali tidak melebihi yang di-refund", `${fmt(gained)} <= ${fmt(AMOUNT)}`);
+record(gained > 0n, "USDC arrived back on the origin chain (Sepolia)", fmt(gained));
+record(gained <= AMOUNT, "what came back does not exceed what was refunded", `${fmt(gained)} <= ${fmt(AMOUNT)}`);
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " Refund bridge-back TERBUKTI: escrow Arc → Ethereum Sepolia (invariant 5)."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " Refund bridge-back PROVEN: Arc escrow → Ethereum Sepolia (invariant 5)."),
 );
 process.exit(failed ? 1 : 0);

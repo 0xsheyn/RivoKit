@@ -24,7 +24,7 @@ for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
 
 const key = env.CIRCLE_CPN_KEY;
 if (!key) {
-  console.error("GAGAL: CIRCLE_CPN_KEY tidak ada di .env.local. Jalankan dulu: node scripts/sync-env.mjs");
+  console.error("FAILED: CIRCLE_CPN_KEY missing from .env.local. Run this first: node scripts/sync-env.mjs");
   process.exit(1);
 }
 
@@ -41,7 +41,7 @@ const demo = await cpn.findRoute(
   { destinationCurrency: "EUR", paymentMethodType: "SEPA", blockchain: "ARC-TESTNET" },
 );
 console.log(
-  `  koridor demo USDC(Arc)→EUR/SEPA: ${demo ? `ADA (min ${demo.cryptoLimit.min} USDC)` : "TIDAK ADA"}`,
+  `  demo corridor USDC(Arc)→EUR/SEPA: ${demo ? `AVAILABLE (min ${demo.cryptoLimit.min} USDC)` : "NOT AVAILABLE"}`,
 );
 
 // With country codes on argv, dump every rail so a corridor can be inspected.

@@ -23,7 +23,7 @@ import { USDC_ADDRESS } from "../src/constants/arc.ts";
 import { createBridge, BridgeStuckError } from "../src/funding/bridge.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 
-// This network hijacks Circle's DNS (see dns-api-circle-dibajak); pin the real
+// This network hijacks Circle's DNS (observed live, not hypothetical); pin the real
 // IPs before any SDK call. Must run before AppKit is used.
 installCircleDnsPinning();
 
@@ -49,7 +49,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -93,9 +93,9 @@ const params = {
   kitKey: env.KIT_KEY,
 };
 
-// ── Saldo awal ─────────────────────────────────────────────────────────
+// ── Opening balances ─────────────────────────────────────────────────────────
 
-step("Langkah 1 — saldo awal di kedua chain");
+step("Step 1 — opening balances on both chains");
 
 const beforeArc = await arcUsdc();
 const beforeSepolia = await sepoliaUsdc();
@@ -104,12 +104,12 @@ const sepoliaEth = await sepoliaClient.getBalance({ address: buyer.address });
 info(`Arc     ${fmt(beforeArc)} USDC`);
 info(`Sepolia ${fmt(beforeSepolia)} USDC · ${formatUnits(sepoliaEth, 18)} ETH`);
 
-record(beforeArc >= AMOUNT, "Arc punya cukup untuk di-bridge", fmt(beforeArc));
-record(sepoliaEth > 0n, "Sepolia punya ETH untuk gas mint", formatUnits(sepoliaEth, 18));
+record(beforeArc >= AMOUNT, "Arc holds enough to bridge", fmt(beforeArc));
+record(sepoliaEth > 0n, "Sepolia holds ETH for mint gas", formatUnits(sepoliaEth, 18));
 
 // ── Estimasi ───────────────────────────────────────────────────────────
 
-step("Langkah 2 — estimasi bridge Arc → Sepolia");
+step("Step 2 — estimasi bridge Arc → Sepolia");
 
 const est = await bridge.estimate(params);
 info(`${est.amount} ${est.token}: ${est.sourceChain} → ${est.destinationChain}`);
@@ -118,8 +118,8 @@ record(est.sourceChain === "Arc_Testnet" && est.destinationChain === "Ethereum_S
 
 // ── Eksekusi ───────────────────────────────────────────────────────────
 
-step("Langkah 3 — eksekusi bridge (CCTP: burn → atestasi → mint)");
-info("ini butuh beberapa menit; atestasi CCTP off-chain");
+step("Step 3 — eksekusi bridge (CCTP: burn → atestasi → mint)");
+info("this takes several minutes; CCTP attestation is off-chain");
 
 if (!state.bridgeDone) {
   state.startedAt = new Date().toISOString();
@@ -130,27 +130,27 @@ if (!state.bridgeDone) {
     state.bridgeDone = res.state === "success";
     state.result = { state: res.state, burn: res.burnTxHash, mint: res.mintTxHash };
     save();
-    ok(`bridge selesai dalam ${Math.round((Date.now() - t0) / 1000)} detik — state ${res.state}`);
+    ok(`bridge completed in ${Math.round((Date.now() - t0) / 1000)}s — state ${res.state}`);
     info(`burn (Arc)     ${res.burnTxHash ?? "-"}`);
     info(`mint (Sepolia) ${res.mintTxHash ?? "-"}`);
     record(res.state === "success", "state bridge sukses", res.state);
-    record(Boolean(res.burnTxHash), "burn tercatat di chain asal");
-    record(Boolean(res.mintTxHash), "mint tercatat di chain tujuan");
+    record(Boolean(res.burnTxHash), "burn recorded on the origin chain");
+    record(Boolean(res.mintTxHash), "mint recorded on the destination chain");
   } catch (e) {
     if (e instanceof BridgeStuckError) {
       console.log(`\n  TERTAHAN — ${e.message}`);
-      console.log("  Jalankan ulang skrip ini untuk melanjutkan; JANGAN reset.");
+      console.log("  Re-run this script to continue; DO NOT reset.");
       process.exit(1);
     }
     throw e;
   }
 } else {
-  ok("bridge sudah tuntas di run sebelumnya");
+  ok("bridge already completed in an earlier run");
 }
 
-// ── Verifikasi ─────────────────────────────────────────────────────────
+// ── Verification ─────────────────────────────────────────────────────────
 
-step("Langkah 4 — verifikasi kedua chain");
+step("Step 4 — verify both chains");
 
 await sleep(5000);
 const afterArc = await arcUsdc();
@@ -162,14 +162,14 @@ info(`Sepolia ${fmt(beforeSepolia)} → ${fmt(afterSepolia)}  (+${fmt(afterSepol
 const sepoliaGain = afterSepolia - beforeSepolia;
 const arcSpent = beforeArc - afterArc;
 
-record(arcSpent >= AMOUNT, "USDC keluar dari Arc", fmt(arcSpent));
-record(sepoliaGain > 0n, "USDC tiba di Sepolia", fmt(sepoliaGain));
-record(sepoliaGain <= AMOUNT, "yang tiba tidak melebihi yang dikirim", `${fmt(sepoliaGain)} <= ${fmt(AMOUNT)}`);
+record(arcSpent >= AMOUNT, "USDC left Arc", fmt(arcSpent));
+record(sepoliaGain > 0n, "USDC arrived on Sepolia", fmt(sepoliaGain));
+record(sepoliaGain <= AMOUNT, "what arrived does not exceed what was sent", `${fmt(sepoliaGain)} <= ${fmt(AMOUNT)}`);
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " Bridge lintas-chain TERBUKTI: Arc → Ethereum Sepolia."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " Bridge lintas-chain PROVEN: Arc → Ethereum Sepolia."),
 );
 process.exit(failed ? 1 : 0);

@@ -25,7 +25,7 @@ for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
 const BASE = "https://api-sandbox.circle.com";
 const key = env.CIRCLE_RAMP_KEY;
 if (!key) {
-  console.error("GAGAL: CIRCLE_RAMP_KEY tidak ada di .env.local");
+  console.error("FAILED: CIRCLE_RAMP_KEY missing from .env.local");
   process.exit(1);
 }
 
@@ -42,7 +42,7 @@ async function call(method, path, body) {
 }
 
 const bal = await call("GET", "/v1/businessAccount/balances");
-console.log("Saldo Mint:", JSON.stringify(bal.data));
+console.log("Mint balance:", JSON.stringify(bal.data));
 
 // Reuse an existing wire bank if any, else create a mock one.
 let banks = (await call("GET", "/v1/businessAccount/banks/wires")).data ?? [];
@@ -58,9 +58,9 @@ if (!bank) {
   console.log("Link bank:", created.status, JSON.stringify(created.data).slice(0, 200));
   bank = created.data;
 } else {
-  console.log("Pakai bank tertaut:", bank.id, bank.description ?? "");
+  console.log("Using linked bank:", bank.id, bank.description ?? "");
 }
-if (!bank?.id) { console.error("Tak ada bank id — berhenti."); process.exit(1); }
+if (!bank?.id) { console.error("No bank id — stopping."); process.exit(1); }
 
 // Redeem a small amount to the bank.
 const payout = await call("POST", "/v1/businessAccount/payouts", {
@@ -72,4 +72,4 @@ console.log("\nRedeem (payout):", payout.status);
 console.log(JSON.stringify(payout.data, null, 2).slice(0, 600));
 
 const bal2 = await call("GET", "/v1/businessAccount/balances");
-console.log("\nSaldo setelah:", JSON.stringify(bal2.data));
+console.log("\nBalance after:", JSON.stringify(bal2.data));

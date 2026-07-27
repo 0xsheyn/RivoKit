@@ -47,7 +47,7 @@ const fmt = (v) => formatUnits(v, 6);
 const checks = [];
 const record = (pass, label, detail) => {
   checks.push(pass);
-  console.log(`${pass ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
@@ -83,7 +83,7 @@ const operatorSender = async ({ functionName, args }) => {
     const s = t.transaction?.state;
     if (["COMPLETE", "CONFIRMED"].includes(s)) return { txHash: t.transaction.txHash };
     if (["FAILED", "CANCELLED", "DENIED"].includes(s)) {
-      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "tanpa alasan"}`);
+      throw new Error(`${functionName} ${s}: ${t.transaction?.errorReason ?? "no reason given"}`);
     }
   }
   throw new Error(`${functionName}: timeout`);
@@ -98,18 +98,18 @@ const fx = createSettlementFx({
 
 // ── Step 0: quote to set an honest floor ───────────────────────────────
 
-step("Langkah 0 — kuotasi untuk menetapkan floor");
+step("Step 0 — quote to establish the floor");
 
 const quote = await fx.quote({ address: MERCHANT, tokenIn: "USDC", tokenOut: "EURC", amountInMinor: AMOUNT });
 info(`${fmt(AMOUNT)} USDC → estimasi ${fmt(quote.amountOutMinor)} EURC`);
 
 // The recipient's guarantee, 2% under the fresh quote — achievable but real.
 const priceOutMinor = (quote.amountOutMinor * 98n) / 100n;
-ok(`floor (priceEUR) ditetapkan ${fmt(priceOutMinor)} EURC`);
+ok(`floor (priceEUR) set to ${fmt(priceOutMinor)} EURC`);
 
 // ── Step 1: build PaymentInfo ──────────────────────────────────────────
 
-step("Langkah 1 — susun PaymentInfo");
+step("Step 1 — susun PaymentInfo");
 
 if (!state.paymentInfo) {
   const now = Math.floor(Date.now() / 1000);
@@ -143,7 +143,7 @@ info(`buyer ${fmt(opening.buyerUsdc)} USDC · merchant ${fmt(opening.merchantUsd
 
 // ── Step 2: authorize ──────────────────────────────────────────────────
 
-step("Langkah 2 — buyer tanda tangan + operator authorize");
+step("Step 2 — buyer tanda tangan + operator authorize");
 
 let ps = await escrow.getPaymentState(hash);
 if (!ps.hasCollectedPayment) {
@@ -169,12 +169,12 @@ if (!ps.hasCollectedPayment) {
   await escrow.authorize(pi, AMOUNT, TOKEN_COLLECTOR, state.signature);
   ps = await escrow.getPaymentState(hash);
 }
-ok(`escrow menahan ${fmt(ps.capturableAmount)} USDC`);
-record(ps.capturableAmount === AMOUNT, "dana masuk escrow", fmt(ps.capturableAmount));
+ok(`escrow holds ${fmt(ps.capturableAmount)} USDC`);
+record(ps.capturableAmount === AMOUNT, "funds entered escrow", fmt(ps.capturableAmount));
 
 // ── Step 3: release = capture + swap, satu panggilan ───────────────────
 
-step("Langkah 3 — release(): capture lalu swap ber-floor");
+step("Step 3 — release(): capture, then the floored swap");
 
 const outcome = await release(
   { escrow, fx, settlementAddress: MERCHANT },
@@ -193,14 +193,14 @@ if (outcome.status === "released") {
   ok(`status ${outcome.status}`);
   info(`capture tx ${outcome.captureTxHash ?? "-"}`);
   info(`swap tx    ${outcome.swapTxHash ?? "-"}`);
-  info(`EURC keluar ${fmt(outcome.eurcOutMinor)} · rebate ${fmt(outcome.rebateMinor)}`);
+  info(`EURC out ${fmt(outcome.eurcOutMinor)} · rebate ${fmt(outcome.rebateMinor)}`);
 } else {
   console.log(`  status ${outcome.status} — ${outcome.reason}`);
 }
 
 // ── Step 4: verify on chain ────────────────────────────────────────────
 
-step("Langkah 4 — verifikasi di chain");
+step("Step 4 — verify on chain");
 
 await sleep(3000);
 const closing = {
@@ -216,16 +216,16 @@ info(`merchant ${fmt(opening.merchantEurc)} → ${fmt(closing.merchantEurc)} EUR
 
 const eurcGained = closing.merchantEurc - opening.merchantEurc;
 
-record(outcome.status === "released", "release tuntas sampai EURC");
-record(opening.buyerUsdc - closing.buyerUsdc === AMOUNT, "buyer terdebit tepat sekali", fmt(opening.buyerUsdc - closing.buyerUsdc));
-record(finalState.capturableAmount === 0n, "escrow kosong setelah capture");
-record(finalState.refundableAmount === AMOUNT, "jumlah ter-capture tercatat refundable", fmt(finalState.refundableAmount));
-record(eurcGained >= priceOutMinor, "merchant menerima >= floor dalam EURC", `${fmt(eurcGained)} >= ${fmt(priceOutMinor)}`);
+record(outcome.status === "released", "release completed all the way to EURC");
+record(opening.buyerUsdc - closing.buyerUsdc === AMOUNT, "the buyer was debited exactly sekali", fmt(opening.buyerUsdc - closing.buyerUsdc));
+record(finalState.capturableAmount === 0n, "escrow is empty after the capture");
+record(finalState.refundableAmount === AMOUNT, "the captured amount is recorded as refundable", fmt(finalState.refundableAmount));
+record(eurcGained >= priceOutMinor, "the merchant receives >= the floor in EURC", `${fmt(eurcGained)} >= ${fmt(priceOutMinor)}`);
 
-step("Hasil");
+step("Result");
 const failed = checks.filter((c) => !c).length;
 console.log(
-  `${checks.length - failed}/${checks.length} lolos.` +
-    (failed ? " Ada yang gagal." : " Rantai penuh TERBUKTI: authorize → capture → swap ber-floor."),
+  `${checks.length - failed}/${checks.length} passed.` +
+    (failed ? " Something failed." : " Full chain PROVEN: authorize → capture → floored swap."),
 );
 process.exit(failed ? 1 : 0);

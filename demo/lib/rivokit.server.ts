@@ -186,7 +186,7 @@ function build() {
   // way; idempotent so a re-fund is a no-op.
   const fund = async ({ paymentInfo, hash, signature }: { paymentInfo: Record<string, unknown>; hash: Hex; signature?: Hex }) => {
     const ps = await escrow.getPaymentState(hash);
-    if (ps.hasCollectedPayment) return { authorizeTxHash: "0xsudah" };
+    if (ps.hasCollectedPayment) return { authorizeTxHash: "0xalready" };
     const sig = signature ?? (await buyerWallet.signTypedData(authTypedData(paymentInfo) as never));
     const auth = await escrow.authorize(paymentInfo as never, (paymentInfo as { maxAmount: bigint }).maxAmount, TOKEN_COLLECTOR, sig);
     return { authorizeTxHash: auth.txHash };

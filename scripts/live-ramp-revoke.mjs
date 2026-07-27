@@ -23,11 +23,11 @@ async function withRpc(fn) {
     try {
       return await fn(url);
     } catch (e) {
-      console.log(`  ${url} gagal, coba berikutnya…`);
+      console.log(`  ${url} failed, trying the next one…`);
       await new Promise((r) => setTimeout(r, 1500));
     }
   }
-  throw new Error("semua RPC Arc gagal");
+  throw new Error("every Arc RPC failed");
 }
 
 const before = await withRpc((url) =>
@@ -36,9 +36,9 @@ const before = await withRpc((url) =>
   }),
 );
 console.log(`sender ${account.address}`);
-console.log(`allowance Permit2 sebelum: ${formatUnits(before, 6)} USDC`);
+console.log(`allowance Permit2 before: ${formatUnits(before, 6)} USDC`);
 if (before === 0n) {
-  console.log("Sudah 0 — tidak perlu revoke.");
+  console.log("Already 0 — no revoke needed.");
   process.exit(0);
 }
 
@@ -47,7 +47,7 @@ const hash = await withRpc((url) =>
     address: USDC_ADDRESS, abi: erc20Abi, functionName: "approve", args: [PERMIT2_ADDRESS, 0n],
   }),
 );
-console.log(`revoke tx: ${hash} — menunggu konfirmasi…`);
+console.log(`revoke tx: ${hash} — waiting for confirmation…`);
 const receipt = await withRpc((url) =>
   createPublicClient({ chain: arcTestnet, transport: http(url) }).waitForTransactionReceipt({ hash }),
 );
@@ -56,4 +56,4 @@ const after = await withRpc((url) =>
     address: USDC_ADDRESS, abi: erc20Abi, functionName: "allowance", args: [account.address, PERMIT2_ADDRESS],
   }),
 );
-console.log(`status: ${receipt.status}  |  allowance Permit2 sesudah: ${formatUnits(after, 6)} USDC`);
+console.log(`status: ${receipt.status}  |  Permit2 allowance after: ${formatUnits(after, 6)} USDC`);

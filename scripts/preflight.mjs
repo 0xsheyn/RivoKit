@@ -29,7 +29,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV = resolve(ROOT, ".env.local");
 
 if (!existsSync(ENV)) {
-  console.error("GAGAL: .env.local tidak ada. Jalankan: node scripts/sync-env.mjs");
+  console.error("FAILED: .env.local is missing. Run: node scripts/sync-env.mjs");
   process.exit(1);
 }
 
@@ -42,7 +42,7 @@ for (const line of readFileSync(ENV, "utf8").split(/\r?\n/)) {
 const results = [];
 const record = (ok, label, detail) => {
   results.push({ ok, label, detail });
-  console.log(`${ok ? "  OK  " : " GAGAL"}  ${label}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${ok ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
 
 const client = createPublicClient({
@@ -64,11 +64,11 @@ try {
   const block = await client.getBlockNumber();
   record(
     chainId === ARC_TESTNET_CHAIN_ID,
-    "RPC terjangkau",
-    `chainId=${chainId} (harap ${ARC_TESTNET_CHAIN_ID}), block=${block}`,
+    "RPC reachable",
+    `chainId=${chainId} (expect ${ARC_TESTNET_CHAIN_ID}), block=${block}`,
   );
 } catch (err) {
-  record(false, "RPC terjangkau", String(err?.shortMessage ?? err?.message ?? err));
+  record(false, "RPC reachable", String(err?.shortMessage ?? err?.message ?? err));
 }
 
 // 2. Key separation + balances.
@@ -80,14 +80,14 @@ const addresses = {};
 
 for (const [role, key] of roles) {
   if (!key) {
-    record(false, `kunci ${role} ada`, "tidak diset di .env.local");
+    record(false, `${role} key present`, "not set in .env.local");
     continue;
   }
   let account;
   try {
     account = privateKeyToAccount(key);
   } catch {
-    record(false, `kunci ${role} valid`, "bukan private key hex 32-byte");
+    record(false, `${role} key valid`, "not a 32-byte hex private key");
     continue;
   }
   addresses[role] = account.address;
@@ -112,13 +112,13 @@ for (const [role, key] of roles) {
     // (18dp vs 6dp). They should agree; a mismatch means a decimals bug.
     record(
       usdc > 0n,
-      `${role} punya USDC untuk gas`,
+      `${role} holds USDC for gas`,
       `${account.address} — ${formatUnits(usdc, TOKEN_DECIMALS)} USDC ` +
         `(native ${formatUnits(native, NATIVE_GAS_DECIMALS)}), ` +
         `${formatUnits(eurc, TOKEN_DECIMALS)} EURC`,
     );
   } catch (err) {
-    record(false, `saldo ${role} terbaca`, String(err?.shortMessage ?? err?.message ?? err));
+    record(false, `${role} balance readable`, String(err?.shortMessage ?? err?.message ?? err));
   }
 }
 
@@ -128,19 +128,19 @@ record(
     addresses.deployer !== addresses["relayer/operator"],
   "deployer != relayer (DEPLOYMENT.md §2)",
   addresses.deployer === addresses["relayer/operator"]
-    ? "kunci IDENTIK — satu bocor berarti kendali penuh"
-    : "terpisah",
+    ? "keys are IDENTICAL — one leak means full control"
+    : "separate",
 );
 
 // 3. Circle API credentials.
 if (!env.CIRCLE_API_KEY) {
-  record(false, "CIRCLE_API_KEY diset", "kosong");
+  record(false, "CIRCLE_API_KEY is set", "empty");
 } else {
   try {
     const res = await fetch("https://api.circle.com/v1/w3s/config/entity", {
       headers: { Authorization: `Bearer ${env.CIRCLE_API_KEY}` },
     });
-    record(res.ok, "kredensial Circle diterima", `HTTP ${res.status}`);
+    record(res.ok, "Circle credentials accepted", `HTTP ${res.status}`);
   } catch (err) {
     // A TLS failure here is usually NOT Circle's fault. Indonesian ISPs
     // hijack DNS for filtered domains and answer with the internetpositif.id
@@ -151,7 +151,7 @@ if (!env.CIRCLE_API_KEY) {
     // the interceptor, not Circle, and the API key would be handed to it in
     // the clear.
     const reason = await diagnoseTlsFailure("api.circle.com");
-    record(false, "kredensial Circle diterima", reason);
+    record(false, "Circle credentials accepted", reason);
   }
 }
 
@@ -174,20 +174,20 @@ async function diagnoseTlsFailure(host) {
 
   if (cn && !cn.includes("circle.com")) {
     return (
-      `DNS dibajak — sertifikat yang disodorkan milik "${cn}", bukan circle.com. ` +
-      `Ganti DNS ke 1.1.1.1 / 8.8.8.8. JANGAN matikan verifikasi TLS: ` +
-      `trafiknya tidak sampai ke Circle, dan kunci API akan terbaca pihak penyaring.`
+      `DNS hijacked — the certificate presented belongs to "${cn}", not circle.com. ` +
+      `Switch DNS to 1.1.1.1 / 8.8.8.8. DO NOT disable TLS verification: ` +
+      `the traffic never reaches Circle, and the API key would be read by whoever intercepts it.`
     );
   }
-  return "fetch gagal (jaringan atau TLS)";
+  return "fetch failed (network or TLS)";
 }
 
 record(Boolean(env.CIRCLE_ENTITY_SECRET), "CIRCLE_ENTITY_SECRET diset");
-record(Boolean(env.KIT_KEY), "KIT_KEY diset (wajib untuk swap FX)");
+record(Boolean(env.KIT_KEY), "KIT_KEY is set (required for the FX swap)");
 
 const failed = results.filter((r) => !r.ok);
 console.log(
-  `\n${results.length - failed.length}/${results.length} lolos.` +
-    (failed.length ? ` Perbaiki dulu sebelum setup:\n  - ${failed.map((f) => f.label).join("\n  - ")}` : " Siap untuk setup."),
+  `\n${results.length - failed.length}/${results.length} passed.` +
+    (failed.length ? ` Fix these before running setup:\n  - ${failed.map((f) => f.label).join("\n  - ")}` : " Ready for setup."),
 );
 process.exit(failed.length ? 1 : 0);
