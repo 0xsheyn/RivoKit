@@ -54,7 +54,11 @@ const ROWS: Array<{ path: string; status: Status; detail: string; url?: string }
     url: TX("0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e"),
   },
   { path: "CPN BRL / MXN / USD", status: "partial", detail: "requirements + quote + prepare only" },
-  { path: "CPN webhook actually delivered", status: "never", detail: "key is 403 on the subscriptions API" },
+  {
+    path: "CPN webhooks — real events, replayed through the reducer",
+    status: "partial",
+    detail: "5 signed events captured; our own endpoint not yet public",
+  },
   { path: "Wallet-side Permit2 approve branch", status: "partial", detail: "written, skipped in that run" },
   { path: "Browser-wallet funding rails", status: "never", detail: "written, never executed on-chain" },
 ];

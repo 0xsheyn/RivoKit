@@ -30,104 +30,115 @@ import { readEnv } from "./lib/env.mjs";
 
 installCircleDnsPinning();
 
-const env = readEnv();
-const key = env.CIRCLE_CPN_KEY;
-if (!key) {
-  console.error("FAILED: CIRCLE_CPN_KEY missing from .env.local");
-  process.exit(1);
-}
+/**
+ * Wrapped in a function so every exit is a `return`, not `process.exit()`.
+ * Exiting while undici still holds sockets trips a libuv assertion on Windows
+ * and reports 127 on a run that actually succeeded — a false failure is worse
+ * than a slow one. Setting `exitCode` lets the loop drain first.
+ */
+async function main() {
+  const env = readEnv();
+  const key = env.CIRCLE_CPN_KEY;
+  if (!key) {
+    console.error("FAILED: CIRCLE_CPN_KEY missing from .env.local");
+    return 1;
+  }
 
-// CPN platform APIs use one base URL; the key decides sandbox vs production.
-const BASE = "https://api.circle.com";
-const PATH = "/v2/cpn/notifications/subscriptions";
+  // CPN platform APIs use one base URL; the key decides sandbox vs production.
+  const BASE = "https://api.circle.com";
+  const PATH = "/v2/cpn/notifications/subscriptions";
 
-const args = process.argv.slice(2);
-const flag = (name) => args.includes(name);
-const valueAfter = (name) => args[args.indexOf(name) + 1];
-const endpoint = args.find((a) => a.startsWith("https://"));
+  const args = process.argv.slice(2);
+  const flag = (name) => args.includes(name);
+  const valueAfter = (name) => args[args.indexOf(name) + 1];
+  const endpoint = args.find((a) => a.startsWith("https://"));
 
-async function call(method, path, body) {
-  const res = await fetch(BASE + path, {
-    method,
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+  async function call(method, path, body) {
+    const res = await fetch(BASE + path, {
+      method,
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const text = await res.text();
+    let parsed;
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+    return { status: res.status, ok: res.ok, data: parsed?.data ?? parsed };
+  }
+
+  // ── --check: does the endpoint answer HEAD the way Circle demands? ──────
+  if (flag("--check")) {
+    const url = valueAfter("--check") ?? endpoint;
+    if (!url) {
+      console.error("FAILED: --check needs an https:// URL");
+      return 1;
+    }
+    const head = await fetch(url, { method: "HEAD" }).catch((e) => ({ status: 0, statusText: e.message }));
+    const post = await fetch(url, { method: "POST", body: "{}" }).catch((e) => ({ status: 0, statusText: e.message }));
+    console.log(`HEAD ${url} → ${head.status} ${head.statusText ?? ""}`);
+    console.log(`POST ${url} → ${post.status} (401/400 is fine here: an unsigned body must be refused)`);
+    console.log(head.status === 200
+      ? "\nOK — Circle's URL validation will pass."
+      : "\nFAILED — Circle validates with HEAD before creating the subscription; this URL would be refused.");
+    return head.status === 200 ? 0 : 1;
+  }
+
+  // ── --delete ───────────────────────────────────────────────────────────
+  if (flag("--delete")) {
+    const id = valueAfter("--delete");
+    if (!id) {
+      console.error("FAILED: --delete needs a subscription id");
+      return 1;
+    }
+    if (process.env.CONFIRM !== "DELETE") {
+      console.error(`Refusing to delete ${id} without CONFIRM=DELETE.`);
+      return 1;
+    }
+    const res = await call("DELETE", `${PATH}/${id}`);
+    console.log(`DELETE ${id} → ${res.status}`);
+    return res.ok ? 0 : 1;
+  }
+
+  // ── list (default) ─────────────────────────────────────────────────────
+  const list = await call("GET", PATH);
+  console.log(`GET ${PATH} → ${list.status}`);
+  const subs = Array.isArray(list.data) ? list.data : (list.data?.subscriptions ?? []);
+  if (!subs.length) {
+    console.log("No CPN subscriptions registered — no webhook can arrive.");
+  } else {
+    for (const s of subs) {
+      console.log(`  ${s.id}  enabled=${s.enabled}  ${s.endpoint}  types=${JSON.stringify(s.notificationTypes)}`);
+    }
+  }
+
+  if (!endpoint) {
+    console.log("\nTo register one:");
+    console.log("  CONFIRM=SUBSCRIBE node scripts/live-cpn-subscribe.mjs https://<public-host>/api/webhooks/circle");
+    return 0;
+  }
+
+  if (process.env.CONFIRM !== "SUBSCRIBE") {
+    console.log(`\nWould register: ${endpoint}`);
+    console.log("Standing configuration on a live account — re-run with CONFIRM=SUBSCRIBE to actually create it.");
+    return 0;
+  }
+
+  // Fail fast on the exact thing Circle checks, so a refusal is legible.
+  const head = await fetch(endpoint, { method: "HEAD" }).catch((e) => ({ status: 0, statusText: e.message }));
+  if (head.status !== 200) {
+    console.error(`FAILED: ${endpoint} answered HEAD with ${head.status}. Circle validates the URL this way first.`);
+    return 1;
+  }
+
+  const created = await call("POST", PATH, {
+    endpoint,
+    name: "RivoKit cash-out webhooks",
+    enabled: true,
+    notificationTypes: ["*"],
   });
-  const text = await res.text();
-  let parsed;
-  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
-  return { status: res.status, ok: res.ok, data: parsed?.data ?? parsed };
+  console.log(`\nCreate subscription → ${created.status}`);
+  console.log(JSON.stringify(created.data, null, 2).slice(0, 800));
+  return created.ok ? 0 : 1;
+
 }
 
-// ── --check: does the endpoint answer HEAD the way Circle demands? ──────
-if (flag("--check")) {
-  const url = valueAfter("--check") ?? endpoint;
-  if (!url) {
-    console.error("FAILED: --check needs an https:// URL");
-    process.exit(1);
-  }
-  const head = await fetch(url, { method: "HEAD" }).catch((e) => ({ status: 0, statusText: e.message }));
-  const post = await fetch(url, { method: "POST", body: "{}" }).catch((e) => ({ status: 0, statusText: e.message }));
-  console.log(`HEAD ${url} → ${head.status} ${head.statusText ?? ""}`);
-  console.log(`POST ${url} → ${post.status} (401/400 is fine here: an unsigned body must be refused)`);
-  console.log(head.status === 200
-    ? "\nOK — Circle's URL validation will pass."
-    : "\nFAILED — Circle validates with HEAD before creating the subscription; this URL would be refused.");
-  process.exit(head.status === 200 ? 0 : 1);
-}
-
-// ── --delete ───────────────────────────────────────────────────────────
-if (flag("--delete")) {
-  const id = valueAfter("--delete");
-  if (!id) {
-    console.error("FAILED: --delete needs a subscription id");
-    process.exit(1);
-  }
-  if (process.env.CONFIRM !== "DELETE") {
-    console.error(`Refusing to delete ${id} without CONFIRM=DELETE.`);
-    process.exit(1);
-  }
-  const res = await call("DELETE", `${PATH}/${id}`);
-  console.log(`DELETE ${id} → ${res.status}`);
-  process.exit(res.ok ? 0 : 1);
-}
-
-// ── list (default) ─────────────────────────────────────────────────────
-const list = await call("GET", PATH);
-console.log(`GET ${PATH} → ${list.status}`);
-const subs = Array.isArray(list.data) ? list.data : (list.data?.subscriptions ?? []);
-if (!subs.length) {
-  console.log("No CPN subscriptions registered — no webhook can arrive.");
-} else {
-  for (const s of subs) {
-    console.log(`  ${s.id}  enabled=${s.enabled}  ${s.endpoint}  types=${JSON.stringify(s.notificationTypes)}`);
-  }
-}
-
-if (!endpoint) {
-  console.log("\nTo register one:");
-  console.log("  CONFIRM=SUBSCRIBE node scripts/live-cpn-subscribe.mjs https://<public-host>/api/webhooks/circle");
-  process.exit(0);
-}
-
-if (process.env.CONFIRM !== "SUBSCRIBE") {
-  console.log(`\nWould register: ${endpoint}`);
-  console.log("Standing configuration on a live account — re-run with CONFIRM=SUBSCRIBE to actually create it.");
-  process.exit(0);
-}
-
-// Fail fast on the exact thing Circle checks, so a refusal is legible.
-const head = await fetch(endpoint, { method: "HEAD" }).catch((e) => ({ status: 0, statusText: e.message }));
-if (head.status !== 200) {
-  console.error(`FAILED: ${endpoint} answered HEAD with ${head.status}. Circle validates the URL this way first.`);
-  process.exit(1);
-}
-
-const created = await call("POST", PATH, {
-  endpoint,
-  name: "RivoKit cash-out webhooks",
-  enabled: true,
-  notificationTypes: ["*"],
-});
-console.log(`\nCreate subscription → ${created.status}`);
-console.log(JSON.stringify(created.data, null, 2).slice(0, 800));
-process.exit(created.ok ? 0 : 1);
+process.exitCode = await main();
