@@ -376,7 +376,7 @@ paths passes without testing anything.
 | Circle Mint redeem — USD → wire bank | ✅ `complete` — 10.00 USD, balance 350.00 → 340.00, payout `3f708440…`, trackingRef `CIR2V7GVUJ` |
 | Circle Mint redeem — EUR → SEPA bank | ✅ `complete` twice — 10.00 EUR each, balance 273.49 → 253.49, payouts `9d98c66f…` + `47a86ec3…` |
 | Seller EURC on Arc → Mint EUR balance, **no bridge** | ✅ 1 EURC, balance 253.49 → 254.49, tx [`0x405164…52a8449e`](https://testnet.arcscan.app/tx/0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e) |
-| CPN webhook actually delivered | ❌ endpoint answers `HEAD` now, but `CIRCLE_CPN_KEY` is `403` on `/v2/cpn/notifications/subscriptions` |
+| CPN webhooks — Circle really delivers, reducer really folds them | ⚠️ 5 signed events captured for payment `479e22db…` and replayed to `COMPLETED`; delivery to *our* endpoint still pending a public URL |
 
 ## Gotchas that already cost time
 
@@ -458,17 +458,22 @@ Report vulnerabilities privately, not via public issues.
   *not* exercised is the wallet-side Permit2 approval: that wallet already held
   an unlimited Permit2 allowance, so the code skipped it. A wallet starting from
   a zero allowance still takes an untested path.
-- **A cash-out is durable, but no webhook has ever reached it.** Every CPN
-  payout is persisted in `cpn_payments` and folded forward by the same reducer
-  the polling path uses, so an RFI or a late failure has somewhere to land. Two
-  things still stand between that and a delivered event, and neither is code:
-  the endpoint must be publicly reachable over HTTPS, and `CIRCLE_CPN_KEY`
-  currently returns `403` on `/v2/cpn/notifications/subscriptions` while
-  succeeding on `/v1/cpn/payments` — the key lacks the notifications
-  capability. The route itself now answers the `HEAD` request Circle uses to
-  validate a subscriber URL; without that the subscription is refused before
-  hosting even matters. `scripts/live-cpn-subscribe.mjs --check <url>` reports
-  exactly which of these is failing.
+- **Webhooks are real; the last hop is not proven.** A subscription registered
+  from the CPN Console delivered five signed events for one cash-out —
+  `cryptoFundsPending`, `transaction.broadcasted`, `transaction.completed`,
+  `fiatPaymentInitiated`, `completed` — and replaying those exact bodies through
+  `interpretCpnEvent` + `applyPaymentEvent` walks the payment
+  `CREATED → CRYPTO_FUNDS_PENDING → FIAT_PAYMENT_INITIATED → COMPLETED`, with
+  the two transaction events correctly no-oping against the payment machine. So
+  the envelope shape and the reducer are verified against real Circle traffic
+  rather than fixtures. What is still untested is the HTTP hop into *our* route:
+  signature verification against a live `X-Circle-Signature` and the write into
+  `cpn_payments`. That needs the endpoint publicly reachable, which a Cloudflare
+  quick tunnel could not achieve on this machine. Note also that the Console
+  path sidesteps the API: `CIRCLE_CPN_KEY` still returns `403` on
+  `/v2/cpn/notifications/subscriptions` while succeeding on `/v1/cpn/payments`,
+  so managing subscriptions from `scripts/live-cpn-subscribe.mjs` needs the
+  notifications capability added to the key.
 - **The off-ramp is still not triggered by `release()`, on purpose.** A seller
   cashes out an accumulated balance, not one order — so `cpn_payments.order_id`
   is a nullable link, not a foreign key the flow depends on.
@@ -495,9 +500,10 @@ here is a promise; it is what the honest ledger above says is still missing.
    non-custodial claim in code form, and it has never been executed. Needs a
    human at a connected wallet: by design no server key can stand in, which is
    exactly the property being demonstrated.
-2. **A CPN webhook actually delivered.** Blocked on a public HTTPS endpoint and
-   on granting `CIRCLE_CPN_KEY` the notifications capability (see
-   *Limitations*). The handler and its reducer are already covered by tests.
+2. **A CPN webhook delivered into our own route.** Circle's delivery and the
+   reducer are both verified against real traffic (see *Limitations*); what is
+   left is the HTTP hop — live signature verification and the `cpn_payments`
+   write — which needs the endpoint publicly reachable.
 3. **The wallet-side Permit2 approve branch.** Only ever run against a wallet
    that already held an allowance, so the zero-allowance path is untested.
 
