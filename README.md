@@ -372,12 +372,12 @@ paths passes without testing anything.
 | CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
 | Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
 | Seller-signed cash-out — the seller's own wallet signs the CPN intent | ✅ proven — MetaMask signed, 15 USDC → 12.94 EUR `COMPLETED`, tx [`0x51e968…f049e7f`](https://testnet.arcscan.app/tx/0x51e9681d1d23fedeb239110a2c58309912a5c82d35a20c316b3102731f049e7f) |
-| Wallet-side Permit2 **approve** branch | ⚠️ written, skipped in that run — the wallet already held an unlimited allowance |
+| Wallet-side Permit2 **approve** branch, from a zero allowance | ✅ wallet `0xd7d7B4…` approved 15 USDC in tx [`0xdeebf4…cf11177a`](https://testnet.arcscan.app/tx/0xdeebf45ad5e1747693e33e2de0dabca14ccef1323d27d29aaaf598f7cf11177a), spent it on a 15 USDC → 12.95 EUR cash-out, allowance back to 0 |
 | Circle Mint redeem — USD → wire bank | ✅ `complete` — 10.00 USD, balance 350.00 → 340.00, payout `3f708440…`, trackingRef `CIR2V7GVUJ` |
 | Circle Mint redeem — EUR → SEPA bank | ✅ `complete` twice — 10.00 EUR each, balance 273.49 → 253.49, payouts `9d98c66f…` + `47a86ec3…` |
 | Seller EURC on Arc → Mint EUR balance, **no bridge** | ✅ 1 EURC, balance 253.49 → 254.49, tx [`0x405164…52a8449e`](https://testnet.arcscan.app/tx/0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e) |
-| CPN webhooks — signatures verified against live Circle traffic | ✅ 5 signed events for `479e22db…` all verify; a tampered body is refused; replay reaches `COMPLETED` |
-| CPN webhook POSTed into our own route | ⚠️ needs a publicly reachable endpoint; the `cpn_payments` write is still unexercised |
+| CPN webhook → verified → folded into the stored cash-out | ✅ live signatures verified, tampered body refused, `cpn_payments` row for `acd9d389…` advanced `CRYPTO_FUNDS_PENDING → FIAT_PAYMENT_INITIATED → COMPLETED` |
+| That webhook arriving over HTTP at our own route | ⚠️ every layer above the transport is proven; the endpoint still needs to be publicly reachable |
 
 ## Gotchas that already cost time
 
@@ -453,12 +453,14 @@ Report vulnerabilities privately, not via public issues.
   `demo/app/wallet-rails.ts` lets a connected wallet reach Arc via Gateway spend
   or a CCTP bridge with no server secret involved — which is the point — but
   only the server-signed demo buyer has actually moved funds.
-- **The seller-signed cash-out is proven, with one branch still untested.** A
-  connected MetaMask signed the CPN intent itself and the server only broadcast
-  it (`ramp.submitSigned`); no key for that address exists server-side. What was
-  *not* exercised is the wallet-side Permit2 approval: that wallet already held
-  an unlimited Permit2 allowance, so the code skipped it. A wallet starting from
-  a zero allowance still takes an untested path.
+- **The seller-signed cash-out is proven, including the approval branch.** A
+  connected MetaMask signs the CPN intent itself and the server only broadcasts
+  it (`ramp.submitSigned`); no key for that address exists server-side. The
+  wallet-side Permit2 approval — previously skipped because the test wallet
+  already held an unlimited allowance — has now run from zero: `0xd7d7B4…`
+  approved exactly 15 USDC, spent it on a 15 USDC → 12.95 EUR cash-out that
+  reached `COMPLETED`, and its allowance returned to 0. The stored row carries
+  `signed_by: "wallet"`.
 - **Webhooks are real; the last hop is not proven.** A subscription registered
   from the CPN Console delivered five signed events for one cash-out —
   `cryptoFundsPending`, `transaction.broadcasted`, `transaction.completed`,
@@ -474,10 +476,12 @@ Report vulnerabilities privately, not via public issues.
   product, and the route was asking the Wallets path
   (`/v2/notifications/publicKey/{id}`) for CPN keys, which answers `404`. Every
   CPN webhook would have been refused `401 unverifiable` by an endpoint that
-  otherwise looked correct. What is left untested is narrow but real: the HTTP
-  hop itself and the `cpn_payments` write, which needs a recorded cash-out and a
-  publicly reachable endpoint — a Cloudflare quick tunnel could not reach the
-  origin on this machine. Note the Console path sidesteps the API:
+  otherwise looked correct. Feeding those verified events into
+  `applyCpnEventToStore` then advanced the real `cpn_payments` row for
+  `acd9d389…` from `CRYPTO_FUNDS_PENDING` to `COMPLETED`, ignoring a duplicate
+  and no-oping both transaction events on the way. So only the transport itself
+  is unproven now — a Cloudflare quick tunnel could not reach the origin on this
+  machine. Note the Console path sidesteps the API:
   `CIRCLE_CPN_KEY` still returns `403` on
   `/v2/cpn/notifications/subscriptions` while succeeding on `/v1/cpn/payments`,
   so `scripts/live-cpn-subscribe.mjs` needs the notifications capability added
@@ -512,8 +516,9 @@ here is a promise; it is what the honest ledger above says is still missing.
    reducer are both verified against real traffic (see *Limitations*); what is
    left is the HTTP hop — live signature verification and the `cpn_payments`
    write — which needs the endpoint publicly reachable.
-3. **The wallet-side Permit2 approve branch.** Only ever run against a wallet
-   that already held an allowance, so the zero-allowance path is untested.
+3. **Automatic reconciliation from webhooks.** The pieces are proven
+   individually; what no one has watched yet is a stale row correcting itself
+   without a human replaying the event.
 
 **Later — widen the reach once the above holds**
 
