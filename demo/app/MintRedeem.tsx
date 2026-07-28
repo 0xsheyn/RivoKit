@@ -63,7 +63,17 @@ export default function MintRedeem() {
         <div className="mt-3 rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
           <span className="font-medium text-foreground">Top up:</span> send USDC to{" "}
           <span className="font-mono text-foreground">{deposit.address.slice(0, 10)}…{deposit.address.slice(-6)}</span> on{" "}
-          {deposit.chains.join("/")}. <span className="text-amber-600">From Arc, bridge over CCTP first.</span>
+          {deposit.chains.join("/")}.
+          {/* Circle lists an EUR deposit address on ARC, so the seller's floored
+              EURC needs no bridge at all — proven by live-mint-arc-deposit.mjs. */}
+          {deposit.eurOnArc && (
+            <>
+              {" "}
+              <span className="text-emerald-600">
+                EURC on Arc goes straight in — no bridge.
+              </span>
+            </>
+          )}
         </div>
       )}
 

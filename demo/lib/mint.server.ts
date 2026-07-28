@@ -49,19 +49,40 @@ export async function mintBalance(): Promise<MintBalance[]> {
   return data.available ?? [];
 }
 
-export type MintDepositInfo = { address: string; chains: string[] };
+export type MintDepositRoute = { currency: string; chain: string; address: string };
+export type MintDepositInfo = {
+  address: string;
+  chains: string[];
+  routes: MintDepositRoute[];
+  /** The EUR route on Arc, when Circle offers one — the seller's direct exit. */
+  eurOnArc: MintDepositRoute | null;
+};
 
 /**
- * Where the seller sends USDC to top up the Mint balance — one address, many
- * EVM chains. Arc is NOT among them, so the seller's Arc proceeds need a CCTP
- * bridge to one of these chains first. Crediting is async (verified live).
+ * Where the seller tops up the Mint balance — one address, many chains.
+ *
+ * This used to filter to `currency === "USD"`, which silently discarded the row
+ * that matters most: Circle exposes an **EUR deposit address on ARC**. The
+ * seller's floored EURC can therefore go straight from Arc into the Mint EUR
+ * balance and out to a SEPA bank, with no CCTP bridge and no detour through
+ * USD. Keep every route and let the caller choose. Crediting is async.
  */
 export async function mintDepositInfo(): Promise<MintDepositInfo> {
   const addrs = await call<Array<{ address: string; chain: string; currency: string }>>(
     "GET", "/v1/businessAccount/wallets/addresses/deposit",
   );
-  const usd = addrs.filter((a) => a.currency === "USD");
-  return { address: usd[0]?.address ?? "", chains: usd.map((a) => a.chain) };
+  const routes: MintDepositRoute[] = addrs.map((a) => ({
+    currency: a.currency,
+    chain: a.chain,
+    address: a.address,
+  }));
+  const usd = routes.filter((r) => r.currency === "USD");
+  return {
+    address: usd[0]?.address ?? routes[0]?.address ?? "",
+    chains: usd.map((r) => r.chain),
+    routes,
+    eurOnArc: routes.find((r) => r.currency === "EUR" && r.chain === "ARC") ?? null,
+  };
 }
 
 let cachedBankId: string | null = null;

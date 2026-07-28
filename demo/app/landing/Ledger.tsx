@@ -47,7 +47,14 @@ const ROWS: Array<{ path: string; status: Status; detail: string; url?: string }
     status: "proven",
     detail: "complete ×2 · 10.00 EUR each · 273.49 → 253.49",
   },
+  {
+    path: "Seller EURC on Arc → Mint EUR balance, no bridge",
+    status: "proven",
+    detail: "1 EURC · 253.49 → 254.49 · 0x405164…2a8449e",
+    url: TX("0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e"),
+  },
   { path: "CPN BRL / MXN / USD", status: "partial", detail: "requirements + quote + prepare only" },
+  { path: "CPN webhook actually delivered", status: "never", detail: "key is 403 on the subscriptions API" },
   { path: "Wallet-side Permit2 approve branch", status: "partial", detail: "written, skipped in that run" },
   { path: "Browser-wallet funding rails", status: "never", detail: "written, never executed on-chain" },
 ];
