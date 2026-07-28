@@ -12,21 +12,17 @@
  *
  *   node scripts/live-compliance.mjs
  */
-import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createCircleClient } from "./lib/circle.mjs";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { createComplianceGate, createCircleScreener, ComplianceBlockedError } from "../src/events/compliance.ts";
 import { createEmitter } from "../src/events/emitter.ts";
 import { mockPayout, isMockPayout } from "../src/payout/mock-payout.ts";
+import { readEnv } from "./lib/env.mjs";
 
 installCircleDnsPinning();
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const CHAIN = env.CIRCLE_BLOCKCHAIN || "ARC-TESTNET";
 const GOOD = env.MERCHANT_ADDRESS;

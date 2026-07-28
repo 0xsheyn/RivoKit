@@ -9,23 +9,19 @@
  *
  *   node scripts/check-operator.mjs
  */
-import { readFileSync } from "node:fs";
 import { createPublicClient, erc20Abi, formatUnits, getAddress, maxUint256 } from "viem";
 import { arcTestnet } from "viem/chains";
 import { createCircleClient } from "./lib/circle.mjs";
 import { arcTransport, sleep } from "../src/lib/rpc.ts";
 import { USDC_ADDRESS } from "../src/constants/arc.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
+import { readEnv } from "./lib/env.mjs";
 
 // Without this, api.circle.com resolves to an ISP interception host here and
 // every Circle call dies as a bare "fetch failed".
 installCircleDnsPinning();
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const OPERATOR = getAddress(env.OPERATOR_ADDRESS);
 const REFUND_COLLECTOR = getAddress(env.NEXT_PUBLIC_RIVO_REFUND_COLLECTOR_ADDRESS);

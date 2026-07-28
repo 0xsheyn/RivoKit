@@ -25,15 +25,12 @@ import { arcTransport, sleep } from "../src/lib/rpc.ts";
 import { USDC_ADDRESS, EURC_ADDRESS } from "../src/constants/arc.ts";
 import { toDecimalString } from "../src/settlement-fx/units.ts";
 import { createSettlementFx, FloorNotMetError, NoRouteError } from "../src/settlement-fx/swap.ts";
+import { readEnv } from "./lib/env.mjs";
 
 const STATE_FILE = ".live-phase2.json";
 const SWAP_SIZE = parseUnits("5", 6); // 5 tokens — above StableFX's 10 USDC min? see note
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const WALLET = getAddress(env.DEPLOYER_ADDRESS); // Circle DCW — swap needs one
 const publicClient = createPublicClient({ chain: arcTestnet, transport: arcTransport() });

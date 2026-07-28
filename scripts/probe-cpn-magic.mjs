@@ -8,16 +8,12 @@
  *
  *   node scripts/probe-cpn-magic.mjs
  */
-import { readFileSync } from "node:fs";
 import { createCpnClient } from "../src/ramp/cpn-client.ts";
 import { encryptPaymentData } from "../src/ramp/cpn-encrypt.ts";
 import { applyPaymentEvent, interpretCpnEvent } from "../src/ramp/cpn-state.ts";
+import { readEnv } from "./lib/env.mjs";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 const cpn = createCpnClient({ apiKey: env.CIRCLE_CPN_KEY });
 const addr = "0xe251dd0d9db9a097ea25f35e222a8c1f03a68cb5";
 const address = { street: "1 Rivo St", city: "Paris", state: "IDF", country: "FR", postalCode: "75001" };
