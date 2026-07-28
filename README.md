@@ -44,11 +44,20 @@ Two legs, normally bought separately:
   ever touching the recipient's floor — proven in tx `0x7910f1…037420`.
 - **CPN EUR/SEPA settled end-to-end to `COMPLETED`**, twice: 15 USDC → 12.92 EUR
   into a real sandbox bank rail. The fiat leg is no longer a mock.
-- **A second, independent fiat exit**: Circle Mint redeem reached `complete`
-  for EUR → SEPA (twice) and USD → wire. Two different rails now reach a bank,
-  which is what stops the fiat story resting on one integration. Note the
-  boundary: this redeems a *Mint balance*, and nothing yet carries the seller's
-  Arc EURC into it.
+- **A second, independent fiat exit, wired all the way back to Arc**: the
+  seller's EURC goes straight from Arc into a Circle Mint balance — Circle
+  exposes an EUR deposit address on Arc, so there is no bridge and no detour
+  through dollars — and Mint redeem then reached `complete` for EUR → SEPA
+  (twice) and USD → wire. Two rails now reach a bank, which is what stops the
+  fiat story resting on one integration.
+- **A cash-out the server cannot forge.** A connected wallet signs the CPN
+  intent itself and the server only broadcasts it; no key for that address
+  exists server-side. Proven from a *zero* Permit2 allowance: approve 15 USDC,
+  spend it on a 15 USDC → 12.95 EUR payout, allowance back to 0.
+- **Webhooks that are verified, not trusted.** Live `X-Circle-Signature`
+  verification against Circle's per-product key endpoint, a body edited by one
+  digit refused, and the verified events folded into a stored cash-out —
+  duplicates and out-of-order arrivals writing nothing.
 - **280 unit tests** across 19 files, runnable with no credentials at all.
 
 RivoKit is **not** a marketplace, wallet, custodian, or licensed institution. It
@@ -254,7 +263,7 @@ names the code actually reads.
 CIRCLE_API_KEY=            CIRCLE_ENTITY_SECRET=      CIRCLE_BLOCKCHAIN=ARC-TESTNET
 KIT_KEY=                   # App Kit — FX swap
 CIRCLE_CPN_KEY=            # fiat off-ramp — SERVER-ONLY, never import client-side
-CIRCLE_RAMP_KEY=           # Circle Mint redeem — optional; USD leg proven, EUR/SEPA not
+CIRCLE_RAMP_KEY=           # Circle Mint redeem — optional; USD and EUR/SEPA both proven
 NEXT_PUBLIC_ARC_RPC_URL=https://rpc.testnet.arc.network
 DEPLOYER_PRIVATE_KEY=      RELAYER_PRIVATE_KEY=       BUYER_PRIVATE_KEY=
 NEXT_PUBLIC_SUPABASE_URL=  SUPABASE_SECRET_KEY=
@@ -342,7 +351,7 @@ Everything under `scripts/` hits real services and needs `.env.local`.
 | Group | Scripts |
 |---|---|
 | **Setup / health** | `preflight` (read-only prereq check) · `setup` (deploy, idempotent) · `check-cpp` (escrow↔collector wiring, 8 assertions) · `check-hash` (off-chain `getPaymentInfoHash` vs on-chain `getHash`) · `check-operator` (grants + proves the operator's USDC allowance to the refund collector) · `sync-env` |
-| **Live proofs** | `live-phase1/1b/2/2-chain` · `live-funding` · `live-bridge` · `live-unified` · `live-refund` · `live-recovery` (capture ok, swap misses floor, retry wins) · `live-charge` (direct mode) · `live-compliance` · `live-sdk` (full flow through the facade) · `live-scenario` · `live-ramp*` |
+| **Live proofs** | `live-phase1/1b/2/2-chain` · `live-funding` · `live-bridge` · `live-unified` · `live-refund` · `live-recovery` (capture ok, swap misses floor, retry wins) · `live-charge` (direct mode) · `live-compliance` · `live-sdk` (full flow through the facade) · `live-scenario` · `live-ramp*` · `live-mint-arc-deposit` (seller EURC on Arc → Mint balance; sends only behind `CONFIRM=DEPOSIT`) · `live-cpn-subscribe` (lists subscriptions; `--check <url>` tests the `HEAD` Circle validates with; creates only behind `CONFIRM=SUBSCRIBE`) |
 | **API probes** | `probe-cpn*` (quote, payment, status, magic values) · `probe-swap` · `probe-mint` (USD → wire) · `probe-mint-sepa` (links an IBAN account; redeems only behind `CONFIRM=REDEEM`) · `probe-mint-deposit` |
 | **Demo utils** | `demo-topup` (fund the buyer on Sepolia + Gateway) · `reset-demo` (wipe orders) |
 
@@ -369,8 +378,6 @@ paths passes without testing anything.
 | Operator fee 25 bps split at capture, floor intact | ✅ `0x7910f1…037420` |
 | Two-wallet mode — floor forwarded merchant → seller wallet | ✅ `0x11bf41…559bf4` |
 | CPN EUR/SEPA end-to-end → `COMPLETED` | ✅ twice (15 USDC → 12.92 EUR) |
-| CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
-| Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
 | Seller-signed cash-out — the seller's own wallet signs the CPN intent | ✅ proven — MetaMask signed, 15 USDC → 12.94 EUR `COMPLETED`, tx [`0x51e968…f049e7f`](https://testnet.arcscan.app/tx/0x51e9681d1d23fedeb239110a2c58309912a5c82d35a20c316b3102731f049e7f) |
 | Wallet-side Permit2 **approve** branch, from a zero allowance | ✅ wallet `0xd7d7B4…` approved 15 USDC in tx [`0xdeebf4…cf11177a`](https://testnet.arcscan.app/tx/0xdeebf45ad5e1747693e33e2de0dabca14ccef1323d27d29aaaf598f7cf11177a), spent it on a 15 USDC → 12.95 EUR cash-out, allowance back to 0 |
 | Circle Mint redeem — USD → wire bank | ✅ `complete` — 10.00 USD, balance 350.00 → 340.00, payout `3f708440…`, trackingRef `CIR2V7GVUJ` |
@@ -378,6 +385,8 @@ paths passes without testing anything.
 | Seller EURC on Arc → Mint EUR balance, **no bridge** | ✅ 1 EURC, balance 253.49 → 254.49, tx [`0x405164…52a8449e`](https://testnet.arcscan.app/tx/0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e) |
 | CPN webhook → verified → folded into the stored cash-out | ✅ live signatures verified, tampered body refused, `cpn_payments` row for `acd9d389…` advanced `CRYPTO_FUNDS_PENDING → FIAT_PAYMENT_INITIATED → COMPLETED` |
 | That webhook arriving over HTTP at our own route | ⚠️ every layer above the transport is proven; the endpoint still needs to be publicly reachable |
+| CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
+| Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
 
 ## Gotchas that already cost time
 
@@ -512,10 +521,10 @@ here is a promise; it is what the honest ledger above says is still missing.
    non-custodial claim in code form, and it has never been executed. Needs a
    human at a connected wallet: by design no server key can stand in, which is
    exactly the property being demonstrated.
-2. **A CPN webhook delivered into our own route.** Circle's delivery and the
-   reducer are both verified against real traffic (see *Limitations*); what is
-   left is the HTTP hop — live signature verification and the `cpn_payments`
-   write — which needs the endpoint publicly reachable.
+2. **A CPN webhook delivered over HTTP into our own route.** Verification,
+   interpretation and the `cpn_payments` write are all proven against real
+   Circle traffic (see *Limitations*); only the transport has never run, and
+   that needs the endpoint publicly reachable.
 3. **Automatic reconciliation from webhooks.** The pieces are proven
    individually; what no one has watched yet is a stale row correcting itself
    without a human replaying the event.
