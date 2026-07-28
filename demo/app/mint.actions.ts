@@ -4,7 +4,13 @@ import { mintBalance, mintDepositInfo, mintRedeem } from "../lib/mint.server.ts"
 
 export type MintBalanceView = { amount: string; currency: string };
 export type MintPayoutView = { id: string; status: string; amount: string; currency: string; bankName: string };
-export type MintDepositView = { address: string; chains: string[] };
+export type MintDepositView = {
+  address: string;
+  chains: string[];
+  /** Present when Circle offers an EUR deposit address on Arc — the seller's
+   *  floored EURC then needs no bridge to reach the Mint balance. */
+  eurOnArc: { currency: string; chain: string; address: string } | null;
+};
 
 export type MintBalanceResult = { ok: true; balances: MintBalanceView[]; deposit: MintDepositView } | { ok: false; error: string };
 export type MintRedeemResult = { ok: true; payout: MintPayoutView } | { ok: false; error: string };
