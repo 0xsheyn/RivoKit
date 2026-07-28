@@ -375,6 +375,8 @@ paths passes without testing anything.
 | Wallet-side Permit2 **approve** branch | ⚠️ written, skipped in that run — the wallet already held an unlimited allowance |
 | Circle Mint redeem — USD → wire bank | ✅ `complete` — 10.00 USD, balance 350.00 → 340.00, payout `3f708440…`, trackingRef `CIR2V7GVUJ` |
 | Circle Mint redeem — EUR → SEPA bank | ✅ `complete` twice — 10.00 EUR each, balance 273.49 → 253.49, payouts `9d98c66f…` + `47a86ec3…` |
+| Seller EURC on Arc → Mint EUR balance, **no bridge** | ✅ 1 EURC, balance 253.49 → 254.49, tx [`0x405164…52a8449e`](https://testnet.arcscan.app/tx/0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e) |
+| CPN webhook actually delivered | ❌ endpoint answers `HEAD` now, but `CIRCLE_CPN_KEY` is `403` on `/v2/cpn/notifications/subscriptions` |
 
 ## Gotchas that already cost time
 
@@ -440,9 +442,12 @@ Report vulnerabilities privately, not via public issues.
   so the money leaves over SEPA rather than a wire wearing its name. Every
   earlier attempt failed `transaction_denied` purely because the sandbox
   account was in Console *default-deny* mode with zero policies; adding one
-  flipped it, with no code change in between. What is still **not** proven is
-  the join: `release()` does not trigger a redeem, and nothing bridges the
-  seller's Arc EURC into the Mint balance automatically.
+  flipped it, with no code change in between. The join is proven too, and it
+  needs no bridge: Circle lists an **EUR deposit address on ARC**, so 1 EURC
+  sent from the seller's Arc wallet credited the Mint EUR balance
+  253.49 → 254.49 within seconds (tx `0x405164…52a8449e`). What remains
+  deliberately unwired is the trigger — `release()` does not start a redeem,
+  because a seller cashes out an accumulated balance rather than one order.
 - **The browser-wallet funding rails have never been executed on-chain.**
   `demo/app/wallet-rails.ts` lets a connected wallet reach Arc via Gateway spend
   or a CCTP bridge with no server secret involved — which is the point — but
@@ -453,11 +458,17 @@ Report vulnerabilities privately, not via public issues.
   *not* exercised is the wallet-side Permit2 approval: that wallet already held
   an unlimited Permit2 allowance, so the code skipped it. A wallet starting from
   a zero allowance still takes an untested path.
-- **A cash-out is now durable, but no webhook has ever reached it.** Every CPN
+- **A cash-out is durable, but no webhook has ever reached it.** Every CPN
   payout is persisted in `cpn_payments` and folded forward by the same reducer
-  the polling path uses, so an RFI or a late failure has somewhere to land. The
-  endpoint is unproven end-to-end: it needs a public URL registered as a Circle
-  notification subscription, which this project has never had.
+  the polling path uses, so an RFI or a late failure has somewhere to land. Two
+  things still stand between that and a delivered event, and neither is code:
+  the endpoint must be publicly reachable over HTTPS, and `CIRCLE_CPN_KEY`
+  currently returns `403` on `/v2/cpn/notifications/subscriptions` while
+  succeeding on `/v1/cpn/payments` — the key lacks the notifications
+  capability. The route itself now answers the `HEAD` request Circle uses to
+  validate a subscriber URL; without that the subscription is refused before
+  hosting even matters. `scripts/live-cpn-subscribe.mjs --check <url>` reports
+  exactly which of these is failing.
 - **The off-ramp is still not triggered by `release()`, on purpose.** A seller
   cashes out an accumulated balance, not one order — so `cpn_payments.order_id`
   is a nullable link, not a foreign key the flow depends on.
@@ -472,6 +483,37 @@ Report vulnerabilities privately, not via public issues.
   go down.
 - **Mainnet is out of scope** — gated on audit, key timelock/multisig, legal
   review and OFI onboarding.
+
+## Roadmap
+
+Ordered by what closes a structural hole rather than what adds surface. Nothing
+here is a promise; it is what the honest ledger above says is still missing.
+
+**Next — finish proving what is already written**
+
+1. **Browser-wallet funding rails on-chain.** `demo/app/wallet-rails.ts` is the
+   non-custodial claim in code form, and it has never been executed. Needs a
+   human at a connected wallet: by design no server key can stand in, which is
+   exactly the property being demonstrated.
+2. **A CPN webhook actually delivered.** Blocked on a public HTTPS endpoint and
+   on granting `CIRCLE_CPN_KEY` the notifications capability (see
+   *Limitations*). The handler and its reducer are already covered by tests.
+3. **The wallet-side Permit2 approve branch.** Only ever run against a wallet
+   that already held an allowance, so the zero-allowance path is untested.
+
+**Later — widen the reach once the above holds**
+
+4. **CPN corridors beyond EUR.** BRL/PIX, MXN/SPEI and USD/WIRE are live as far
+   as `prepare`; each needs a funded settlement to prove. Deliberately *not* a
+   focus: they add breadth, not depth, and every one of them costs real
+   settlement to demonstrate. Revisit once the rails above are proven.
+5. **Direct unit coverage for the network-facing modules** — `escrow/operations`,
+   `settlement-fx/swap`, `orchestrator/order-store`, `funding/unified-balance`.
+   The facade tests mock these, so today only the live scripts exercise them.
+
+**Gated on things outside the code**
+
+6. **Mainnet** — audit, key timelock/multisig, legal review, OFI onboarding.
 
 ## Structure
 

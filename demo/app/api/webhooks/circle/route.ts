@@ -27,6 +27,18 @@ function looksLikeCpn(rawBody: string): boolean {
   }
 }
 
+/**
+ * Circle validates a subscriber URL with `HEAD` before it will create the
+ * subscription — notification API v2, which is what CPN, Wallets, Contracts,
+ * Gateway and StableFX all use. A route that exports only `POST` answers 405,
+ * the subscription is refused, and no event ever arrives: the endpoint looks
+ * finished while being unreachable by construction. Nothing to verify here —
+ * the request carries no body and no signature.
+ */
+export async function HEAD(): Promise<Response> {
+  return new Response(null, { status: 200 });
+}
+
 export async function POST(req: Request): Promise<Response> {
   const { store, resolveWebhookPublicKey } = getRivoKit();
 
