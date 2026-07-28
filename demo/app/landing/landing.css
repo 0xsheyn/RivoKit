@@ -1,0 +1,153 @@
+/*
+ * RivoKit landing page — scoped design tokens (RIVO_LP.md §1–§2).
+ * Everything lives under `.rivo-landing` so it never leaks into the shadcn
+ * theme the /app marketplace demo uses.
+ */
+.rivo-landing {
+  --ink: #0b0d0c;
+  --ink-raised: #14181a;
+  --bone: #ede7da;
+  --sodium: #f0a93b;
+  --verdigris: #3fa98f;
+  --rust: #b4462f;
+  --ash: #6e7573;
+
+  --font-display: var(--landing-serif), ui-serif, Georgia, serif;
+  --font-body: var(--landing-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--landing-mono), ui-monospace, SFMono-Regular, monospace;
+
+  background: var(--ink);
+  color: var(--bone);
+  font-family: var(--font-body);
+  font-feature-settings: "cv02", "cv03", "cv04";
+}
+
+.rivo-landing .f-display {
+  font-family: var(--font-display);
+  font-style: italic;
+  letter-spacing: -0.02em;
+}
+
+.rivo-landing .f-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.rivo-landing .eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ash);
+}
+
+.rivo-landing .hairline {
+  background-color: color-mix(in oklab, var(--ash) 22%, transparent);
+}
+
+/* ── Rail draw-in ─────────────────────────────────────────────────────────── */
+.rivo-landing .rail-path {
+  stroke-dasharray: var(--rail-len, 1000);
+  stroke-dashoffset: var(--rail-len, 1000);
+  transition: stroke-dashoffset 900ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.rivo-landing .rail-drawn .rail-path {
+  stroke-dashoffset: 0;
+}
+
+/* ── Hero coin travel ─────────────────────────────────────────────────────── */
+@keyframes rivo-coin-travel {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 1;
+  }
+}
+.rivo-landing .coin-travel {
+  offset-rotate: 0deg;
+  animation: rivo-coin-travel 1.8s cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+
+@keyframes rivo-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rivo-landing .fade-up {
+  animation: rivo-fade-up 700ms ease-out forwards;
+}
+
+/* ── Card stamp (order-states §6.4) ──────────────────────────────────────── */
+@keyframes rivo-stamp {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.rivo-landing .stamp-in {
+  animation: rivo-stamp 320ms ease-out;
+}
+
+/* ── Ticker (§6.7) — pure CSS marquee, pauses on hover ───────────────────── */
+.rivo-landing .ticker-track {
+  animation: rivo-ticker 60s linear infinite;
+}
+.rivo-landing .ticker-viewport:hover .ticker-track {
+  animation-play-state: paused;
+}
+@keyframes rivo-ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* ── Hover: background step only, never lift/shadow/scale (§7) ──────────── */
+.rivo-landing .hover-step {
+  transition: background-color 120ms ease-out;
+}
+.rivo-landing .hover-step:hover {
+  background-color: var(--ink-raised);
+}
+
+.rivo-landing :focus-visible {
+  outline: 2px solid var(--sodium);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rivo-landing .coin-travel,
+  .rivo-landing .fade-up,
+  .rivo-landing .stamp-in {
+    animation: none !important;
+  }
+  .rivo-landing .rail-path {
+    transition: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+  .rivo-landing .ticker-track {
+    animation-duration: 140s;
+  }
+}
