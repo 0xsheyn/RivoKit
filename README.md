@@ -376,7 +376,8 @@ paths passes without testing anything.
 | Circle Mint redeem — USD → wire bank | ✅ `complete` — 10.00 USD, balance 350.00 → 340.00, payout `3f708440…`, trackingRef `CIR2V7GVUJ` |
 | Circle Mint redeem — EUR → SEPA bank | ✅ `complete` twice — 10.00 EUR each, balance 273.49 → 253.49, payouts `9d98c66f…` + `47a86ec3…` |
 | Seller EURC on Arc → Mint EUR balance, **no bridge** | ✅ 1 EURC, balance 253.49 → 254.49, tx [`0x405164…52a8449e`](https://testnet.arcscan.app/tx/0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e) |
-| CPN webhooks — Circle really delivers, reducer really folds them | ⚠️ 5 signed events captured for payment `479e22db…` and replayed to `COMPLETED`; delivery to *our* endpoint still pending a public URL |
+| CPN webhooks — signatures verified against live Circle traffic | ✅ 5 signed events for `479e22db…` all verify; a tampered body is refused; replay reaches `COMPLETED` |
+| CPN webhook POSTed into our own route | ⚠️ needs a publicly reachable endpoint; the `cpn_payments` write is still unexercised |
 
 ## Gotchas that already cost time
 
@@ -466,14 +467,21 @@ Report vulnerabilities privately, not via public issues.
   `CREATED → CRYPTO_FUNDS_PENDING → FIAT_PAYMENT_INITIATED → COMPLETED`, with
   the two transaction events correctly no-oping against the payment machine. So
   the envelope shape and the reducer are verified against real Circle traffic
-  rather than fixtures. What is still untested is the HTTP hop into *our* route:
-  signature verification against a live `X-Circle-Signature` and the write into
-  `cpn_payments`. That needs the endpoint publicly reachable, which a Cloudflare
-  quick tunnel could not achieve on this machine. Note also that the Console
-  path sidesteps the API: `CIRCLE_CPN_KEY` still returns `403` on
+  rather than fixtures. All five signatures verify against the live
+  `X-Circle-Signature`, and a body edited by one digit is refused — so the
+  security-critical half is proven too. Finding that required fixing a defect
+  real traffic exposed and tests could not: the public key endpoint differs per
+  product, and the route was asking the Wallets path
+  (`/v2/notifications/publicKey/{id}`) for CPN keys, which answers `404`. Every
+  CPN webhook would have been refused `401 unverifiable` by an endpoint that
+  otherwise looked correct. What is left untested is narrow but real: the HTTP
+  hop itself and the `cpn_payments` write, which needs a recorded cash-out and a
+  publicly reachable endpoint — a Cloudflare quick tunnel could not reach the
+  origin on this machine. Note the Console path sidesteps the API:
+  `CIRCLE_CPN_KEY` still returns `403` on
   `/v2/cpn/notifications/subscriptions` while succeeding on `/v1/cpn/payments`,
-  so managing subscriptions from `scripts/live-cpn-subscribe.mjs` needs the
-  notifications capability added to the key.
+  so `scripts/live-cpn-subscribe.mjs` needs the notifications capability added
+  to the key before it can manage subscriptions itself.
 - **The off-ramp is still not triggered by `release()`, on purpose.** A seller
   cashes out an accumulated balance, not one order — so `cpn_payments.order_id`
   is a nullable link, not a foreign key the flow depends on.

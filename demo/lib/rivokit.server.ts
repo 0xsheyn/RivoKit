@@ -230,10 +230,29 @@ function build() {
   // Circle signs notifications with a per-key ECDSA key fetched from its API. The
   // webhook route resolves it here so env loading, auth, and DNS pinning stay in
   // one place. Returns null when the key id is unknown → the webhook is rejected.
-  const resolveWebhookPublicKey = async (keyId?: string): Promise<string | null> => {
+  /**
+   * Resolve the public key that signed a webhook.
+   *
+   * The signature scheme is shared across v2 products but the KEY ENDPOINT is
+   * not: Wallets/Contracts/Gateway live at `/v2/notifications/publicKey/{id}`
+   * while CPN lives at `/v2/cpn/notifications/publicKey/{id}`. Asking the wrong
+   * one returns 404 `API parameter invalid`, so every CPN webhook would have
+   * been refused `401 unverifiable` — an endpoint that looks wired while being
+   * incapable of accepting a single CPN event. Verified against live traffic.
+   *
+   * Both paths authenticate with CIRCLE_API_KEY. CIRCLE_CPN_KEY is 403 here,
+   * the same capability gap it hits on the subscriptions API.
+   */
+  const resolveWebhookPublicKey = async (
+    keyId?: string,
+    product: "cpn" | "wallets" = "wallets",
+  ): Promise<string | null> => {
     if (!keyId) return null;
+    const path = product === "cpn"
+      ? `/v2/cpn/notifications/publicKey/${keyId}`
+      : `/v2/notifications/publicKey/${keyId}`;
     try {
-      const data = await circle.request("GET", `/v2/notifications/publicKey/${keyId}`);
+      const data = await circle.request("GET", path);
       return (data?.publicKey as string | undefined) ?? null;
     } catch {
       return null;

@@ -51,7 +51,11 @@ export async function POST(req: Request): Promise<Response> {
   // verified FIRST — `looksLikeCpn` only routes, it never grants trust.
   if (looksLikeCpn(rawBody)) {
     const signatureBase64 = req.headers.get("X-Circle-Signature");
-    const publicKey = await resolveWebhookPublicKey(req.headers.get("X-Circle-Key-Id") ?? undefined);
+    // CPN keys live on their own path — see resolveWebhookPublicKey.
+    const publicKey = await resolveWebhookPublicKey(
+      req.headers.get("X-Circle-Key-Id") ?? undefined,
+      "cpn",
+    );
     if (!signatureBase64 || !publicKey) {
       return Response.json({ ok: false, reason: "unverifiable" }, { status: 401 });
     }
