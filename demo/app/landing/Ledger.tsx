@@ -55,11 +55,21 @@ const ROWS: Array<{ path: string; status: Status; detail: string; url?: string }
   },
   { path: "CPN BRL / MXN / USD", status: "partial", detail: "requirements + quote + prepare only" },
   {
-    path: "CPN webhooks — real events, replayed through the reducer",
-    status: "partial",
-    detail: "5 signed events captured; our own endpoint not yet public",
+    path: "CPN webhook → signature verified → cash-out row advanced",
+    status: "proven",
+    detail: "live signatures · row reached COMPLETED",
   },
-  { path: "Wallet-side Permit2 approve branch", status: "partial", detail: "written, skipped in that run" },
+  {
+    path: "That webhook arriving over HTTP at our own route",
+    status: "partial",
+    detail: "needs a publicly reachable endpoint",
+  },
+  {
+    path: "Wallet-side Permit2 approve — from a zero allowance",
+    status: "proven",
+    detail: "0 → 15 → 0 USDC · 0xdeebf4…cf11177a",
+    url: TX("0xdeebf45ad5e1747693e33e2de0dabca14ccef1323d27d29aaaf598f7cf11177a"),
+  },
   { path: "Browser-wallet funding rails", status: "never", detail: "written, never executed on-chain" },
 ];
 
