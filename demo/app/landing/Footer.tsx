@@ -3,7 +3,7 @@ export default function Footer() {
     <footer className="relative overflow-hidden px-5 pt-16 md:px-16">
       <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 border-b border-[color:var(--ash)]/20 pb-8 text-[13px] text-[var(--bone)]/70">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 f-mono">
-          <a href="#" className="hover-step">
+          <a href="#top" className="hover-step">
             Overview
           </a>
           <a href="/app" className="hover-step">

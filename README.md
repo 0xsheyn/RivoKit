@@ -44,6 +44,11 @@ Two legs, normally bought separately:
   ever touching the recipient's floor — proven in tx `0x7910f1…037420`.
 - **CPN EUR/SEPA settled end-to-end to `COMPLETED`**, twice: 15 USDC → 12.92 EUR
   into a real sandbox bank rail. The fiat leg is no longer a mock.
+- **A second, independent fiat exit**: Circle Mint redeem reached `complete`
+  for EUR → SEPA (twice) and USD → wire. Two different rails now reach a bank,
+  which is what stops the fiat story resting on one integration. Note the
+  boundary: this redeems a *Mint balance*, and nothing yet carries the seller's
+  Arc EURC into it.
 - **280 unit tests** across 19 files, runnable with no credentials at all.
 
 RivoKit is **not** a marketplace, wallet, custodian, or licensed institution. It
@@ -249,7 +254,7 @@ names the code actually reads.
 CIRCLE_API_KEY=            CIRCLE_ENTITY_SECRET=      CIRCLE_BLOCKCHAIN=ARC-TESTNET
 KIT_KEY=                   # App Kit — FX swap
 CIRCLE_CPN_KEY=            # fiat off-ramp — SERVER-ONLY, never import client-side
-CIRCLE_RAMP_KEY=           # Circle Mint redeem — optional, unproven path
+CIRCLE_RAMP_KEY=           # Circle Mint redeem — optional; USD leg proven, EUR/SEPA not
 NEXT_PUBLIC_ARC_RPC_URL=https://rpc.testnet.arc.network
 DEPLOYER_PRIVATE_KEY=      RELAYER_PRIVATE_KEY=       BUYER_PRIVATE_KEY=
 NEXT_PUBLIC_SUPABASE_URL=  SUPABASE_SECRET_KEY=
@@ -338,7 +343,7 @@ Everything under `scripts/` hits real services and needs `.env.local`.
 |---|---|
 | **Setup / health** | `preflight` (read-only prereq check) · `setup` (deploy, idempotent) · `check-cpp` (escrow↔collector wiring, 8 assertions) · `check-hash` (off-chain `getPaymentInfoHash` vs on-chain `getHash`) · `check-operator` (grants + proves the operator's USDC allowance to the refund collector) · `sync-env` |
 | **Live proofs** | `live-phase1/1b/2/2-chain` · `live-funding` · `live-bridge` · `live-unified` · `live-refund` · `live-recovery` (capture ok, swap misses floor, retry wins) · `live-charge` (direct mode) · `live-compliance` · `live-sdk` (full flow through the facade) · `live-scenario` · `live-ramp*` |
-| **API probes** | `probe-cpn*` (quote, payment, status, magic values) · `probe-swap` · `probe-mint*` |
+| **API probes** | `probe-cpn*` (quote, payment, status, magic values) · `probe-swap` · `probe-mint` (USD → wire) · `probe-mint-sepa` (links an IBAN account; redeems only behind `CONFIRM=REDEEM`) · `probe-mint-deposit` |
 | **Demo utils** | `demo-topup` (fund the buyer on Sepolia + Gateway) · `reset-demo` (wipe orders) |
 
 ## Testing
@@ -368,7 +373,8 @@ paths passes without testing anything.
 | Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
 | Seller-signed cash-out — the seller's own wallet signs the CPN intent | ✅ proven — MetaMask signed, 15 USDC → 12.94 EUR `COMPLETED`, tx [`0x51e968…f049e7f`](https://testnet.arcscan.app/tx/0x51e9681d1d23fedeb239110a2c58309912a5c82d35a20c316b3102731f049e7f) |
 | Wallet-side Permit2 **approve** branch | ⚠️ written, skipped in that run — the wallet already held an unlimited allowance |
-| Circle Mint redeem | ❌ wired, never run once |
+| Circle Mint redeem — USD → wire bank | ✅ `complete` — 10.00 USD, balance 350.00 → 340.00, payout `3f708440…`, trackingRef `CIR2V7GVUJ` |
+| Circle Mint redeem — EUR → SEPA bank | ✅ `complete` twice — 10.00 EUR each, balance 273.49 → 253.49, payouts `9d98c66f…` + `47a86ec3…` |
 
 ## Gotchas that already cost time
 
@@ -382,9 +388,15 @@ paths passes without testing anything.
   (`PM09000`). The sender must **approve Permit2** first or the broadcast fails.
 - **`submit` cannot be cancelled** past `BROADCASTED`. Always gate it behind an
   explicit confirmation.
-- **`api.circle.com` has been DNS-hijacked here**, surfacing as a bare
-  `fetch failed` or a misleading `CERT_HAS_EXPIRED`. Call
-  `installCircleDnsPinning()` — **never** disable TLS verification.
+- **Every `*.circle.com` host is DNS-hijacked here** — not just the API.
+  Verified 28 Jul 2026: `api-sandbox.circle.com` *and* `developers.circle.com`
+  both resolve to `36.86.63.185` presenting a `CN=internetpositif.id`
+  certificate that expired 4 Jun 2026, so calls surface as a bare
+  `fetch failed` or a misleading `CERT_HAS_EXPIRED`. Circle's **documentation**
+  is unreachable from an ordinary fetch too; route it through
+  `installCircleDnsPinning()` (DoH via `1.1.1.1`, TLS still verified), and note
+  that appending `.md` to a docs URL returns the raw markdown.
+  **Never** disable TLS verification.
 - Meta-transactions that fully drain a nonce-zero Arc account revert.
 
 ## Security model
@@ -419,9 +431,18 @@ Report vulnerabilities privately, not via public issues.
 - **The off-ramp is real, but its reach is uneven.** EUR/SEPA is proven to
   `COMPLETED`. BRL, MXN and USD are verified only as far as `prepare` — their
   requirements and quotes are live, but no payment has settled on those rails.
-- **Circle Mint redeem has never been run.** `demo/lib/mint.server.ts` and the
-  MintRedeem panel are wired against the sandbox API but have not been executed
-  once. Treat it as unproven code, not a feature.
+- **Circle Mint redeem is proven, in both currencies.** USD → wire bank reached
+  `complete` once (10.00 USD, balance 350.00 → 340.00, payout `3f708440…`), and
+  the euro-native path this project actually argues for — EUR → a SEPA bank —
+  reached `complete` twice (10.00 EUR each, balance 273.49 → 253.49, payouts
+  `9d98c66f…` and `47a86ec3…`), all on 28 Jul 2026. The destination is a linked
+  IBAN account whose `transferTypesInfo` reports `sepa: {currencies: ["EUR"]}`,
+  so the money leaves over SEPA rather than a wire wearing its name. Every
+  earlier attempt failed `transaction_denied` purely because the sandbox
+  account was in Console *default-deny* mode with zero policies; adding one
+  flipped it, with no code change in between. What is still **not** proven is
+  the join: `release()` does not trigger a redeem, and nothing bridges the
+  seller's Arc EURC into the Mint balance automatically.
 - **The browser-wallet funding rails have never been executed on-chain.**
   `demo/app/wallet-rails.ts` lets a connected wallet reach Arc via Gateway spend
   or a CCTP bridge with no server secret involved — which is the point — but

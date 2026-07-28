@@ -6,14 +6,26 @@ const STATUS_STYLE: Record<Status, { symbol: string; color: string }> = {
   never: { symbol: "❌", color: "var(--rust)" },
 };
 
-const ROWS: Array<{ path: string; status: Status; detail: string }> = [
+const TX = (hash: string) => `https://testnet.arcscan.app/tx/${hash}`;
+
+const ROWS: Array<{ path: string; status: Status; detail: string; url?: string }> = [
   {
     path: "Escrow lifecycle · floored swap · multi-chain funding · refund bridge-back",
     status: "proven",
     detail: "proven on Arc",
   },
-  { path: "Operator fee 25 bps split at capture, floor intact", status: "proven", detail: "0x7910f1…037420" },
-  { path: "Two-wallet mode — floor forwarded merchant → seller", status: "proven", detail: "0x11bf41…559bf4" },
+  {
+    path: "Operator fee 25 bps split at capture, floor intact",
+    status: "proven",
+    detail: "0x7910f1…037420",
+    url: TX("0x7910f15984c10fe929d3e642a84ca3be2c86d3727076fb3d57552899e0037420"),
+  },
+  {
+    path: "Two-wallet mode — floor forwarded merchant → seller",
+    status: "proven",
+    detail: "0x11bf41…559bf4",
+    url: TX("0x11bf41510b5aa7943dde09b436ff499064e4f9b8bea6c85f20a1057540559bf4"),
+  },
   {
     path: "CPN EUR/SEPA end-to-end → COMPLETED",
     status: "proven",
@@ -22,13 +34,40 @@ const ROWS: Array<{ path: string; status: Status; detail: string }> = [
   {
     path: "Seller-signed cash-out — seller's own wallet signs the CPN intent",
     status: "proven",
-    detail: "0x51e968…f049e7f",
+    detail: "15 USDC → €12.94 · 0x51e968…f049e7f",
+    url: TX("0x51e9681d1d23fedeb239110a2c58309912a5c82d35a20c316b3102731f049e7f"),
+  },
+  {
+    path: "Circle Mint redeem — USD → wire bank",
+    status: "proven",
+    detail: "complete · 10.00 USD · balance 350 → 340",
+  },
+  {
+    path: "Circle Mint redeem — EUR → SEPA bank",
+    status: "proven",
+    detail: "complete ×2 · 10.00 EUR each · 273.49 → 253.49",
   },
   { path: "CPN BRL / MXN / USD", status: "partial", detail: "requirements + quote + prepare only" },
   { path: "Wallet-side Permit2 approve branch", status: "partial", detail: "written, skipped in that run" },
   { path: "Browser-wallet funding rails", status: "never", detail: "written, never executed on-chain" },
-  { path: "Circle Mint redeem", status: "never", detail: "wired, never run once" },
 ];
+
+/** A ✅ row that names a tx should be checkable — otherwise it's still a claim. */
+function Detail({ row }: { row: (typeof ROWS)[number] }) {
+  const s = STATUS_STYLE[row.status];
+  if (!row.url) return <>{row.detail}</>;
+  return (
+    <a
+      href={row.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="underline decoration-dotted underline-offset-4"
+      style={{ color: s.color }}
+    >
+      {row.detail}
+    </a>
+  );
+}
 
 export default function Ledger() {
   return (
@@ -49,7 +88,7 @@ export default function Ledger() {
                 </span>
               </div>
               <p className="f-mono mt-2 text-[12px]" style={{ color: s.color }}>
-                {r.detail}
+                <Detail row={r} />
               </p>
             </div>
           );
@@ -65,7 +104,7 @@ export default function Ledger() {
                 <tr key={r.path} className="hover-step border-b border-[color:var(--ash)]/15">
                   <td className="py-3 pr-4 text-[13px] text-[var(--bone)]/85 sm:text-[14px]">{r.path}</td>
                   <td className="f-mono whitespace-nowrap py-3 pl-4 text-right text-[12px]" style={{ color: s.color }}>
-                    <span aria-hidden>{s.symbol}</span> {r.detail}
+                    <span aria-hidden>{s.symbol}</span> <Detail row={r} />
                   </td>
                 </tr>
               );
