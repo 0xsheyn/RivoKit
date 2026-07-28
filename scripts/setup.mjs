@@ -19,9 +19,13 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { createCircleClient } from "./lib/circle.mjs";
+import { envPath } from "./lib/env.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const ENV = resolve(ROOT, ".env.local");
+// Contract artifacts are tracked, so they come from this checkout. .env.local
+// is not: it lives in whichever checkout owns it, and every worktree writes
+// back to that same file rather than starting a private copy.
+const ENV = envPath();
 
 // ── env helpers ────────────────────────────────────────────────────────
 

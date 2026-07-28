@@ -12,8 +12,6 @@
  * gasless authorization (src/escrow/erc3009.ts) is designed for exactly that.
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { AppKit, BridgeChain } from "@circle-fin/app-kit";
 import { createViemAdapterFromPrivateKey } from "@circle-fin/adapter-viem-v2";
 import { createPublicClient, createWalletClient, erc20Abi, getAddress, http, type Address, type Hex } from "viem";
@@ -21,6 +19,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet, sepolia } from "viem/chains";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import { createCircleClient } from "../../scripts/lib/circle.mjs";
+import { loadRootEnv } from "../../scripts/lib/env.mjs";
 import { installCircleDnsPinning } from "../../src/lib/circle-dns.ts";
 import { arcTransport, sleep } from "../../src/lib/rpc.ts";
 import { ARC_TESTNET_CHAIN_ID, EURC_ADDRESS, USDC_ADDRESS } from "../../src/constants/arc.ts";
@@ -34,18 +33,6 @@ import { createOrderStore } from "../../src/orchestrator/order-store.ts";
 import { createComplianceGate, createCircleScreener } from "../../src/events/compliance.ts";
 import { createRivoKit, paymentInfoFromRecord } from "../../src/sdk/rivokit.ts";
 
-// Next loads .env from the app dir (demo/), but the credentials live in the
-// repo-root .env.local. Load it here so the same file drives scripts and demo.
-function loadRootEnv() {
-  const path = join(process.cwd(), ".env.local");
-  if (!existsSync(path)) return;
-  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    const key = m?.[1];
-    const val = m?.[2];
-    if (key && val && process.env[key] == null) process.env[key] = val;
-  }
-}
 loadRootEnv();
 
 const need = (key: string): string => {

@@ -11,12 +11,12 @@
  *   node scripts/sync-env.mjs
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { envPath, fromRoot } from "./lib/env.mjs";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const SOURCE = resolve(ROOT, "docs/BUILDER-KEY.md");
-const TARGET = resolve(ROOT, ".env.local");
+// Both files are gitignored, so neither exists in a worktree — resolve them
+// against the checkout that owns .env.local, not against this one.
+const SOURCE = fromRoot("docs/BUILDER-KEY.md");
+const TARGET = envPath();
 
 /** BUILDER-KEY.md name -> .env.local name (DEPLOYMENT.md §1). */
 const MAPPING = {

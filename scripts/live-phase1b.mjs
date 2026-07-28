@@ -29,17 +29,14 @@ import { ARC_TESTNET_CHAIN_ID, USDC_ADDRESS } from "../src/constants/arc.ts";
 import { getPaymentInfoHash, getPayerAgnosticHash, ZERO_ADDRESS } from "../src/escrow/payment-info.ts";
 import { ESCROW_ABI, ESCROW_SIGNATURES } from "../src/escrow/abi.ts";
 import { createEscrow } from "../src/escrow/operations.ts";
+import { readEnv } from "./lib/env.mjs";
 
 const STATE_FILE = ".live-phase1b.json";
 const AMOUNT = parseUnits("0.5", 6);
 /** Short enough to wait out in one run; long enough for authorize to land. */
 const RECLAIM_WINDOW_SECONDS = 180;
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const ESCROW = getAddress(env.NEXT_PUBLIC_RIVO_ESCROW_ADDRESS);
 const TOKEN_COLLECTOR = getAddress(env.NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS);

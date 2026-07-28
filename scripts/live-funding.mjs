@@ -31,6 +31,7 @@ import { createOrderStore } from "../src/orchestrator/order-store.ts";
 import { expiriesFor, timeoutPolicyFor } from "../src/orchestrator/policy.ts";
 import { createBridge, BridgeStuckError, BridgeFailedError } from "../src/funding/bridge.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
+import { readEnv } from "./lib/env.mjs";
 
 // Resolve *.circle.com out of band before any SDK call — this network hijacks
 // Circle's DNS (observed live). Must run before any AppKit/Circle use.
@@ -42,11 +43,7 @@ const WEDGE = "digital_goods";
 const RECEIVING_CHAIN = "Ethereum_Sepolia";
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const ESCROW = getAddress(env.NEXT_PUBLIC_RIVO_ESCROW_ADDRESS);
 const TOKEN_COLLECTOR = getAddress(env.NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS);

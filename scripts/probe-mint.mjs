@@ -12,16 +12,12 @@
  *   node scripts/probe-mint.mjs
  */
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
+import { readEnv } from "./lib/env.mjs";
 
 installCircleDnsPinning();
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 const BASE = "https://api-sandbox.circle.com";
 const key = env.CIRCLE_RAMP_KEY;
 if (!key) {
