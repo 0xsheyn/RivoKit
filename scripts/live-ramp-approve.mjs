@@ -7,7 +7,13 @@
  * more than this cumulatively without a fresh approve. Each CPN transfer is still
  * separately bounded by the signed permit.
  *
- *   node scripts/live-ramp-approve.mjs
+ * Which wallet needs it depends on who sends: the scripted broadcast test signs
+ * as BUYER, while the demo's own cash-out signs as the seller (RELAYER). Pick
+ * with SIGNER; the allowance is per-wallet, so approving one proves nothing
+ * about the other.
+ *
+ *   node scripts/live-ramp-approve.mjs                  # BUYER (default)
+ *   SIGNER=RELAYER node scripts/live-ramp-approve.mjs   # the demo's seller
  */
 import { createPublicClient, createWalletClient, erc20Abi, formatUnits, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -16,7 +22,13 @@ import { readEnv } from "./lib/env.mjs";
 
 const env = readEnv();
 
-const account = privateKeyToAccount(env.BUYER_PRIVATE_KEY);
+const SIGNER = (process.env.SIGNER ?? "BUYER").toUpperCase();
+const pk = env[`${SIGNER}_PRIVATE_KEY`];
+if (!pk) {
+  console.error(`FAILED: ${SIGNER}_PRIVATE_KEY missing from .env.local`);
+  process.exit(1);
+}
+const account = privateKeyToAccount(pk);
 const pub = createPublicClient({ chain: arcTestnet, transport: http(ARC_TESTNET_RPC_URL) });
 const wallet = createWalletClient({ account, chain: arcTestnet, transport: http(ARC_TESTNET_RPC_URL) });
 

@@ -44,11 +44,21 @@ Two legs, normally bought separately:
   ever touching the recipient's floor — proven in tx `0x7910f1…037420`.
 - **CPN EUR/SEPA settled end-to-end to `COMPLETED`**, twice: 15 USDC → 12.92 EUR
   into a real sandbox bank rail. The fiat leg is no longer a mock.
-- **A second, independent fiat exit**: Circle Mint redeem reached `complete`
-  for EUR → SEPA (twice) and USD → wire. Two different rails now reach a bank,
-  which is what stops the fiat story resting on one integration. Note the
-  boundary: this redeems a *Mint balance*, and nothing yet carries the seller's
-  Arc EURC into it.
+- **A second, independent fiat exit, wired all the way back to Arc**: the
+  seller's EURC goes straight from Arc into a Circle Mint balance — Circle
+  exposes an EUR deposit address on Arc, so there is no bridge and no detour
+  through dollars — and Mint redeem then reached `complete` for EUR → SEPA
+  (twice) and USD → wire. Two rails now reach a bank, which is what stops the
+  fiat story resting on one integration.
+- **A cash-out the server cannot forge.** A connected wallet signs the CPN
+  intent itself and the server only broadcasts it; no key for that address
+  exists server-side. Proven from a *zero* Permit2 allowance: approve 15 USDC,
+  spend it on a 15 USDC → 12.95 EUR payout, allowance back to 0.
+- **Webhooks that are verified, not trusted.** Circle delivers to the route over
+  HTTPS, each event is checked against the live `X-Circle-Signature` using its
+  product's key endpoint, a body edited by one digit is refused, and verified
+  events fold into the stored cash-out — duplicates and out-of-order arrivals
+  writing nothing.
 - **280 unit tests** across 19 files, runnable with no credentials at all.
 
 RivoKit is **not** a marketplace, wallet, custodian, or licensed institution. It
@@ -254,7 +264,7 @@ names the code actually reads.
 CIRCLE_API_KEY=            CIRCLE_ENTITY_SECRET=      CIRCLE_BLOCKCHAIN=ARC-TESTNET
 KIT_KEY=                   # App Kit — FX swap
 CIRCLE_CPN_KEY=            # fiat off-ramp — SERVER-ONLY, never import client-side
-CIRCLE_RAMP_KEY=           # Circle Mint redeem — optional; USD leg proven, EUR/SEPA not
+CIRCLE_RAMP_KEY=           # Circle Mint redeem — optional; USD and EUR/SEPA both proven
 NEXT_PUBLIC_ARC_RPC_URL=https://rpc.testnet.arc.network
 DEPLOYER_PRIVATE_KEY=      RELAYER_PRIVATE_KEY=       BUYER_PRIVATE_KEY=
 NEXT_PUBLIC_SUPABASE_URL=  SUPABASE_SECRET_KEY=
@@ -342,7 +352,7 @@ Everything under `scripts/` hits real services and needs `.env.local`.
 | Group | Scripts |
 |---|---|
 | **Setup / health** | `preflight` (read-only prereq check) · `setup` (deploy, idempotent) · `check-cpp` (escrow↔collector wiring, 8 assertions) · `check-hash` (off-chain `getPaymentInfoHash` vs on-chain `getHash`) · `check-operator` (grants + proves the operator's USDC allowance to the refund collector) · `sync-env` |
-| **Live proofs** | `live-phase1/1b/2/2-chain` · `live-funding` · `live-bridge` · `live-unified` · `live-refund` · `live-recovery` (capture ok, swap misses floor, retry wins) · `live-charge` (direct mode) · `live-compliance` · `live-sdk` (full flow through the facade) · `live-scenario` · `live-ramp*` |
+| **Live proofs** | `live-phase1/1b/2/2-chain` · `live-funding` · `live-bridge` · `live-unified` · `live-refund` · `live-recovery` (capture ok, swap misses floor, retry wins) · `live-charge` (direct mode) · `live-compliance` · `live-sdk` (full flow through the facade) · `live-scenario` · `live-ramp*` · `live-mint-arc-deposit` (seller EURC on Arc → Mint balance; sends only behind `CONFIRM=DEPOSIT`) · `live-cpn-subscribe` (lists subscriptions; `--check <url>` tests the `HEAD` Circle validates with; creates only behind `CONFIRM=SUBSCRIBE`) |
 | **API probes** | `probe-cpn*` (quote, payment, status, magic values) · `probe-swap` · `probe-mint` (USD → wire) · `probe-mint-sepa` (links an IBAN account; redeems only behind `CONFIRM=REDEEM`) · `probe-mint-deposit` |
 | **Demo utils** | `demo-topup` (fund the buyer on Sepolia + Gateway) · `reset-demo` (wipe orders) |
 
@@ -351,7 +361,10 @@ Everything under `scripts/` hits real services and needs `.env.local`.
 - **Unit** — `npm test`, 280 green / 19 files, no credentials. State machine,
   unit conversions, quote/rebate math, fee gross-up round-trip
   (`netOfFee(grossUpForFee(x)) ≥ x`), facade composition, compliance gating,
-  webhook ECDSA verification, ERC-3009 sign+recover, the whole CPN layer.
+  webhook ECDSA verification, ERC-3009 sign+recover, the whole CPN layer. What
+  they deliberately do not reach is listed in
+  [What the tests do not guard](#what-the-tests-do-not-guard) — read it before
+  treating a green run as coverage.
 - **Live proofs** — `scripts/live-*.mjs` against Arc Testnet itself.
 - **API probes** — `scripts/probe-*.mjs` map real service behaviour instead of
   assuming it (CPN response shapes, per-corridor requirements, sandbox magic
@@ -369,12 +382,38 @@ paths passes without testing anything.
 | Operator fee 25 bps split at capture, floor intact | ✅ `0x7910f1…037420` |
 | Two-wallet mode — floor forwarded merchant → seller wallet | ✅ `0x11bf41…559bf4` |
 | CPN EUR/SEPA end-to-end → `COMPLETED` | ✅ twice (15 USDC → 12.92 EUR) |
-| CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
-| Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
 | Seller-signed cash-out — the seller's own wallet signs the CPN intent | ✅ proven — MetaMask signed, 15 USDC → 12.94 EUR `COMPLETED`, tx [`0x51e968…f049e7f`](https://testnet.arcscan.app/tx/0x51e9681d1d23fedeb239110a2c58309912a5c82d35a20c316b3102731f049e7f) |
-| Wallet-side Permit2 **approve** branch | ⚠️ written, skipped in that run — the wallet already held an unlimited allowance |
+| Wallet-side Permit2 **approve** branch, from a zero allowance | ✅ wallet `0xd7d7B4…` approved 15 USDC in tx [`0xdeebf4…cf11177a`](https://testnet.arcscan.app/tx/0xdeebf45ad5e1747693e33e2de0dabca14ccef1323d27d29aaaf598f7cf11177a), spent it on a 15 USDC → 12.95 EUR cash-out, allowance back to 0 |
 | Circle Mint redeem — USD → wire bank | ✅ `complete` — 10.00 USD, balance 350.00 → 340.00, payout `3f708440…`, trackingRef `CIR2V7GVUJ` |
 | Circle Mint redeem — EUR → SEPA bank | ✅ `complete` twice — 10.00 EUR each, balance 273.49 → 253.49, payouts `9d98c66f…` + `47a86ec3…` |
+| Seller EURC on Arc → Mint EUR balance, **no bridge** | ✅ 1 EURC, balance 253.49 → 254.49, tx [`0x405164…52a8449e`](https://testnet.arcscan.app/tx/0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e) |
+| CPN webhook delivered over HTTP into our own route | ✅ Circle validated the URL with `HEAD`, then POSTed 5 events for `056c3e1f…`; each verified live and written to `events` with `sig_verified = true` |
+| Webhook signature verification | ✅ live `X-Circle-Signature` accepted, a body edited by one digit refused, `webhooks.test` accepted on a fresh subscription |
+| Cash-out row advanced from a verified webhook | ✅ `acd9d389…` walked `CRYPTO_FUNDS_PENDING → FIAT_PAYMENT_INITIATED → COMPLETED`; duplicates and transaction events wrote nothing |
+| *Which* writer advanced the row in the live run | ⚠️ webhook and the demo's own poller both write; in the `056c3e1f…` run they raced inside the same 16-second window |
+| CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
+| Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
+
+### What the tests do not guard
+
+The 280 unit tests are weighted toward pure logic — state machines, money
+conversion, fee arithmetic, reducers, signature verification against a keypair
+the test itself creates. The modules that talk to a network or a chain have no
+direct tests, and the facade tests mock them:
+
+| Module | How it is actually checked |
+|---|---|
+| `escrow/operations.ts` | live scripts only; mocked in the facade tests |
+| `settlement-fx/swap.ts` | live scripts only; only `FloorNotMetError` is imported by tests |
+| `orchestrator/order-store.ts` | live scripts only; tests import its *types* |
+| `funding/unified-balance.ts` | no test, and the browser rail is unproven too |
+| `escrow/payment-info.ts` | no unit test, but `check-hash.mjs` asserts it against the chain |
+| `lib/rpc.ts`, `lib/circle-dns.ts` | no test; both are infrastructure the live scripts lean on |
+
+This is not a theoretical gap. Two production defects this month lived exactly
+there and passed every test: the CPN public-key endpoint (tests sign with their
+own keypair, so key resolution never runs) and the `webhooks.test` rejection
+that silently disabled a subscription. Real traffic caught both.
 
 ## Gotchas that already cost time
 
@@ -440,24 +479,59 @@ Report vulnerabilities privately, not via public issues.
   so the money leaves over SEPA rather than a wire wearing its name. Every
   earlier attempt failed `transaction_denied` purely because the sandbox
   account was in Console *default-deny* mode with zero policies; adding one
-  flipped it, with no code change in between. What is still **not** proven is
-  the join: `release()` does not trigger a redeem, and nothing bridges the
-  seller's Arc EURC into the Mint balance automatically.
+  flipped it, with no code change in between. The join is proven too, and it
+  needs no bridge: Circle lists an **EUR deposit address on ARC**, so 1 EURC
+  sent from the seller's Arc wallet credited the Mint EUR balance
+  253.49 → 254.49 within seconds (tx `0x405164…52a8449e`). What remains
+  deliberately unwired is the trigger — `release()` does not start a redeem,
+  because a seller cashes out an accumulated balance rather than one order.
 - **The browser-wallet funding rails have never been executed on-chain.**
   `demo/app/wallet-rails.ts` lets a connected wallet reach Arc via Gateway spend
   or a CCTP bridge with no server secret involved — which is the point — but
   only the server-signed demo buyer has actually moved funds.
-- **The seller-signed cash-out is proven, with one branch still untested.** A
-  connected MetaMask signed the CPN intent itself and the server only broadcast
-  it (`ramp.submitSigned`); no key for that address exists server-side. What was
-  *not* exercised is the wallet-side Permit2 approval: that wallet already held
-  an unlimited Permit2 allowance, so the code skipped it. A wallet starting from
-  a zero allowance still takes an untested path.
-- **A cash-out is now durable, but no webhook has ever reached it.** Every CPN
-  payout is persisted in `cpn_payments` and folded forward by the same reducer
-  the polling path uses, so an RFI or a late failure has somewhere to land. The
-  endpoint is unproven end-to-end: it needs a public URL registered as a Circle
-  notification subscription, which this project has never had.
+- **The seller-signed cash-out is proven, including the approval branch.** A
+  connected MetaMask signs the CPN intent itself and the server only broadcasts
+  it (`ramp.submitSigned`); no key for that address exists server-side. The
+  wallet-side Permit2 approval — previously skipped because the test wallet
+  already held an unlimited allowance — has now run from zero: `0xd7d7B4…`
+  approved exactly 15 USDC, spent it on a 15 USDC → 12.95 EUR cash-out that
+  reached `COMPLETED`, and its allowance returned to 0. The stored row carries
+  `signed_by: "wallet"`.
+- **The webhook path runs end to end; one attribution is still open.** A
+  subscription registered from the CPN Console pointed at a Cloudflare quick
+  tunnel. Circle validated the URL with `HEAD` (the route exports one —
+  notification API v2 checks this before creating a subscription, and a
+  `POST`-only route is refused there, not later), then delivered five signed
+  events for cash-out `056c3e1f…`. Each was verified against the live
+  `X-Circle-Signature` and written to `events` with `sig_verified = true`; a
+  body edited by one digit is refused. Only the webhook path writes that table,
+  so those rows are proof the transport, the verification and the persistence
+  all ran.
+
+  What is **not** settled is which writer advanced `cpn_payments` in that run.
+  `demo/lib/cpn.server.ts` also reconciles from polled status, and the demo tab
+  polls roughly every 1.5s, so the webhook (`cpn.payment.completed` at
+  20:32:25) and the poller raced inside the same 16-second window. The
+  behaviour is right either way, but "the row corrected itself from a webhook"
+  is not yet a claim this project can make. To settle it: trigger a cash-out,
+  close the demo tab so the poller stops, and watch the row move anyway.
+
+  Two defects surfaced only under real traffic, both invisible to the unit
+  tests because those sign with their own keypair and never resolve a key.
+  First, the public key endpoint differs per product: the route asked the
+  Wallets path (`/v2/notifications/publicKey/{id}`) for CPN key ids, which
+  answers `404`, so every CPN webhook would have been refused `401
+  unverifiable`. Second, the `webhooks.test` Circle fires at a brand-new
+  subscription carries no `cpn.` prefix, so it was routed to the Wallets path
+  too and rejected three times — after which the subscription stopped
+  receiving anything and had to be re-enabled from the Console. Key resolution
+  now tries the inferred product and falls back to the other.
+
+  Note the Console path sidesteps the API: `CIRCLE_CPN_KEY` still returns `403`
+  on `/v2/cpn/notifications/subscriptions` while succeeding on
+  `/v1/cpn/payments`, so `scripts/live-cpn-subscribe.mjs` needs the
+  notifications capability added to the key before it can manage subscriptions
+  itself.
 - **The off-ramp is still not triggered by `release()`, on purpose.** A seller
   cashes out an accumulated balance, not one order — so `cpn_payments.order_id`
   is a nullable link, not a foreign key the flow depends on.
@@ -472,6 +546,40 @@ Report vulnerabilities privately, not via public issues.
   go down.
 - **Mainnet is out of scope** — gated on audit, key timelock/multisig, legal
   review and OFI onboarding.
+
+## Roadmap
+
+Ordered by what closes a structural hole rather than what adds surface. Nothing
+here is a promise; it is what the honest ledger above says is still missing.
+
+**Next — finish proving what is already written**
+
+1. **Browser-wallet funding rails on-chain.** `demo/app/wallet-rails.ts` is the
+   non-custodial claim in code form, and it has never been executed. Needs a
+   human at a connected wallet: by design no server key can stand in, which is
+   exactly the property being demonstrated.
+2. **Attribute the reconciliation to the webhook.** Delivery, verification and
+   persistence all ran live, but the demo's poller writes the same row, so the
+   two raced. Repeat the cash-out with the demo tab closed and the ambiguity
+   disappears — a short experiment, not a build.
+3. **A durable public endpoint.** Today's proof rode a Cloudflare quick tunnel,
+   whose URL dies with the process, and the subscription dies with it. Anything
+   beyond a one-off demo needs a stable host; note the trade-off in
+   *Limitations* about exposing the demo's server actions.
+
+**Later — widen the reach once the above holds**
+
+4. **CPN corridors beyond EUR.** BRL/PIX, MXN/SPEI and USD/WIRE are live as far
+   as `prepare`; each needs a funded settlement to prove. Deliberately *not* a
+   focus: they add breadth, not depth, and every one of them costs real
+   settlement to demonstrate. Revisit once the rails above are proven.
+5. **Direct unit coverage for the network-facing modules** — listed in
+   [What the tests do not guard](#what-the-tests-do-not-guard). Two real defects
+   have already hidden there, so this is remediation, not tidiness.
+
+**Gated on things outside the code**
+
+6. **Mainnet** — audit, key timelock/multisig, legal review, OFI onboarding.
 
 ## Structure
 

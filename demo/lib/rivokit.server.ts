@@ -230,14 +230,45 @@ function build() {
   // Circle signs notifications with a per-key ECDSA key fetched from its API. The
   // webhook route resolves it here so env loading, auth, and DNS pinning stay in
   // one place. Returns null when the key id is unknown → the webhook is rejected.
-  const resolveWebhookPublicKey = async (keyId?: string): Promise<string | null> => {
+  /**
+   * Resolve the public key that signed a webhook.
+   *
+   * The signature scheme is shared across v2 products but the KEY ENDPOINT is
+   * not: Wallets/Contracts/Gateway live at `/v2/notifications/publicKey/{id}`
+   * while CPN lives at `/v2/cpn/notifications/publicKey/{id}`. Asking the wrong
+   * one returns 404 `API parameter invalid`, so every CPN webhook would have
+   * been refused `401 unverifiable` — an endpoint that looks wired while being
+   * incapable of accepting a single CPN event. Verified against live traffic.
+   *
+   * Both paths authenticate with CIRCLE_API_KEY. CIRCLE_CPN_KEY is 403 here,
+   * the same capability gap it hits on the subscriptions API.
+   */
+  const resolveWebhookPublicKey = async (
+    keyId?: string,
+    product: "cpn" | "wallets" = "wallets",
+  ): Promise<string | null> => {
     if (!keyId) return null;
-    try {
-      const data = await circle.request("GET", `/v2/notifications/publicKey/${keyId}`);
-      return (data?.publicKey as string | undefined) ?? null;
-    } catch {
-      return null;
+    const paths = {
+      cpn: `/v2/cpn/notifications/publicKey/${keyId}`,
+      wallets: `/v2/notifications/publicKey/${keyId}`,
+    };
+    // Try the expected product first, then the other. The caller infers the
+    // product from `notificationType`, which is right for real events but wrong
+    // for the `webhooks.test` Circle fires at a brand-new subscription: that
+    // type carries no `cpn.` prefix while its key id belongs to the CPN
+    // subscription that triggered it. Guessing from the body alone answered 401
+    // to the very first thing Circle ever sends — and repeated failures are how
+    // a subscription gets disabled.
+    for (const p of [product, product === "cpn" ? "wallets" : "cpn"] as const) {
+      try {
+        const data = await circle.request("GET", paths[p]);
+        const key = (data?.publicKey as string | undefined) ?? null;
+        if (key) return key;
+      } catch {
+        // 404 here means "wrong product for this key id" — try the other.
+      }
     }
+    return null;
   };
 
   return {
