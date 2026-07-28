@@ -19,14 +19,17 @@ export default function Hero() {
     setReducedMotion(mq.matches);
   }, []);
 
+  // rAF is frozen while the tab is hidden, so a run started on a background
+  // load would stall part-way through and never finish. Hold the clock until
+  // the page is actually visible, then start it from that first frame.
   useEffect(() => {
     if (reducedMotion) {
       setPhase(COIN_END);
       return;
     }
-    setPhase(0);
-    const start = performance.now();
+    let start: number | null = null;
     const tick = (now: number) => {
+      if (start === null) start = now;
       const elapsed = now - start;
       if (elapsed >= COIN_END) {
         setPhase(COIN_END);
@@ -35,14 +38,27 @@ export default function Hero() {
       setPhase(elapsed);
       rafRef.current = requestAnimationFrame(tick);
     };
-    rafRef.current = requestAnimationFrame(tick);
+    const startRun = () => {
+      setPhase(0);
+      start = null;
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      document.removeEventListener("visibilitychange", onVisible);
+      startRun();
+    };
+
+    if (document.visibilityState === "visible") startRun();
+    else document.addEventListener("visibilitychange", onVisible);
+
     return () => {
+      document.removeEventListener("visibilitychange", onVisible);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, [reducedMotion, runId]);
 
   const railDrawn = phase > 0;
-  const wordmarkUp = phase > 250;
   const coinPct = phase >= COIN_START ? Math.min(1, (phase - COIN_START) / (COIN_END - COIN_START)) : null;
   const settled = phase >= COIN_END;
   const timerLabel =
@@ -87,17 +103,34 @@ export default function Hero() {
         </div>
 
         <div className="relative">
+          {/* Never gated on the animation clock: the page's own name must be
+              legible on the first paint, whatever the rAF loop is doing. */}
           <h1
-            className={`f-display select-none text-center leading-[0.92] text-[var(--bone)] transition-all duration-700 ease-out ${
-              wordmarkUp ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
-            }`}
+            className="f-display wordmark-in select-none text-center leading-[0.92] text-[var(--bone)]"
             style={{ fontSize: "clamp(64px, 14vw, 200px)" }}
           >
             rivokit
           </h1>
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2">
+          {/* The rail's viewBox is 1200×220, so under ~640px it renders about
+              66px tall and its 11px labels land at ~3px — a smear behind the
+              wordmark rather than a diagram. Below sm we tell the same route
+              in type instead. */}
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 hidden -translate-y-1/2 sm:block">
             <HeroRail railDrawn={railDrawn} coinPct={coinPct} settled={settled} />
           </div>
+        </div>
+
+        <div className="f-mono mt-5 flex flex-col items-center gap-1.5 text-[11px] tracking-[0.14em] text-[var(--ash)] sm:hidden">
+          <span>ETH · BASE · OP</span>
+          <span className="text-[var(--verdigris)]">↓ ARC · ESCROW · FLOORED SWAP</span>
+          <span>SEPA · PIX · SPEI · WIRE</span>
+          <span
+            className={`mt-1 text-[13px] tracking-normal ${
+              settled ? "text-[var(--verdigris)]" : "text-[var(--sodium)]"
+            }`}
+          >
+            {settled ? "€12.92" : "15.00 USDC"}
+          </span>
         </div>
 
         <p className="f-mono mx-auto mt-6 max-h-5 text-center text-[11px] text-[var(--ash)]">{timerLabel}&nbsp;</p>

@@ -19,7 +19,10 @@ export const metadata = {
 
 export default function LandingPage() {
   return (
-    <div className={`rivo-landing ${displaySerif.variable} ${bodySans.variable} ${utilityMono.variable}`}>
+    <div
+      id="top"
+      className={`rivo-landing ${displaySerif.variable} ${bodySans.variable} ${utilityMono.variable}`}
+    >
       <Hero />
       <BuiltOn />
       <Capabilities />
