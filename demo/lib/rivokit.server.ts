@@ -248,15 +248,27 @@ function build() {
     product: "cpn" | "wallets" = "wallets",
   ): Promise<string | null> => {
     if (!keyId) return null;
-    const path = product === "cpn"
-      ? `/v2/cpn/notifications/publicKey/${keyId}`
-      : `/v2/notifications/publicKey/${keyId}`;
-    try {
-      const data = await circle.request("GET", path);
-      return (data?.publicKey as string | undefined) ?? null;
-    } catch {
-      return null;
+    const paths = {
+      cpn: `/v2/cpn/notifications/publicKey/${keyId}`,
+      wallets: `/v2/notifications/publicKey/${keyId}`,
+    };
+    // Try the expected product first, then the other. The caller infers the
+    // product from `notificationType`, which is right for real events but wrong
+    // for the `webhooks.test` Circle fires at a brand-new subscription: that
+    // type carries no `cpn.` prefix while its key id belongs to the CPN
+    // subscription that triggered it. Guessing from the body alone answered 401
+    // to the very first thing Circle ever sends — and repeated failures are how
+    // a subscription gets disabled.
+    for (const p of [product, product === "cpn" ? "wallets" : "cpn"] as const) {
+      try {
+        const data = await circle.request("GET", paths[p]);
+        const key = (data?.publicKey as string | undefined) ?? null;
+        if (key) return key;
+      } catch {
+        // 404 here means "wrong product for this key id" — try the other.
+      }
     }
+    return null;
   };
 
   return {
