@@ -16,17 +16,14 @@ import { sleep } from "../src/lib/rpc.ts";
 import { createBridge } from "../src/funding/bridge.ts";
 import { createUnifiedBalance } from "../src/funding/unified-balance.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
+import { readEnv } from "./lib/env.mjs";
 
 installCircleDnsPinning();
 const STATE = ".demo-topup.json";
 const BRIDGE_TO_SEPOLIA = parseUnits("10", 6);
 const DEPOSIT_TO_GATEWAY = parseUnits("6", 6);
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 const buyer = privateKeyToAccount(env.BUYER_PRIVATE_KEY);
 if (process.argv.includes("--reset") && existsSync(STATE)) writeFileSync(STATE, "{}");
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {};

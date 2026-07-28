@@ -8,14 +8,10 @@
  *
  *   node scripts/live-ramp.mjs
  */
-import { readFileSync } from "node:fs";
 import { createCpnRamp } from "../src/ramp/cpn-ramp.ts";
+import { readEnv } from "./lib/env.mjs";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 if (!env.CIRCLE_CPN_KEY) {
   console.error("FAILED: CIRCLE_CPN_KEY is missing. Run: node scripts/sync-env.mjs");
   process.exit(1);

@@ -13,8 +13,6 @@
  * the seller's behalf with a testnet key; in production the seller signs in
  * their own wallet.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { createPublicClient, createWalletClient, erc20Abi, fallback, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { installCircleDnsPinning } from "../../src/lib/circle-dns.ts";
@@ -26,18 +24,8 @@ import { fromDecimalStringScaled } from "../../src/settlement-fx/units.ts";
 import { createOrderStore, type OrderStore } from "../../src/orchestrator/order-store.ts";
 import type { CpnPayment, CpnQuote, CpnTransaction } from "../../src/ramp/cpn-client.ts";
 import type { CpnFieldValue } from "../../src/ramp/cpn-encrypt.ts";
+import { loadRootEnv } from "../../scripts/lib/env.mjs";
 
-// Next loads .env from demo/, but credentials live in the repo-root .env.local.
-function loadRootEnv() {
-  const path = join(process.cwd(), ".env.local");
-  if (!existsSync(path)) return;
-  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    const key = m?.[1];
-    const val = m?.[2];
-    if (key && val && process.env[key] == null) process.env[key] = val;
-  }
-}
 loadRootEnv();
 installCircleDnsPinning();
 

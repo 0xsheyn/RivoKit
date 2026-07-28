@@ -6,14 +6,10 @@
  *
  *   node scripts/reset-demo.mjs
  */
-import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import { readEnv } from "./lib/env.mjs";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const url = env.NEXT_PUBLIC_SUPABASE_URL;
 const key = env.SUPABASE_SECRET_KEY;

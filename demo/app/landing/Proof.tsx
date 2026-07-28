@@ -5,7 +5,7 @@ import Ledger from "./Ledger";
 export default function Proof() {
   return (
     <section className="mx-auto w-full max-w-[1440px] px-5 py-16 md:px-16">
-      <SectionHeader number="05" title="PROOF, NOT CLAIMS" />
+      <SectionHeader number="05" title="WHAT'S PROVEN, WHAT ISN'T" />
 
       <div className="mb-10">
         <h2 className="f-display text-[34px] text-[var(--bone)] sm:text-[44px]">Proof, not claims.</h2>

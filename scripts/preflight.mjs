@@ -10,9 +10,6 @@
  *
  *   node scripts/preflight.mjs
  */
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { createPublicClient, erc20Abi, formatUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arcTestnet } from "viem/chains";
@@ -24,20 +21,9 @@ import {
   USDC_ADDRESS,
 } from "../src/constants/arc.ts";
 import { arcTransport, sleep } from "../src/lib/rpc.ts";
+import { readEnv } from "./lib/env.mjs";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const ENV = resolve(ROOT, ".env.local");
-
-if (!existsSync(ENV)) {
-  console.error("FAILED: .env.local is missing. Run: node scripts/sync-env.mjs");
-  process.exit(1);
-}
-
-const env = {};
-for (const line of readFileSync(ENV, "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const results = [];
 const record = (ok, label, detail) => {

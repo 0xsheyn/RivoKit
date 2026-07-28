@@ -9,14 +9,10 @@
  *
  *   node scripts/probe-cpn-quote.mjs
  */
-import { readFileSync } from "node:fs";
 import { createCpnClient } from "../src/ramp/cpn-client.ts";
+import { readEnv } from "./lib/env.mjs";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 const key = env.CIRCLE_CPN_KEY;
 if (!key) {
   console.error("FAILED: CIRCLE_CPN_KEY missing from .env.local");

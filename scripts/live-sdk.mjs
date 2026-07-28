@@ -36,17 +36,14 @@ import { createOrderStore } from "../src/orchestrator/order-store.ts";
 import { createComplianceGate, createCircleScreener } from "../src/events/compliance.ts";
 import { createRivoKit } from "../src/sdk/rivokit.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
+import { readEnv } from "./lib/env.mjs";
 
 installCircleDnsPinning();
 
 const STATE_FILE = ".live-sdk.json";
 const PRICE_EUR = parseUnits("1.5", 6); // €1.50 guaranteed to the receiver
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const ESCROW = getAddress(env.NEXT_PUBLIC_RIVO_ESCROW_ADDRESS);
 const TOKEN_COLLECTOR = getAddress(env.NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS);

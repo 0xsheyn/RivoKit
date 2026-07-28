@@ -4,16 +4,12 @@
 // The sample uses createCircleWalletsAdapter (not viem), constructs AppKit with
 // NO arguments, and passes an explicit `address` in `from`. Reproduce that
 // exactly, then compare against the viem path that failed.
-import { readFileSync } from "node:fs";
 import { AppKit, SwapChain } from "@circle-fin/app-kit";
 import { createCircleWalletsAdapter } from "@circle-fin/adapter-circle-wallets";
 import { createViemAdapterFromPrivateKey } from "@circle-fin/adapter-viem-v2";
+import { readEnv } from "./lib/env.mjs";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const short = (e) => `${e?.code ?? "?"} ${String(e?.message ?? e).slice(0, 120)}`;
 const kit = new AppKit(); // no constructor args, exactly as the sample does

@@ -8,18 +8,14 @@
  *
  *   node scripts/check-hash.mjs
  */
-import { readFileSync } from "node:fs";
 import { createPublicClient, getAddress, toHex } from "viem";
 import { arcTestnet } from "viem/chains";
 import { arcTransport, sleep } from "../src/lib/rpc.ts";
 import { ARC_TESTNET_CHAIN_ID, USDC_ADDRESS, EURC_ADDRESS } from "../src/constants/arc.ts";
 import { getPaymentInfoHash, getPayerAgnosticHash, ZERO_ADDRESS } from "../src/escrow/payment-info.ts";
+import { readEnv } from "./lib/env.mjs";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 const ESCROW = getAddress(env.NEXT_PUBLIC_RIVO_ESCROW_ADDRESS);
 
 const GET_HASH_ABI = [

@@ -9,20 +9,12 @@
  *
  *   node scripts/check-cpp.mjs
  */
-import { existsSync, readFileSync } from "node:fs";
 import { createPublicClient, getAddress } from "viem";
 import { arcTestnet } from "viem/chains";
 import { arcTransport, sleep } from "../src/lib/rpc.ts";
+import { readEnv } from "./lib/env.mjs";
 
-if (!existsSync(".env.local")) {
-  console.error("FAILED: .env.local is missing. Run: node scripts/setup.mjs");
-  process.exit(1);
-}
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv({ hint: "node scripts/setup.mjs" });
 
 const ESCROW = env.NEXT_PUBLIC_RIVO_ESCROW_ADDRESS;
 const COLLECTOR = env.NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS;
