@@ -54,10 +54,11 @@ Two legs, normally bought separately:
   intent itself and the server only broadcasts it; no key for that address
   exists server-side. Proven from a *zero* Permit2 allowance: approve 15 USDC,
   spend it on a 15 USDC → 12.95 EUR payout, allowance back to 0.
-- **Webhooks that are verified, not trusted.** Live `X-Circle-Signature`
-  verification against Circle's per-product key endpoint, a body edited by one
-  digit refused, and the verified events folded into a stored cash-out —
-  duplicates and out-of-order arrivals writing nothing.
+- **Webhooks that are verified, not trusted.** Circle delivers to the route over
+  HTTPS, each event is checked against the live `X-Circle-Signature` using its
+  product's key endpoint, a body edited by one digit is refused, and verified
+  events fold into the stored cash-out — duplicates and out-of-order arrivals
+  writing nothing.
 - **280 unit tests** across 19 files, runnable with no credentials at all.
 
 RivoKit is **not** a marketplace, wallet, custodian, or licensed institution. It
@@ -360,7 +361,10 @@ Everything under `scripts/` hits real services and needs `.env.local`.
 - **Unit** — `npm test`, 280 green / 19 files, no credentials. State machine,
   unit conversions, quote/rebate math, fee gross-up round-trip
   (`netOfFee(grossUpForFee(x)) ≥ x`), facade composition, compliance gating,
-  webhook ECDSA verification, ERC-3009 sign+recover, the whole CPN layer.
+  webhook ECDSA verification, ERC-3009 sign+recover, the whole CPN layer. What
+  they deliberately do not reach is listed in
+  [What the tests do not guard](#what-the-tests-do-not-guard) — read it before
+  treating a green run as coverage.
 - **Live proofs** — `scripts/live-*.mjs` against Arc Testnet itself.
 - **API probes** — `scripts/probe-*.mjs` map real service behaviour instead of
   assuming it (CPN response shapes, per-corridor requirements, sandbox magic
@@ -383,10 +387,33 @@ paths passes without testing anything.
 | Circle Mint redeem — USD → wire bank | ✅ `complete` — 10.00 USD, balance 350.00 → 340.00, payout `3f708440…`, trackingRef `CIR2V7GVUJ` |
 | Circle Mint redeem — EUR → SEPA bank | ✅ `complete` twice — 10.00 EUR each, balance 273.49 → 253.49, payouts `9d98c66f…` + `47a86ec3…` |
 | Seller EURC on Arc → Mint EUR balance, **no bridge** | ✅ 1 EURC, balance 253.49 → 254.49, tx [`0x405164…52a8449e`](https://testnet.arcscan.app/tx/0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e) |
-| CPN webhook → verified → folded into the stored cash-out | ✅ live signatures verified, tampered body refused, `cpn_payments` row for `acd9d389…` advanced `CRYPTO_FUNDS_PENDING → FIAT_PAYMENT_INITIATED → COMPLETED` |
-| That webhook arriving over HTTP at our own route | ⚠️ every layer above the transport is proven; the endpoint still needs to be publicly reachable |
+| CPN webhook delivered over HTTP into our own route | ✅ Circle validated the URL with `HEAD`, then POSTed 5 events for `056c3e1f…`; each verified live and written to `events` with `sig_verified = true` |
+| Webhook signature verification | ✅ live `X-Circle-Signature` accepted, a body edited by one digit refused, `webhooks.test` accepted on a fresh subscription |
+| Cash-out row advanced from a verified webhook | ✅ `acd9d389…` walked `CRYPTO_FUNDS_PENDING → FIAT_PAYMENT_INITIATED → COMPLETED`; duplicates and transaction events wrote nothing |
+| *Which* writer advanced the row in the live run | ⚠️ webhook and the demo's own poller both write; in the `056c3e1f…` run they raced inside the same 16-second window |
 | CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
 | Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
+
+### What the tests do not guard
+
+The 280 unit tests are weighted toward pure logic — state machines, money
+conversion, fee arithmetic, reducers, signature verification against a keypair
+the test itself creates. The modules that talk to a network or a chain have no
+direct tests, and the facade tests mock them:
+
+| Module | How it is actually checked |
+|---|---|
+| `escrow/operations.ts` | live scripts only; mocked in the facade tests |
+| `settlement-fx/swap.ts` | live scripts only; only `FloorNotMetError` is imported by tests |
+| `orchestrator/order-store.ts` | live scripts only; tests import its *types* |
+| `funding/unified-balance.ts` | no test, and the browser rail is unproven too |
+| `escrow/payment-info.ts` | no unit test, but `check-hash.mjs` asserts it against the chain |
+| `lib/rpc.ts`, `lib/circle-dns.ts` | no test; both are infrastructure the live scripts lean on |
+
+This is not a theoretical gap. Two production defects this month lived exactly
+there and passed every test: the CPN public-key endpoint (tests sign with their
+own keypair, so key resolution never runs) and the `webhooks.test` rejection
+that silently disabled a subscription. Real traffic caught both.
 
 ## Gotchas that already cost time
 
@@ -470,31 +497,41 @@ Report vulnerabilities privately, not via public issues.
   approved exactly 15 USDC, spent it on a 15 USDC → 12.95 EUR cash-out that
   reached `COMPLETED`, and its allowance returned to 0. The stored row carries
   `signed_by: "wallet"`.
-- **Webhooks are real; the last hop is not proven.** A subscription registered
-  from the CPN Console delivered five signed events for one cash-out —
-  `cryptoFundsPending`, `transaction.broadcasted`, `transaction.completed`,
-  `fiatPaymentInitiated`, `completed` — and replaying those exact bodies through
-  `interpretCpnEvent` + `applyPaymentEvent` walks the payment
-  `CREATED → CRYPTO_FUNDS_PENDING → FIAT_PAYMENT_INITIATED → COMPLETED`, with
-  the two transaction events correctly no-oping against the payment machine. So
-  the envelope shape and the reducer are verified against real Circle traffic
-  rather than fixtures. All five signatures verify against the live
-  `X-Circle-Signature`, and a body edited by one digit is refused — so the
-  security-critical half is proven too. Finding that required fixing a defect
-  real traffic exposed and tests could not: the public key endpoint differs per
-  product, and the route was asking the Wallets path
-  (`/v2/notifications/publicKey/{id}`) for CPN keys, which answers `404`. Every
-  CPN webhook would have been refused `401 unverifiable` by an endpoint that
-  otherwise looked correct. Feeding those verified events into
-  `applyCpnEventToStore` then advanced the real `cpn_payments` row for
-  `acd9d389…` from `CRYPTO_FUNDS_PENDING` to `COMPLETED`, ignoring a duplicate
-  and no-oping both transaction events on the way. So only the transport itself
-  is unproven now — a Cloudflare quick tunnel could not reach the origin on this
-  machine. Note the Console path sidesteps the API:
-  `CIRCLE_CPN_KEY` still returns `403` on
-  `/v2/cpn/notifications/subscriptions` while succeeding on `/v1/cpn/payments`,
-  so `scripts/live-cpn-subscribe.mjs` needs the notifications capability added
-  to the key before it can manage subscriptions itself.
+- **The webhook path runs end to end; one attribution is still open.** A
+  subscription registered from the CPN Console pointed at a Cloudflare quick
+  tunnel. Circle validated the URL with `HEAD` (the route exports one —
+  notification API v2 checks this before creating a subscription, and a
+  `POST`-only route is refused there, not later), then delivered five signed
+  events for cash-out `056c3e1f…`. Each was verified against the live
+  `X-Circle-Signature` and written to `events` with `sig_verified = true`; a
+  body edited by one digit is refused. Only the webhook path writes that table,
+  so those rows are proof the transport, the verification and the persistence
+  all ran.
+
+  What is **not** settled is which writer advanced `cpn_payments` in that run.
+  `demo/lib/cpn.server.ts` also reconciles from polled status, and the demo tab
+  polls roughly every 1.5s, so the webhook (`cpn.payment.completed` at
+  20:32:25) and the poller raced inside the same 16-second window. The
+  behaviour is right either way, but "the row corrected itself from a webhook"
+  is not yet a claim this project can make. To settle it: trigger a cash-out,
+  close the demo tab so the poller stops, and watch the row move anyway.
+
+  Two defects surfaced only under real traffic, both invisible to the unit
+  tests because those sign with their own keypair and never resolve a key.
+  First, the public key endpoint differs per product: the route asked the
+  Wallets path (`/v2/notifications/publicKey/{id}`) for CPN key ids, which
+  answers `404`, so every CPN webhook would have been refused `401
+  unverifiable`. Second, the `webhooks.test` Circle fires at a brand-new
+  subscription carries no `cpn.` prefix, so it was routed to the Wallets path
+  too and rejected three times — after which the subscription stopped
+  receiving anything and had to be re-enabled from the Console. Key resolution
+  now tries the inferred product and falls back to the other.
+
+  Note the Console path sidesteps the API: `CIRCLE_CPN_KEY` still returns `403`
+  on `/v2/cpn/notifications/subscriptions` while succeeding on
+  `/v1/cpn/payments`, so `scripts/live-cpn-subscribe.mjs` needs the
+  notifications capability added to the key before it can manage subscriptions
+  itself.
 - **The off-ramp is still not triggered by `release()`, on purpose.** A seller
   cashes out an accumulated balance, not one order — so `cpn_payments.order_id`
   is a nullable link, not a foreign key the flow depends on.
@@ -521,13 +558,14 @@ here is a promise; it is what the honest ledger above says is still missing.
    non-custodial claim in code form, and it has never been executed. Needs a
    human at a connected wallet: by design no server key can stand in, which is
    exactly the property being demonstrated.
-2. **A CPN webhook delivered over HTTP into our own route.** Verification,
-   interpretation and the `cpn_payments` write are all proven against real
-   Circle traffic (see *Limitations*); only the transport has never run, and
-   that needs the endpoint publicly reachable.
-3. **Automatic reconciliation from webhooks.** The pieces are proven
-   individually; what no one has watched yet is a stale row correcting itself
-   without a human replaying the event.
+2. **Attribute the reconciliation to the webhook.** Delivery, verification and
+   persistence all ran live, but the demo's poller writes the same row, so the
+   two raced. Repeat the cash-out with the demo tab closed and the ambiguity
+   disappears — a short experiment, not a build.
+3. **A durable public endpoint.** Today's proof rode a Cloudflare quick tunnel,
+   whose URL dies with the process, and the subscription dies with it. Anything
+   beyond a one-off demo needs a stable host; note the trade-off in
+   *Limitations* about exposing the demo's server actions.
 
 **Later — widen the reach once the above holds**
 
@@ -535,9 +573,9 @@ here is a promise; it is what the honest ledger above says is still missing.
    as `prepare`; each needs a funded settlement to prove. Deliberately *not* a
    focus: they add breadth, not depth, and every one of them costs real
    settlement to demonstrate. Revisit once the rails above are proven.
-5. **Direct unit coverage for the network-facing modules** — `escrow/operations`,
-   `settlement-fx/swap`, `orchestrator/order-store`, `funding/unified-balance`.
-   The facade tests mock these, so today only the live scripts exercise them.
+5. **Direct unit coverage for the network-facing modules** — listed in
+   [What the tests do not guard](#what-the-tests-do-not-guard). Two real defects
+   have already hidden there, so this is remediation, not tidiness.
 
 **Gated on things outside the code**
 
