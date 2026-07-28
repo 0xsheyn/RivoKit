@@ -22,6 +22,7 @@ import { arcTransport, sleep } from "../src/lib/rpc.ts";
 import { USDC_ADDRESS } from "../src/constants/arc.ts";
 import { createBridge, BridgeStuckError } from "../src/funding/bridge.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
+import { readEnv } from "./lib/env.mjs";
 
 // This network hijacks Circle's DNS (observed live, not hypothetical); pin the real
 // IPs before any SDK call. Must run before AppKit is used.
@@ -31,11 +32,7 @@ const STATE_FILE = ".live-bridge.json";
 const AMOUNT = parseUnits("3", 6);
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const buyer = privateKeyToAccount(env.BUYER_PRIVATE_KEY);
 const arcClient = createPublicClient({ chain: arcTestnet, transport: arcTransport() });

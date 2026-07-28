@@ -10,21 +10,10 @@
  *
  * Never import from a client component — it reads CIRCLE_RAMP_KEY.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { installCircleDnsPinning } from "../../src/lib/circle-dns.ts";
+import { loadRootEnv } from "../../scripts/lib/env.mjs";
 
-function loadRootEnv() {
-  const path = join(process.cwd(), ".env.local");
-  if (!existsSync(path)) return;
-  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    const key = m?.[1];
-    const val = m?.[2];
-    if (key && val && process.env[key] == null) process.env[key] = val;
-  }
-}
 loadRootEnv();
 installCircleDnsPinning();
 

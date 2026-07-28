@@ -3,6 +3,19 @@
  * Everything lives under `.rivo-landing` so it never leaks into the shadcn
  * theme the /app marketplace demo uses.
  */
+/*
+ * The shared layout paints <body> with the light shadcn `--background`, which
+ * shows through in the rubber-band gutter above and below a dark page. Scoped
+ * with :has so /app and /sdk — which share that layout — keep their own theme
+ * even after a client-side nav has already loaded this stylesheet.
+ */
+:root:has(.rivo-landing) {
+  color-scheme: dark;
+}
+:root:has(.rivo-landing) body {
+  background-color: #0b0d0c;
+}
+
 .rivo-landing {
   --ink: #0b0d0c;
   --ink-raised: #14181a;
@@ -78,6 +91,20 @@
   animation: rivo-coin-travel 1.8s cubic-bezier(0.65, 0, 0.35, 1) forwards;
 }
 
+/* Wordmark settle — translate only, never opacity: if this animation is
+   throttled or skipped the word still reads. */
+@keyframes rivo-wordmark-in {
+  from {
+    transform: translateY(12px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.rivo-landing .wordmark-in {
+  animation: rivo-wordmark-in 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 @keyframes rivo-fade-up {
   from {
     opacity: 0;
@@ -140,6 +167,7 @@
 @media (prefers-reduced-motion: reduce) {
   .rivo-landing .coin-travel,
   .rivo-landing .fade-up,
+  .rivo-landing .wordmark-in,
   .rivo-landing .stamp-in {
     animation: none !important;
   }

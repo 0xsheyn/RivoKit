@@ -30,6 +30,7 @@ import { createOrderStore } from "../src/orchestrator/order-store.ts";
 import { createBridge, BridgeStuckError, BridgeFailedError } from "../src/funding/bridge.ts";
 import { refund } from "../src/orchestrator/refund.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
+import { readEnv } from "./lib/env.mjs";
 
 // This network hijacks Circle's DNS (observed live); pin before use.
 installCircleDnsPinning();
@@ -38,11 +39,7 @@ const FUNDING_STATE = ".live-funding.json";
 const STATE_FILE = ".live-refund.json";
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const ESCROW = getAddress(env.NEXT_PUBLIC_RIVO_ESCROW_ADDRESS);
 const buyer = privateKeyToAccount(env.BUYER_PRIVATE_KEY);

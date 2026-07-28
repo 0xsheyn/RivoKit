@@ -4,15 +4,17 @@ export default function ThesisBand() {
       <svg
         viewBox="0 0 1440 400"
         preserveAspectRatio="none"
-        className="pointer-events-none absolute inset-0 h-full w-full opacity-40"
+        className="pointer-events-none absolute inset-0 h-full w-full opacity-30"
         aria-hidden
       >
         <line x1="0" y1="200" x2="1440" y2="200" stroke="var(--verdigris)" strokeWidth="1" opacity="0.5" />
+        {/* Kept clear of the vertical middle: the headline lives there, and a
+            hash running through it reads as a rendering fault, not texture. */}
         {Array.from({ length: 26 }).map((_, i) => (
           <text
             key={i}
             x={(i * 1440) / 26 + 10}
-            y={i % 2 === 0 ? 150 : 260}
+            y={i % 2 === 0 ? 48 : 352}
             className="f-mono"
             fontSize="10"
             fill="var(--ash)"
@@ -22,14 +24,16 @@ export default function ThesisBand() {
         ))}
       </svg>
 
-      <div className="relative mx-auto max-w-4xl px-5 text-center">
+      <div className="relative mx-auto max-w-5xl px-5 text-center">
+        {/* Two deliberate lines. Each is its own block so that when one is too
+            wide to fit it balances across two rows instead of dropping a
+            single orphaned word — which is what "€P," was doing. */}
         <p
           className="f-display text-[var(--bone)]"
-          style={{ fontSize: "clamp(34px, 8vw, 88px)", lineHeight: 1.05 }}
+          style={{ fontSize: "clamp(30px, 6.4vw, 76px)", lineHeight: 1.08 }}
         >
-          The recipient gets at least €P,
-          <br />
-          or the swap reverts.
+          <span className="block text-balance">The recipient gets at least €P,</span>
+          <span className="block text-balance">or the swap reverts.</span>
         </p>
         <p className="f-mono mt-6 text-[13px] text-[var(--ash)]">
           ENFORCED ON-CHAIN BY stopLimit — NOT IN TYPESCRIPT · THERE IS NO PATH WHERE THE RECIPIENT QUIETLY RECEIVES

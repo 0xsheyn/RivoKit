@@ -30,6 +30,7 @@ import { toDecimalString } from "../src/settlement-fx/units.ts";
 import { createOrderStore } from "../src/orchestrator/order-store.ts";
 import { expiriesFor, timeoutPolicyFor } from "../src/orchestrator/policy.ts";
 import { release } from "../src/orchestrator/release.ts";
+import { readEnv } from "./lib/env.mjs";
 
 const STATE_FILE = ".live-scenario.json";
 
@@ -38,11 +39,7 @@ const PRICE_EUR = 18_500_000n;
 const BUFFER_BPS = 150;
 const WEDGE = "digital_goods";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 
 const ESCROW = getAddress(env.NEXT_PUBLIC_RIVO_ESCROW_ADDRESS);
 const TOKEN_COLLECTOR = getAddress(env.NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS);

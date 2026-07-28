@@ -11,15 +11,11 @@
  *
  * Optional: ORIGINATOR_NAME=AsyncSuccess ... to drive a sandbox magic value.
  */
-import { readFileSync } from "node:fs";
 import { privateKeyToAccount } from "viem/accounts";
 import { createCpnRamp } from "../src/ramp/cpn-ramp.ts";
+import { readEnv } from "./lib/env.mjs";
 
-const env = {};
-for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
-  const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-  if (m && m[2]) env[m[1]] = m[2];
-}
+const env = readEnv();
 const CONFIRM = process.env.CONFIRM === "BROADCAST";
 const ORIGINATOR_NAME = process.env.ORIGINATOR_NAME || "Rivo Co";
 

@@ -16,8 +16,11 @@ const STATES = [
     color: "var(--verdigris)",
     label: "SWAPPED · FLOOR MET · PAID OUT",
     caption: "released",
-    tx: "0x51e968…f049e7f",
-    txUrl: "https://testnet.arcscan.app/tx/0x51e9681d1d23fedeb239110a2c58309912a5c82d35a20c316b3102731f049e7f",
+    // The capture that split the 25 bps fee with the floor still intact — the
+    // tx that actually proves *this* state. (The seller-signed cash-out hash
+    // belongs to a later, separate leg; it lives in the ledger, not here.)
+    tx: "0x7910f1…037420",
+    txUrl: "https://testnet.arcscan.app/tx/0x7910f15984c10fe929d3e642a84ca3be2c86d3727076fb3d57552899e0037420",
   },
   {
     key: "refunded",
