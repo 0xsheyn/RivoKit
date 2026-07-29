@@ -352,7 +352,7 @@ Everything under `scripts/` hits real services and needs `.env.local`.
 | Group | Scripts |
 |---|---|
 | **Setup / health** | `preflight` (read-only prereq check) · `setup` (deploy, idempotent) · `check-cpp` (escrow↔collector wiring, 8 assertions) · `check-hash` (off-chain `getPaymentInfoHash` vs on-chain `getHash`) · `check-operator` (grants + proves the operator's USDC allowance to the refund collector) · `sync-env` |
-| **Live proofs** | `live-phase1/1b/2/2-chain` · `live-funding` · `live-bridge` · `live-unified` · `live-refund` · `live-recovery` (capture ok, swap misses floor, retry wins) · `live-charge` (direct mode) · `live-compliance` · `live-sdk` (full flow through the facade) · `live-scenario` · `live-ramp*` · `live-mint-arc-deposit` (seller EURC on Arc → Mint balance; sends only behind `CONFIRM=DEPOSIT`) · `live-cpn-subscribe` (lists subscriptions; `--check <url>` tests the `HEAD` Circle validates with; creates only behind `CONFIRM=SUBSCRIBE`) |
+| **Live proofs** | `live-phase1/1b/2/2-chain` · `live-funding` · `live-bridge` · `live-unified` · `live-refund` · `live-recovery` (capture ok, swap misses floor, retry wins) · `live-charge` (direct mode) · `live-compliance` · `live-sdk` (full flow through the facade) · `live-scenario` · `live-ramp*` · `live-mint-arc-deposit` (seller EURC on Arc → Mint balance; sends only behind `CONFIRM=DEPOSIT`) · `live-cpn-subscribe` (lists subscriptions; `--check <url>` tests the `HEAD` Circle validates with; creates only behind `CONFIRM=SUBSCRIBE`) · `live-webhook-attribution` (cash-out with the polling writer removed, so only a webhook can move the row; broadcasts only behind `CONFIRM=BROADCAST`) |
 | **API probes** | `probe-cpn*` (quote, payment, status, magic values) · `probe-swap` · `probe-mint` (USD → wire) · `probe-mint-sepa` (links an IBAN account; redeems only behind `CONFIRM=REDEEM`) · `probe-mint-deposit` |
 | **Demo utils** | `demo-topup` (fund the buyer on Sepolia + Gateway) · `reset-demo` (wipe orders) |
 
@@ -390,9 +390,13 @@ paths passes without testing anything.
 | CPN webhook delivered over HTTP into our own route | ✅ Circle validated the URL with `HEAD`, then POSTed 5 events for `056c3e1f…`; each verified live and written to `events` with `sig_verified = true` |
 | Webhook signature verification | ✅ live `X-Circle-Signature` accepted, a body edited by one digit refused, `webhooks.test` accepted on a fresh subscription |
 | Cash-out row advanced from a verified webhook | ✅ `acd9d389…` walked `CRYPTO_FUNDS_PENDING → FIAT_PAYMENT_INITIATED → COMPLETED`; duplicates and transaction events wrote nothing |
-| *Which* writer advanced the row in the live run | ⚠️ webhook and the demo's own poller both write; in the `056c3e1f…` run they raced inside the same 16-second window |
-| CPN BRL / MXN / USD | ⚠️ requirements + quote + prepare only, **no settlement** |
+| *Which* writer advanced the row | ✅ settled — `da85fbcc…` broadcast with the polling writer removed, not out-raced: zero status writes from the caller, 5 verified `events` rows, row reached `COMPLETED` |
+| CPN USD/WIRE — the second corridor being aimed at | ⚠️ implemented, one attempt, `FAILED`; no settlement yet |
 | Browser-wallet funding rails (`demo/app/wallet-rails.ts`) | ❌ written, never executed on-chain |
+
+CPN **BRL/PIX and MXN/SPEI** are **roadmap, not a gap** — see
+[Roadmap](#roadmap). They are deliberately left unexercised during the build and
+testnet phase, so they are not tracked as a status here.
 
 ### What the tests do not guard
 
@@ -467,9 +471,15 @@ Report vulnerabilities privately, not via public issues.
 ## Limitations & honest boundaries
 
 - **Testnet / sandbox only**, unaudited — do not use real funds.
-- **The off-ramp is real, but its reach is uneven.** EUR/SEPA is proven to
-  `COMPLETED`. BRL, MXN and USD are verified only as far as `prepare` — their
-  requirements and quotes are live, but no payment has settled on those rails.
+- **The off-ramp settles on EUR/SEPA; USD/WIRE is the other corridor being
+  aimed at and has not settled yet.** One USD/WIRE attempt failed. Do not read
+  the proven Circle Mint *USD → wire* redeem as this: that one starts from a
+  fiat balance already inside Circle Mint, while the CPN corridor starts from
+  USDC on Arc and runs quote → travel rule → Permit2 → broadcast. Only the
+  second is part of RivoKit's off-ramp.
+- **BRL/PIX and MXN/SPEI are built but deliberately unexercised** in the build
+  and testnet phase — roadmap work, not an unfinished edge. See
+  [Roadmap](#roadmap).
 - **Circle Mint redeem is proven, in both currencies.** USD → wire bank reached
   `complete` once (10.00 USD, balance 350.00 → 340.00, payout `3f708440…`), and
   the euro-native path this project actually argues for — EUR → a SEPA bank —
@@ -508,13 +518,32 @@ Report vulnerabilities privately, not via public issues.
   so those rows are proof the transport, the verification and the persistence
   all ran.
 
-  What is **not** settled is which writer advanced `cpn_payments` in that run.
-  `demo/lib/cpn.server.ts` also reconciles from polled status, and the demo tab
-  polls roughly every 1.5s, so the webhook (`cpn.payment.completed` at
-  20:32:25) and the poller raced inside the same 16-second window. The
-  behaviour is right either way, but "the row corrected itself from a webhook"
-  is not yet a claim this project can make. To settle it: trigger a cash-out,
-  close the demo tab so the poller stops, and watch the row move anyway.
+  Which writer advanced `cpn_payments` in that run was left open, because
+  `demo/lib/cpn.server.ts` reconciles from polled status too and the webhook
+  (`cpn.payment.completed` at 20:32:25) landed inside the same 16-second window
+  as the poll loop. That is now settled — see below.
+- **The webhook, and only the webhook, advances the stored cash-out.** The
+  attribution above was closed by removing the competing writer rather than
+  trying to out-race it. Note the original plan — "close the demo tab so the
+  poller stops" — was aimed at the wrong variable: no tab poller exists. The
+  writer that raced is the loop *inside* `broadcastPayment`, twelve polls three
+  seconds apart each calling `persistStatus`, which runs server-side and keeps
+  running whether or not a tab is open.
+
+  `scripts/live-webhook-attribution.mjs` prepares, records the row, broadcasts,
+  and then only reads. For cash-out `da85fbcc…` (12 USDC → 10.31 EUR,
+  broadcast 08:49:43.999Z) the row moved `CRYPTO_FUNDS_PENDING → COMPLETED`
+  while the caller made exactly one write — the initial `recordCpnPayment` —
+  and no status write at all. Five events landed in `events` with
+  `sig_verified = true`, and only the webhook route writes that table. The
+  single `ramp.status()` call ran *after* the observation window closed, as a
+  control: CPN also said `COMPLETED`. On chain the seller went 24.000787 →
+  12.000787 USDC.
+
+  One thing that row does **not** claim: `FIAT_PAYMENT_INITIATED` was applied
+  by the reducer but never sampled, because the last two webhooks arrived
+  inside the same five-second read interval. What is proven is the endpoints of
+  the walk, not three observed stops along it.
 
   Two defects surfaced only under real traffic, both invisible to the unit
   tests because those sign with their own keypair and never resolve a key.
@@ -558,10 +587,12 @@ here is a promise; it is what the honest ledger above says is still missing.
    non-custodial claim in code form, and it has never been executed. Needs a
    human at a connected wallet: by design no server key can stand in, which is
    exactly the property being demonstrated.
-2. **Attribute the reconciliation to the webhook.** Delivery, verification and
-   persistence all ran live, but the demo's poller writes the same row, so the
-   two raced. Repeat the cash-out with the demo tab closed and the ambiguity
-   disappears — a short experiment, not a build.
+2. **Settle a CPN USD/WIRE cash-out.** EUR/SEPA and USD/WIRE are the two
+   corridors this project is aiming to land; only the first has reached
+   `COMPLETED`. USD/WIRE has been attempted once and failed, so this is a real
+   target with a known starting point, not breadth for its own sake. Note the
+   ~61 USDC minimum — the destination-side limit makes it the most expensive
+   corridor to prove.
 3. **A durable public endpoint.** Today's proof rode a Cloudflare quick tunnel,
    whose URL dies with the process, and the subscription dies with it. Anything
    beyond a one-off demo needs a stable host; note the trade-off in
@@ -569,10 +600,12 @@ here is a promise; it is what the honest ledger above says is still missing.
 
 **Later — widen the reach once the above holds**
 
-4. **CPN corridors beyond EUR.** BRL/PIX, MXN/SPEI and USD/WIRE are live as far
-   as `prepare`; each needs a funded settlement to prove. Deliberately *not* a
-   focus: they add breadth, not depth, and every one of them costs real
-   settlement to demonstrate. Revisit once the rails above are proven.
+4. **CPN BRL/PIX and MXN/SPEI.** Both are implemented — corridor config,
+   per-rail beneficiary and travel-rule fields, quotes — and settling them is a
+   **deliberate non-goal of the build and testnet phase**, not an outstanding
+   defect. They add breadth, not depth. Treat their absence from the proof table
+   as intentional: this is the one place their status is tracked. (USD/WIRE is
+   *not* in this group — it is a target, item 2.)
 5. **Direct unit coverage for the network-facing modules** — listed in
    [What the tests do not guard](#what-the-tests-do-not-guard). Two real defects
    have already hidden there, so this is remediation, not tidiness.
