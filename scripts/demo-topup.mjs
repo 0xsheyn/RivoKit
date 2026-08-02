@@ -1,11 +1,13 @@
 /**
- * One-time demo funding: give the buyer USDC on Sepolia (bridge rail) and in
- * Circle Gateway (unified-balance rail), sourced from its Arc balance.
+ * One-time demo funding: give the buyer USDC on the source chain (bridge rail)
+ * and in Circle Gateway (unified-balance rail), sourced from its Arc balance.
  *
  *   node scripts/demo-topup.mjs [--reset]
  *
- * Gateway deposits wait on Ethereum finality (~13 min) before they are spendable
- * — the marketplace reads the live balance and lights up the rail once confirmed.
+ * The chain is whatever demo/lib/source-chain.ts names, so this stays in step
+ * with the rails it funds. A Gateway deposit is spendable only after the source
+ * chain finalises — seconds on a fast-finality chain, ~13 min from Ethereum —
+ * and the marketplace lights the rail up once the live balance confirms.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { AppKit, BridgeChain } from "@circle-fin/app-kit";
@@ -17,10 +19,11 @@ import { createBridge } from "../src/funding/bridge.ts";
 import { createUnifiedBalance } from "../src/funding/unified-balance.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { readEnv } from "./lib/env.mjs";
+import { SOURCE_CHAIN } from "../demo/lib/source-chain.ts";
 
 installCircleDnsPinning();
 const STATE = ".demo-topup.json";
-const BRIDGE_TO_SEPOLIA = parseUnits("10", 6);
+const BRIDGE_TO_SOURCE = parseUnits("10", 6);
 const DEPOSIT_TO_GATEWAY = parseUnits("6", 6);
 
 const env = readEnv();
@@ -33,14 +36,14 @@ const kit = new AppKit();
 const bridge = createBridge(kit);
 const ub = createUnifiedBalance(kit);
 const arc = createViemAdapterFromPrivateKey({ privateKey: env.BUYER_PRIVATE_KEY, chain: BridgeChain.Arc_Testnet });
-const sep = createViemAdapterFromPrivateKey({ privateKey: env.BUYER_PRIVATE_KEY, chain: BridgeChain.Ethereum_Sepolia });
+const src = createViemAdapterFromPrivateKey({ privateKey: env.BUYER_PRIVATE_KEY, chain: SOURCE_CHAIN.name });
 
 if (!state.bridged) {
-  console.log(`Bridge ${formatUnits(BRIDGE_TO_SEPOLIA, 6)} USDC Arc → Sepolia…`);
+  console.log(`Bridge ${formatUnits(BRIDGE_TO_SOURCE, 6)} USDC Arc → ${SOURCE_CHAIN.label}…`);
   const res = await bridge.execute({
     fromAdapter: arc, fromChain: BridgeChain.Arc_Testnet,
-    toAdapter: sep, toChain: BridgeChain.Ethereum_Sepolia,
-    amountMinor: BRIDGE_TO_SEPOLIA, kitKey: env.KIT_KEY,
+    toAdapter: src, toChain: SOURCE_CHAIN.name,
+    amountMinor: BRIDGE_TO_SOURCE, kitKey: env.KIT_KEY,
   });
   state.bridged = res.state === "success";
   save();
@@ -49,13 +52,13 @@ if (!state.bridged) {
 }
 
 if (!state.deposited) {
-  console.log(`Deposit ${formatUnits(DEPOSIT_TO_GATEWAY, 6)} USDC Sepolia → Gateway…`);
-  const dep = await ub.deposit({ adapter: sep, chain: "Ethereum_Sepolia", amountMinor: DEPOSIT_TO_GATEWAY });
+  console.log(`Deposit ${formatUnits(DEPOSIT_TO_GATEWAY, 6)} USDC ${SOURCE_CHAIN.label} → Gateway…`);
+  const dep = await ub.deposit({ adapter: src, chain: SOURCE_CHAIN.name, amountMinor: DEPOSIT_TO_GATEWAY });
   state.deposited = true;
   save();
   console.log(`  deposit ter-mine — ${dep.txHash}`);
 }
 
-const gb = await ub.getBalance(sep);
+const gb = await ub.getBalance(src);
 console.log(`Gateway: confirmed ${formatUnits(gb.confirmedMinor, 6)} · pending ${formatUnits(gb.pendingMinor, 6)}`);
-console.log("Done. The Sepolia balance (bridge rail) is ready; Gateway confirms ~13 minutes after the deposit.");
+console.log(`Done. The ${SOURCE_CHAIN.label} balance (bridge rail) is ready; Gateway confirms once that chain finalises.`);

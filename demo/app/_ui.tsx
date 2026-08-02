@@ -2,7 +2,15 @@
 
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 
 /* ── format ──────────────────────────────────────────────────────────────── */
 
@@ -16,8 +24,10 @@ export const shortHash = (h: string) => `${h.slice(0, 8)}…${h.slice(-6)}`;
 
 /**
  * One quadrant of the 2×2 board: fixed header, independently scrolling body.
- * `min-h-0` on both the card and the body is what lets the grid row cap the
- * height instead of the content stretching the page.
+ * Card, CardHeader and CardContent keep their stock shadcn styling — only the
+ * layout classes needed to cap the height are added. `min-h-0` on both the card
+ * and the body is what lets the grid row cap the height instead of the content
+ * stretching the page.
  */
 export function Panel({
   title,
@@ -37,23 +47,25 @@ export function Panel({
   return (
     <Card
       className={cn(
-        "flex min-h-0 flex-col gap-0 overflow-hidden py-0",
+        "min-h-0 overflow-hidden",
         // Below the 4-column breakpoint the page scrolls; cap each panel so all four stay reachable.
         "max-h-[80vh] xl:max-h-none",
         className,
       )}
     >
-      <CardHeader className="flex shrink-0 flex-row items-center gap-3 border-b bg-muted/40 px-4 py-3">
-        <span className="flex size-7 items-center justify-center rounded-md border bg-background text-muted-foreground">
-          {icon}
-        </span>
-        <div className="min-w-0 flex-1">
-          <CardTitle className="truncate text-sm">{title}</CardTitle>
-          {hint && <p className="mt-0.5 truncate text-xs text-muted-foreground">{hint}</p>}
-        </div>
-        {action}
+      <CardHeader className="shrink-0">
+        <CardTitle className="flex items-center gap-2">
+          <span className="text-muted-foreground">{icon}</span>
+          <span className="truncate">{title}</span>
+        </CardTitle>
+        {hint && <CardDescription className="truncate">{hint}</CardDescription>}
+        {action && <CardAction>{action}</CardAction>}
       </CardHeader>
-      <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">{children}</CardContent>
+      {/* `py-px` is not spacing: the preset's Card draws its edge as an outset
+          `ring-1`, which the scroll container clips flush against its own top
+          and bottom — the first card's upper edge came out shaved off. One
+          pixel of room inside the scrollport is enough to let the ring land. */}
+      <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto py-px">{children}</CardContent>
     </Card>
   );
 }
@@ -62,20 +74,20 @@ export function Panel({
 export function SectionLabel({ children, count }: { children: React.ReactNode; count?: number }) {
   return (
     <div className="flex items-center gap-2 pt-1 first:pt-0">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{children}</span>
+      <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{children}</span>
       {count != null && count > 0 && (
-        <span className="rounded-full bg-muted px-1.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+        <Badge variant="secondary" className="tabular-nums">
           {count}
-        </span>
+        </Badge>
       )}
-      <span className="h-px flex-1 bg-border" />
+      <Separator className="flex-1" />
     </div>
   );
 }
 
 export function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">{children}</p>
+    <p className="border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">{children}</p>
   );
 }
 
@@ -83,55 +95,111 @@ export function Empty({ children }: { children: React.ReactNode }) {
 export function Metric({
   label,
   value,
-  tone,
   className,
 }: {
   label: string;
   value: React.ReactNode;
-  tone?: "default" | "positive";
   className?: string;
 }) {
   return (
     <div className={cn("min-w-0", className)}>
-      <div className="truncate text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div
-        className={cn(
-          "mt-0.5 truncate text-sm font-semibold tabular-nums",
-          tone === "positive" ? "text-emerald-600" : "text-foreground",
-        )}
-      >
-        {value}
-      </div>
+      <div className="truncate text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</div>
+      <div className="mt-0.5 truncate text-sm font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
 
-/* ── status ──────────────────────────────────────────────────────────────── */
+/* ── status tone ─────────────────────────────────────────────────────────── */
 
-export const TONE: Record<string, string> = {
-  waiting_payment: "border-border bg-muted text-muted-foreground",
-  processing_payment: "border-sky-200 bg-sky-50 text-sky-700",
-  paid: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  shipped: "border-sky-200 bg-sky-50 text-sky-700",
-  confirmed: "border-amber-200 bg-amber-50 text-amber-700",
-  dispute: "border-red-200 bg-red-50 text-red-700",
-  settling: "border-amber-200 bg-amber-50 text-amber-700",
-  refunding: "border-sky-200 bg-sky-50 text-sky-700",
-  refunded: "border-border bg-muted text-muted-foreground",
-  completed: "border-emerald-200 bg-emerald-50 text-emerald-700",
+/**
+ * Six meanings, and every status badge in the demo picks one. Before this the
+ * badge colour came from the stock variants, which meant a badge was black
+ * whether it said "completed" or "refunded" — the word carried the whole
+ * message. Now colour and word say the same thing, and they say it the same way
+ * in the order list, the CPN history and the Mint history.
+ */
+export type Tone = "neutral" | "progress" | "warning" | "success" | "refund" | "danger";
+
+/**
+ * Tinted fill + saturated text, the same idiom the shadcn preset uses for its
+ * own destructive badge. The five hues are `--chart-1…5` from globals.css, so
+ * the palette has exactly one definition.
+ */
+export const TONE_CLASS: Record<Tone, string> = {
+  neutral: "border-border text-muted-foreground",
+  progress: "border-transparent bg-chart-1/10 text-chart-1 dark:bg-chart-1/20",
+  refund: "border-transparent bg-chart-2/10 text-chart-2 dark:bg-chart-2/20",
+  success: "border-transparent bg-chart-3/10 text-chart-3 dark:bg-chart-3/20",
+  warning: "border-transparent bg-chart-4/10 text-chart-4 dark:bg-chart-4/20",
+  danger: "border-transparent bg-chart-5/10 text-chart-5 dark:bg-chart-5/20",
 };
+
+/** Marketplace order view states and SDK `OrderState`, in one table. */
+const STATE_TONE: Record<string, Tone> = {
+  // Marketplace order view
+  waiting_payment: "warning",
+  processing_payment: "progress",
+  paid: "success",
+  shipped: "progress",
+  confirmed: "progress",
+  settling: "progress",
+  dispute: "danger",
+  refunding: "refund",
+  refunded: "refund",
+  completed: "success",
+  // The authorization window closed before the escrow ever collected. Nothing
+  // was taken, but nothing more can happen either.
+  expired: "danger",
+  // SDK OrderState
+  created: "neutral",
+  funding_pending: "warning",
+  funded: "success",
+  settlement_pending: "progress",
+  released: "success",
+  payout_pending: "warning",
+  paid_out: "success",
+  refund_pending: "refund",
+  failed: "danger",
+};
+
+export const stateTone = (state: string): Tone => STATE_TONE[state] ?? "neutral";
+
+/**
+ * CPN and Circle Mint each report their own vocabulary — SCREAMING_SNAKE for
+ * CPN, lower case for Mint — and both keep adding statuses. Matching on
+ * substrings rather than enumerating means a status nobody has seen yet still
+ * lands in the right colour instead of falling through to grey.
+ */
+export function railTone(status: string | null | undefined): Tone {
+  const s = (status ?? "").toUpperCase();
+  if (!s) return "neutral";
+  if (s.startsWith("COMPLETE") || s === "PAID" || s === "SETTLED") return "success";
+  if (/FAIL|DENIED|REJECT|EXPIRE|CANCEL/.test(s)) return "danger";
+  if (s.includes("REFUND")) return "refund";
+  if (s.includes("PENDING") || s === "CREATED" || s === "QUEUED") return "warning";
+  return "progress";
+}
+
+/** `CRYPTO_FUNDS_PENDING` → `crypto funds pending`, so rail statuses read like the rest. */
+export const statusLabel = (s: string | null | undefined) =>
+  (s ?? "").toLowerCase().replace(/_/g, " ") || "—";
+
+export function ToneBadge({
+  tone,
+  className,
+  children,
+}: {
+  tone: Tone;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return <Badge variant="outline" className={cn("shrink-0", TONE_CLASS[tone], className)}>{children}</Badge>;
+}
 
 export function StatusBadge({ status, label, busy }: { status: string; label: string; busy?: boolean }) {
   return (
-    <Badge
-      variant="outline"
-      className={cn(
-        "shrink-0 font-medium",
-        TONE[status] ?? "border-border bg-muted text-muted-foreground",
-        busy && "animate-pulse",
-      )}
-    >
+    <ToneBadge tone={busy ? "progress" : stateTone(status)} className={cn(busy && "animate-pulse")}>
       {busy ? "working…" : label}
-    </Badge>
+    </ToneBadge>
   );
 }

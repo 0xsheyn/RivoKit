@@ -18,6 +18,29 @@ export type OrderEventMap = {
   funding_pending: { orderId: string };
   funded: { orderId: string };
   released: { orderId: string; eurcOutMinor: bigint; rebateMinor: bigint; rebateTxHash?: string | undefined };
+  /**
+   * The off-ramp was BROADCAST — irreversible, and not yet delivered. Hosts
+   * should read this as "the money is in transit", never as "the seller has
+   * been paid"; `paid_out` is the event that means that.
+   */
+  payout_pending: {
+    orderId: string;
+    paymentId: string;
+    rail: string;
+    corridor: string;
+    sourceMinor: bigint;
+    destinationMinor: bigint;
+    destinationCurrency: string;
+    rebateMinor: bigint;
+    rebateTxHash?: string | undefined;
+  };
+  /** Fiat reached the beneficiary's bank. Terminal. */
+  paid_out: {
+    orderId: string;
+    paymentId: string;
+    destinationMinor: bigint;
+    destinationCurrency: string;
+  };
   refund_pending: { orderId: string };
   refunded: { orderId: string; chain: string };
   failed: { orderId: string; reason: string };

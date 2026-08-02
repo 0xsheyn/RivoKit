@@ -24,6 +24,7 @@ export {
   createRivoKit,
   paymentInfoFromRecord,
   OperatorGasLowError,
+  PayoutUnavailableError,
   type RivoKit,
   type RivoKitConfig,
   type RivoKitDeps,
@@ -91,6 +92,7 @@ export {
   isTerminal,
   isFunded,
   isCaptured,
+  isOffRamped,
   nextStates,
   InvalidStateTransition,
   type OrderState,
@@ -125,9 +127,40 @@ export {
 } from "./events/compliance.ts";
 export { parseWebhookEvent, verifyCircleSignature } from "./events/webhook.ts";
 export { handleCircleWebhook } from "./events/webhook-handler.ts";
-/** Labelled MOCK on purpose: RivoKit issues a payout INSTRUCTION, it does not
- *  execute fiat. The real fiat leg is the CPN ramp below, or the host's own. */
-export { mockPayout, isMockPayout, type PayoutInstruction } from "./payout/mock-payout.ts";
+/** The payout an order gets when no rail is wired: labelled MOCK, executes
+ *  nothing, and hands the fiat leg to the host. */
+export { mockPayout } from "./payout/mock-payout.ts";
+export {
+  livePayout,
+  isMockPayout,
+  isLivePayout,
+  type PayoutInstruction,
+  type PayoutKind,
+} from "./payout/instruction.ts";
+
+/* ── The fiat payout rail — what makes `release()` reach a bank ───────────── */
+/** Implement this to off-ramp somewhere RivoKit does not ship a client for.
+ *  The floor check stays in the SDK; a rail only quotes and broadcasts. */
+export {
+  toDestinationMinor,
+  PayoutFloorNotMetError,
+  PayoutQuoteExpiredError,
+  type PayoutRail,
+  type PayoutTarget,
+  type PayoutLimits,
+  type PayoutQuote,
+  type PayoutQuoteRequest,
+  type PayoutSubmission,
+  type PayoutStatus,
+} from "./payout/rail.ts";
+/** CPN as a rail. Quotes the DESTINATION side so the seller's floor is the
+ *  thing that is pinned, and takes its signer injected — no key lives here. */
+export {
+  createCpnPayoutRail,
+  permitAmountOf,
+  type CpnPayoutDetails,
+  type CreateCpnPayoutRailParams,
+} from "./payout/cpn-payout.ts";
 
 /* ── Fiat off-ramp (CPN) — separate from the facade on purpose ────────────── */
 export {
