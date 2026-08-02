@@ -14,34 +14,9 @@
 
 ---
 
-## One call, escrow to bank account
-
-```ts
-const order = await kit.createOrder({
-  payer, receiver,
-  priceEURMinor: 1_000_000n,        // €10.00 guaranteed to the seller
-  receivingChain: "ARC-TESTNET",
-  wedge: "delivery_confirmed",
-  payoutTo: "bank",
-});
-
-await kit.fund(order.id);
-await kit.release(order.id, proof);  // capture → CPN quote → broadcast → bank
-```
-
-That is not a sketch. Order `ord_1785510582_657861` ran it against Arc Testnet on
-2026-07-31: capture
-[`0x631405…9966698`](https://testnet.arcscan.app/tx/0x63140582f99e748e2af4c4f1f281fc086f5ee953f861668eb161adf7a9966698),
-CPN payment `61d22d57…` reported **`COMPLETED`**, 11.751140 USDC → **€10.00
-exactly**. The order walked `funded → payout_pending → paid_out` and stored its
-payout as `kind: cpn`, `label: LIVE`, `executed: true`.
-
-Both target corridors have reached `COMPLETED` on live infrastructure:
-
-| Corridor | Payment | Moved |
-|---|---|---|
-| **EUR/SEPA** | `61d22d57…` | 11.751140 USDC → €10.00 |
-| **USD/WIRE** | `c2fec0f6…` | 62.000000 USDC → $36.96, `signed_by: wallet` |
+<p align="center">
+  <img src="demo/assets/readme_banner.jpg" alt="RivoKit — one call, escrow to bank account. A createOrder call with payoutTo: &quot;bank&quot;, then fund() and release(), which captures, quotes through CPN, broadcasts and reaches the bank. Order ord_1785510582_657861 ran it on Arc Testnet on 2026-07-31: capture 0x631405…9966698, CPN payment 61d22d57… reported COMPLETED, 11.751140 USDC to €10.00 exactly; the order walked funded → payout_pending → paid_out and stored its payout as kind: cpn, label: LIVE, executed: true. Both target corridors have reached COMPLETED on live infrastructure — EUR/SEPA payment 61d22d57… moved 11.751140 USDC to €10.00, and USD/WIRE payment c2fec0f6… moved 62.000000 USDC to $36.96, signed_by: wallet.">
+</p>
 
 Every hash, every order id, and exactly what each run does *not* prove:
 **[PROOFS.md](PROOFS.md)**.
