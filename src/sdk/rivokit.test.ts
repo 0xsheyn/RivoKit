@@ -23,7 +23,8 @@ function mkOrder(o: Partial<OrderRecord> = {}): OrderRecord {
     id: "ord_x", payer: ADDR.payer, receiver: ADDR.receiver, operator: ADDR.operator, token: ADDR.token,
     price_eur: "2000000", buffer_bps: 150, usdc_amount: "2100000", max_amount: "2100000", salt: "7",
     min_fee_bps: 0, max_fee_bps: 0, fee_receiver: "0x0000000000000000000000000000000000000000",
-    receiving_chain: "Ethereum_Sepolia", mode: "escrow", wedge: "digital_goods", state: "created",
+    receiving_chain: "Ethereum_Sepolia", mode: "escrow", payout_to: "wallet",
+    wedge: "digital_goods", state: "created",
     timeout_kind: "auto_capture", timeout_deadline: iso,
     pre_approval_expiry: iso, authorization_expiry: iso, refund_expiry: iso,
     payment_info_hash: "0xhash", eurc_out: null, rebate: null, failure_reason: null,
@@ -258,7 +259,12 @@ describe("release", () => {
     await kit.release("ord_x", proof);
 
     // Surplus (2_030_000 − 2_000_000 floor = 30_000) goes back to the payer.
-    expect(payRebate).toHaveBeenCalledWith({ orderId: "ord_x", to: ADDR.payer, amountMinor: 30_000n });
+    // `token` travels with the amount: on the wallet path the surplus is EURC
+    // (what the swap produced), on the bank path it is USDC. A host that
+    // ignored it would send the wrong asset.
+    expect(payRebate).toHaveBeenCalledWith({
+      orderId: "ord_x", to: ADDR.payer, amountMinor: 30_000n, token: "EURC",
+    });
     expect(deps.store.recordPaymentIdempotent).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "rebate", txHash: "0xrebate", amountMinor: 30_000n }),
     );

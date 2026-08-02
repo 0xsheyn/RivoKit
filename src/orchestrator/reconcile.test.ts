@@ -11,7 +11,7 @@ function order(overrides: Partial<OrderRecord> = {}): OrderRecord {
     payer: "0x1", receiver: "0x2", operator: "0x3", token: "0x4",
     price_eur: "2000000", buffer_bps: 150, usdc_amount: "2000000",
     max_amount: "2000000", salt: "1", min_fee_bps: 0, max_fee_bps: 0, fee_receiver: "0x0",
-    receiving_chain: "Ethereum_Sepolia", mode: "escrow", wedge: "digital_goods",
+    receiving_chain: "Ethereum_Sepolia", mode: "escrow", payout_to: "wallet", wedge: "digital_goods",
     state: "funding_pending", timeout_kind: "auto_capture",
     timeout_deadline: "", pre_approval_expiry: "", authorization_expiry: "", refund_expiry: "",
     payment_info_hash: HASH, eurc_out: null, rebate: null, failure_reason: null,
