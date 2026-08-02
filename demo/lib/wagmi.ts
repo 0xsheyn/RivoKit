@@ -7,7 +7,7 @@
  * key never leaves the browser. Arc Testnet only; USDC is Arc's gas token.
  */
 import { createConfig, fallback, http } from "wagmi";
-import { arcTestnet, avalancheFuji, baseSepolia, sepolia } from "viem/chains";
+import { arcTestnet, avalancheFuji, baseSepolia, polygonAmoy, sepolia } from "viem/chains";
 import { sourceChain } from "./source-chain";
 
 // Connectors come from EIP-6963 injected-provider discovery (MetaMask et al.),
@@ -27,12 +27,13 @@ const srcTransport = (key: Parameters<typeof sourceChain>[0]) =>
   fallback(sourceChain(key).rpcUrls.map((url) => http(url)));
 
 export const wagmiConfig = createConfig({
-  chains: [arcTestnet, avalancheFuji, baseSepolia, sepolia],
+  chains: [arcTestnet, avalancheFuji, baseSepolia, sepolia, polygonAmoy],
   transports: {
     [arcTestnet.id]: http(),
     [avalancheFuji.id]: srcTransport("fuji"),
     [baseSepolia.id]: srcTransport("base"),
     [sepolia.id]: srcTransport("sepolia"),
+    [polygonAmoy.id]: srcTransport("amoy"),
   },
   multiInjectedProviderDiscovery: true,
   ssr: true,
