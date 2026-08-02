@@ -22,25 +22,27 @@
  *   Avalanche Fuji             1                      1
  *   Base Sepolia               1                     65   (~15-19 min)
  *   Ethereum Sepolia           2                     65   (~15-19 min)
+ *   Polygon Amoy              13                     33   (~1-2 min)
  *
  * Arc Testnet publishes **only** a v2 CCTP deployment, so every transfer here is
  * v2 — the version that has Fast Transfer at all. And App Kit defaults to it:
  * `transferSpeed: params.config?.transferSpeed ?? TransferSpeed.FAST`. RivoKit
- * passes no `transferSpeed`, so all three chains normally settle in seconds.
+ * passes no `transferSpeed`, so all four chains normally settle in seconds.
  *
  * Fast Transfer is not free: Circle charges a few bps for it, and it draws on a
  * Fast Transfer Allowance that can be exhausted. When it is, the transfer falls
- * back to hard finality — which costs Base and Ethereum ~15-19 minutes, and
- * costs Fuji nothing, because its hard finality is already 1 confirmation.
+ * back to hard finality — which costs Base and Ethereum ~15-19 minutes, costs
+ * Amoy a minute or two (33 confirmations at ~2s blocks), and costs Fuji nothing,
+ * because its hard finality is already 1 confirmation.
  *
  * That, and only that, is why Fuji is the default: it is the one chain whose
  * worst case equals its best case. The others are offered because a payer holds
  * USDC where they hold it — the point of a multichain funding story.
  *
  * To add another chain, add a row. The `name` must exist in App Kit's
- * `BridgeChain` AND in `UnifiedBalanceChain`; all three below do.
+ * `BridgeChain` AND in `UnifiedBalanceChain`; all four below do.
  */
-export type SourceChainId = "fuji" | "base" | "sepolia";
+export type SourceChainId = "fuji" | "base" | "sepolia" | "amoy";
 
 export type SourceChain = {
   /** Stable key used by the UI and the server actions. */
@@ -62,7 +64,8 @@ export type SourceChain = {
    * a dead rail. This is the same treatment Arc already gets
    * (`ARC_TESTNET_RPC_FALLBACKS`), for the same reason.
    *
-   * The first entry of each list is the one Circle's own chain table names.
+   * The first entry is the one Circle's own chain table names — EXCEPT on Amoy,
+   * where that endpoint does not resolve here at all; see the row's own note.
    */
   rpcUrls: readonly string[];
   explorerUrl: string;
@@ -77,6 +80,16 @@ export type SourceChain = {
    * Shown in the rail list, so it must describe the NORMAL case first.
    */
   finality: string;
+  /**
+   * Set when the rail is known NOT to work, with the reason in the buyer's own
+   * terms. The row stays in the table — it is kept, not deleted, so the work to
+   * finish it survives — but nothing may start a transfer from it.
+   *
+   * A disabled chain is still SHOWN, greyed out and unselectable, rather than
+   * hidden: a chain that silently vanishes reads as a bug, and the balance a
+   * payer holds there is still worth showing them.
+   */
+  disabledReason?: string;
 };
 
 export const SOURCE_CHAINS: readonly SourceChain[] = [
@@ -122,6 +135,37 @@ export const SOURCE_CHAINS: readonly SourceChain[] = [
     nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
     finality: "~seconds (fast, 2 blocks) · ~15-19 min if the fast allowance is spent",
   },
+  {
+    key: "amoy",
+    id: 80002,
+    name: "Polygon_Amoy_Testnet",
+    label: "Polygon Amoy",
+    usdc: "0x41e94eb019c0762f9bfcf9fb1e58725bfb0e7582",
+    // Circle's chain table names `rpc-amoy.polygon.technology` first, and it is
+    // the one endpoint here that does NOT resolve on this network — plain
+    // ENOTFOUND, verified 2026-08-02, the same treatment `*.circle.com` gets.
+    // So it is kept (it is the canonical one, and it works elsewhere) but demoted
+    // below two that were read live: both answered at block ~43,854,600.
+    rpcUrls: [
+      "https://polygon-amoy-bor-rpc.publicnode.com",
+      "https://polygon-amoy.drpc.org",
+      "https://rpc-amoy.polygon.technology",
+    ],
+    explorerUrl: "https://amoy.polygonscan.com",
+    nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 },
+    finality: "~seconds (fast, 13 blocks) · ~1-2 min if the fast allowance is spent",
+    // Approve lands, then the CCTP burn reverts every time — simulation fails
+    // with EMPTY revert data inside App Kit's `kitContracts.bridge` wrapper.
+    // Proven to be Amoy's own problem, not ours: the identical code path from
+    // Ethereum Sepolia → Arc completes end-to-end (burn 0xf3504eab…, mint
+    // 0xb1dc1f20…, 2026-08-02). Ruled out as causes: gas, allowance, balance,
+    // destination (domain 0 and 6 revert the same), the wrapper deployment
+    // (identical 813-byte bytecode on four chains, not paused), token identity,
+    // burn limits, `maxFee`, and `transferSpeed`. `estimateBridge` SUCCEEDS on
+    // this route — which is exactly why it must be blocked here instead: nothing
+    // upstream reports it as broken. See scripts/live-bridge-amoy.mjs.
+    disabledReason: "CCTP burn reverts from Amoy — approve lands, the burn never does",
+  },
 ] as const;
 
 export const DEFAULT_SOURCE_CHAIN_ID: SourceChainId = "fuji";
@@ -129,9 +173,27 @@ export const DEFAULT_SOURCE_CHAIN_ID: SourceChainId = "fuji";
 /** The default source chain. Kept as a named export: scripts import it directly. */
 export const SOURCE_CHAIN: SourceChain = SOURCE_CHAINS[0]!;
 
+/** The rows a payer may actually transfer from. The UI still renders the rest, greyed out. */
+export const ENABLED_SOURCE_CHAINS: readonly SourceChain[] = SOURCE_CHAINS.filter((c) => !c.disabledReason);
+
 /** Never throws — an unknown key falls back to the default rather than breaking a rail. */
 export function sourceChain(key: string | null | undefined): SourceChain {
   return SOURCE_CHAINS.find((c) => c.key === key) ?? SOURCE_CHAIN;
+}
+
+/**
+ * The same lookup, for the code paths that are about to MOVE money.
+ *
+ * Throws rather than falling back to the default, which is the whole point: a
+ * silent substitution here would approve on the chain the payer picked and burn
+ * on a different one. Loud refusal beats a transfer nobody asked for.
+ */
+export function usableSourceChain(key: string | null | undefined): SourceChain {
+  const c = sourceChain(key);
+  if (c.disabledReason) {
+    throw new Error(`Source chain ${c.label} is disabled: ${c.disabledReason}`);
+  }
+  return c;
 }
 
 /** Reverse lookup by App Kit chain name — for turning a recorded tx into an explorer link. */

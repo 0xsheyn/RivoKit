@@ -37,7 +37,7 @@ import { useSellerWallet } from "./seller-wallet";
 import { withActionToast, withToast } from "./toast";
 import SellerWalletPicker from "./SellerWalletPicker";
 import {
-  DEFAULT_SOURCE_CHAIN_ID, SOURCE_CHAINS, sourceChain, sourceChainByName, type SourceChainId,
+  DEFAULT_SOURCE_CHAIN_ID, ENABLED_SOURCE_CHAINS, SOURCE_CHAINS, sourceChain, sourceChainByName, type SourceChainId,
 } from "@/lib/source-chain";
 
 // Anything recorded against a source chain links to that chain's explorer;
@@ -220,7 +220,10 @@ function SourceChainPicker({ value, onChange, usdcByChain, disabled }: {
       <ToggleGroup variant="outline" size="sm" className="flex-wrap"
         value={[value]} onValueChange={([v]) => v && onChange(v as SourceChainId)} disabled={disabled}>
         {SOURCE_CHAINS.map((c) => (
-          <ToggleGroupItem key={c.key} value={c.key}>
+          // A disabled chain stays visible with its balance, but cannot be
+          // picked — the title carries the reason, so the control explains
+          // itself instead of just refusing.
+          <ToggleGroupItem key={c.key} value={c.key} disabled={Boolean(c.disabledReason)} title={c.disabledReason}>
             {c.label}
             <span className="tabular-nums text-muted-foreground">{usd(usdcByChain?.[c.key] ?? null)}</span>
           </ToggleGroupItem>
@@ -229,6 +232,11 @@ function SourceChainPicker({ value, onChange, usdcByChain, disabled }: {
       <p className="text-xs text-muted-foreground">
         {sourceChain(value).finality} · gas paid in {sourceChain(value).nativeCurrency.symbol}
       </p>
+      {SOURCE_CHAINS.filter((c) => c.disabledReason).map((c) => (
+        <p key={c.key} className="text-xs text-muted-foreground">
+          {c.label} unavailable — {c.disabledReason}
+        </p>
+      ))}
     </div>
   );
 }
@@ -667,7 +675,7 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
           <AlertTitle>You are the payer</AlertTitle>
           <AlertDescription>
             New orders use your address, and every rail (Arc · Gateway · a CCTP bridge from{" "}
-            {SOURCE_CHAINS.map((c) => c.label).join(", ")}) runs from your own wallet. The escrow authorization stays
+            {ENABLED_SOURCE_CHAINS.map((c) => c.label).join(", ")}) runs from your own wallet. The escrow authorization stays
             gasless — the operator pays that gas.
           </AlertDescription>
         </Alert>

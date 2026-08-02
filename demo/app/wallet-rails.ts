@@ -24,7 +24,7 @@ import {
   ARC_TESTNET_CHAIN_ID, ARC_TESTNET_RPC_FALLBACKS, ARC_TESTNET_EXPLORER_URL,
 } from "../../src/constants/arc.ts";
 import {
-  SOURCE_CHAIN, SOURCE_CHAIN_PARAMS, sourceChain, sourceChainParams, type SourceChainId,
+  SOURCE_CHAIN, SOURCE_CHAIN_PARAMS, sourceChainParams, usableSourceChain, type SourceChainId,
 } from "../lib/source-chain.ts";
 import { hasCode, looksUnrecognizedChain } from "./wallet-errors.ts";
 
@@ -207,8 +207,12 @@ function adapterFor(provider: Eip1193, chainId: number, addParams?: Record<strin
 // One adapter per source chain, so a wallet holding USDC on Base and on Fuji
 // can fund from either without the two views colliding — `adapterFor` already
 // keys its cache by chain id.
+// `usableSourceChain`, not `sourceChain`: this is the single chokepoint every
+// money-moving wallet rail passes through (bridge, Gateway deposit, spend), so
+// refusing a disabled chain here covers all of them at once — and refuses BEFORE
+// the wallet is asked to switch chains or approve anything.
 const sourceAdapter = (p: Eip1193, from?: SourceChainId) => {
-  const c = sourceChain(from);
+  const c = usableSourceChain(from);
   return adapterFor(p, c.id, sourceChainParams(c) as never);
 };
 const arcAdapter = (p: Eip1193) => adapterFor(p, ARC_TESTNET_CHAIN_ID, ARC_CHAIN_PARAMS as never);
@@ -248,7 +252,7 @@ export async function walletSpendToArc(
     // Names which chain's deposit to draw down. It has to be the chain the
     // buyer actually deposited from, or Gateway reports BALANCE_INSUFFICIENT
     // against a balance the UI is showing as available.
-    fromChain: sourceChain(params.from).name,
+    fromChain: usableSourceChain(params.from).name,
     toAdapter: await arcAdapter(provider),
     toChain: "Arc_Testnet",
     recipientAddress: params.recipient,
@@ -269,7 +273,7 @@ export async function walletGatewayDeposit(
 ): Promise<string> {
   const res = await ub.deposit({
     adapter: await sourceAdapter(provider, from),
-    chain: sourceChain(from).name,
+    chain: usableSourceChain(from).name,
     amountMinor,
   });
   return res.txHash;
@@ -278,11 +282,12 @@ export async function walletGatewayDeposit(
 /**
  * CCTP bridge source chain → Arc, into the wallet's own address.
  *
- * Roughly a minute from any of the three: App Kit defaults to CCTP v2 Fast
+ * Roughly a minute from any of the four: App Kit defaults to CCTP v2 Fast
  * Transfer (`transferSpeed ?? TransferSpeed.FAST`), whose threshold is 1-2
- * blocks everywhere here, and the wallet prompts cost more than the attestation.
- * A spent Fast Transfer Allowance drops Base and Ethereum Sepolia to 65
- * confirmations — see demo/lib/source-chain.ts.
+ * blocks on Fuji/Base/Sepolia and 13 on Amoy — still seconds — and the wallet
+ * prompts cost more than the attestation. A spent Fast Transfer Allowance drops
+ * Base and Ethereum Sepolia to 65 confirmations and Amoy to 33 — see
+ * demo/lib/source-chain.ts.
  *
  * Interruptible either way: a BridgeStuckError means the burn already happened,
  * so the funds are in flight and it must be resumed, never resent. That property
@@ -295,7 +300,7 @@ export async function walletBridgeToArc(
 ): Promise<string> {
   const res = await bridge.execute({
     fromAdapter: await sourceAdapter(provider, from),
-    fromChain: sourceChain(from).name as BridgeChain,
+    fromChain: usableSourceChain(from).name as BridgeChain,
     toAdapter: await arcAdapter(provider),
     toChain: BridgeChain.Arc_Testnet,
     amountMinor,

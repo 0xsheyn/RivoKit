@@ -18,8 +18,8 @@ import {
   createPublicClient, createWalletClient, erc20Abi, fallback, getAddress, http, type Address, type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { arcTestnet, avalancheFuji, baseSepolia, sepolia } from "viem/chains";
-import { SOURCE_CHAINS, sourceChain, type SourceChainId } from "./source-chain.ts";
+import { arcTestnet, avalancheFuji, baseSepolia, polygonAmoy, sepolia } from "viem/chains";
+import { SOURCE_CHAINS, sourceChain, usableSourceChain, type SourceChainId } from "./source-chain.ts";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import { createCircleClient } from "../../scripts/lib/circle.mjs";
 import { loadRootEnv } from "../../scripts/lib/env.mjs";
@@ -175,6 +175,7 @@ function build() {
     fuji: createPublicClient({ chain: avalancheFuji, transport: srcTransport("fuji") }),
     base: createPublicClient({ chain: baseSepolia, transport: srcTransport("base") }),
     sepolia: createPublicClient({ chain: sepolia, transport: srcTransport("sepolia") }),
+    amoy: createPublicClient({ chain: polygonAmoy, transport: srcTransport("amoy") }),
   } satisfies Record<SourceChainId, unknown>;
 
   const erc20Balance = (client: typeof arcClient, token: Address, owner: string) =>
@@ -365,9 +366,16 @@ function build() {
     addresses: { buyer: buyer.address as string, merchant: MERCHANT as string },
     funding: {
       bridge, ub, arcAdapter, srcAdapter, buyer: buyer.address as string, kitKey: KIT_KEY,
-      /** Adapter + App Kit chain name for one source chain; unknown keys fall back to the default. */
+      /**
+       * Adapter + App Kit chain name for one source chain.
+       *
+       * `usableSourceChain`, so a disabled chain throws here rather than
+       * silently falling back to the default — the server actions that call
+       * this go straight on to burn, and burning on a chain the caller did not
+       * name is worse than refusing.
+       */
       source: (from?: SourceChainId) => {
-        const c = sourceChain(from);
+        const c = usableSourceChain(from);
         return { adapter: srcAdapters[c.key], chain: c.name as BridgeChain, label: c.label };
       },
       chains: { arc: BridgeChain.Arc_Testnet },
