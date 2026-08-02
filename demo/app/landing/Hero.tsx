@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, ExternalLink } from "lucide-react";
+import { RiArrowRightUpLine, RiExternalLinkLine } from "@remixicon/react";
 import HeroRail from "./HeroRail";
 
 const RAIL_DONE = 900;
@@ -85,7 +85,7 @@ export default function Hero() {
             className="eyebrow flex items-center gap-1.5 rounded-full border border-[color:var(--ash)]/30 px-3 py-1.5 hover-step"
           >
             GITHUB
-            <ExternalLink className="size-3.5" />
+            <RiExternalLinkLine className="size-3.5" />
           </a>
           <a
             href="#install"
@@ -152,7 +152,7 @@ export default function Hero() {
             className="flex items-center gap-1.5 rounded-sm border border-[color:var(--ash)]/40 px-5 py-2.5 text-sm text-[var(--bone)] hover-step"
           >
             Watch a payment clear
-            <ArrowUpRight className="size-4" />
+            <RiArrowRightUpLine className="size-4" />
           </a>
           {!reducedMotion && (
             <button

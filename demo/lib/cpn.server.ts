@@ -19,9 +19,12 @@ import { installCircleDnsPinning } from "../../src/lib/circle-dns.ts";
 import { sleep } from "../../src/lib/rpc.ts";
 import { ARC_TESTNET_RPC_FALLBACKS, PERMIT2_ADDRESS, USDC_ADDRESS, arcTestnet } from "../../src/constants/arc.ts";
 import { createCpnRamp, type CpnRamp } from "../../src/ramp/cpn-ramp.ts";
+import { signPaymentIntent } from "../../src/ramp/cpn-sign.ts";
+import { createCpnPayoutRail } from "../../src/payout/cpn-payout.ts";
+import type { PayoutRail } from "../../src/payout/rail.ts";
 import { applyPaymentEvent, type CpnPaymentState } from "../../src/ramp/cpn-state.ts";
 import { fromDecimalStringScaled } from "../../src/settlement-fx/units.ts";
-import { createOrderStore, type OrderStore } from "../../src/orchestrator/order-store.ts";
+import { createOrderStore, type CpnPaymentRecord, type OrderStore } from "../../src/orchestrator/order-store.ts";
 import type { CpnPayment, CpnQuote, CpnTransaction } from "../../src/ramp/cpn-client.ts";
 import type { CpnFieldValue } from "../../src/ramp/cpn-encrypt.ts";
 import { loadRootEnv } from "../../scripts/lib/env.mjs";
@@ -49,7 +52,12 @@ const buildTravelRule = (beneficiaryAddr: Record<string, string>, originatorName
 ];
 
 /** UI-safe corridor summary. */
-export type CorridorInfo = { key: string; label: string; currency: string; method: string; minUsdc: number };
+export type CorridorInfo = {
+  key: string; label: string; currency: string; method: string; minUsdc: number;
+  /** Corridors this build phase targets are selectable; the rest are on the
+   *  roadmap and shown but not offered. */
+  roadmap: boolean;
+};
 
 type Corridor = CorridorInfo & {
   country: string;
@@ -66,30 +74,19 @@ const CORRIDORS: Record<string, Corridor> = {
   // USDC figure that clears drifts with FX: 11 USDC (~9.4 EUR) is refused while
   // 12 USDC (10.31 EUR) is accepted — verified live 2026-07-28. Keep these a
   // little above the observed floor; the API stays the authority.
+  // Order is the UI's order: the two corridors this phase targets first.
   "EUR-SEPA": {
     key: "EUR-SEPA", label: "🇪🇺 EUR · SEPA", currency: "EUR", method: "SEPA", minUsdc: 12, country: "FR",
+    roadmap: false,
     address: { street: "1 Rue de Rivoli", city: "Paris", stateProvince: "IDF", country: "FR", postalCode: "75001" },
     beneficiary: [
       { name: "IBAN", value: "FR7630006000011234567890189" },
       { name: "RECIPIENT_LEGAL_NAME", value: "Acme SARL" },
     ],
   },
-  "BRL-PIX": {
-    key: "BRL-PIX", label: "🇧🇷 BRL · PIX", currency: "BRL", method: "PIX", minUsdc: 10, country: "BR",
-    address: { street: "Av. Paulista 1000", city: "Sao Paulo", stateProvince: "SP", country: "BR", postalCode: "01310-100" },
-    beneficiary: [
-      { name: "RECIPIENT_ID_NUMBER", value: "11222333000181" },
-      { name: "RECIPIENT_EVP", value: "123e4567-e89b-12d3-a456-426614174000" },
-    ],
-  },
-  "MXN-SPEI": {
-    key: "MXN-SPEI", label: "🇲🇽 MXN · SPEI", currency: "MXN", method: "SPEI", minUsdc: 11, country: "MX",
-    address: { street: "Av. Reforma 100", city: "Mexico City", stateProvince: "CDMX", country: "MX", postalCode: "06600" },
-    beneficiary: [{ name: "CLABE", value: "032180000118359719" }],
-    extraTravelRule: [{ name: "BENEFICIARY_NATIONAL_IDENTIFICATION_NUMBER", value: "AAA010101AAA" }],
-  },
   "USD-WIRE": {
     key: "USD-WIRE", label: "🌍 USD · WIRE", currency: "USD", method: "WIRE", minUsdc: 61, country: "US",
+    roadmap: false,
     address: { street: "5th Avenue 1", city: "New York", stateProvince: "NY", country: "US", postalCode: "10001" },
     beneficiary: [
       { name: "BANK_NAME", value: "First National Bank" },
@@ -99,13 +96,29 @@ const CORRIDORS: Record<string, Corridor> = {
       { name: "RECIPIENT_LEGAL_NAME", value: "Acme LLC" },
     ],
   },
+  "BRL-PIX": {
+    key: "BRL-PIX", label: "🇧🇷 BRL · PIX", currency: "BRL", method: "PIX", minUsdc: 10, country: "BR",
+    roadmap: true,
+    address: { street: "Av. Paulista 1000", city: "Sao Paulo", stateProvince: "SP", country: "BR", postalCode: "01310-100" },
+    beneficiary: [
+      { name: "RECIPIENT_ID_NUMBER", value: "11222333000181" },
+      { name: "RECIPIENT_EVP", value: "123e4567-e89b-12d3-a456-426614174000" },
+    ],
+  },
+  "MXN-SPEI": {
+    key: "MXN-SPEI", label: "🇲🇽 MXN · SPEI", currency: "MXN", method: "SPEI", minUsdc: 11, country: "MX",
+    roadmap: true,
+    address: { street: "Av. Reforma 100", city: "Mexico City", stateProvince: "CDMX", country: "MX", postalCode: "06600" },
+    beneficiary: [{ name: "CLABE", value: "032180000118359719" }],
+    extraTravelRule: [{ name: "BENEFICIARY_NATIONAL_IDENTIFICATION_NUMBER", value: "AAA010101AAA" }],
+  },
 };
 const DEFAULT_CORRIDOR = "EUR-SEPA";
 
-/** The corridors the seller can cash out to. */
+/** The corridors the seller can cash out to, in the order the UI shows them. */
 export function corridorList(): CorridorInfo[] {
-  return Object.values(CORRIDORS).map(({ key, label, currency, method, minUsdc }) => ({
-    key, label, currency, method, minUsdc,
+  return Object.values(CORRIDORS).map(({ key, label, currency, method, minUsdc, roadmap }) => ({
+    key, label, currency, method, minUsdc, roadmap,
   }));
 }
 
@@ -121,6 +134,18 @@ function cpnStore(): OrderStore {
     process.env.SUPABASE_SECRET_KEY as string,
   );
   return storeSingleton;
+}
+
+/**
+ * Past cash-outs, newest first.
+ *
+ * Read from the store rather than from CPN: the stored row is what the webhook
+ * and the polling fallback both advance, so it is the record the demo actually
+ * acts on — and it survives a server restart, which the in-memory prepared-intent
+ * map does not.
+ */
+export function listCashouts(limit = 10): Promise<CpnPaymentRecord[]> {
+  return cpnStore().listCpnPayments(limit);
 }
 
 const rampCache = new Map<string, CpnRamp>();
@@ -216,6 +241,10 @@ export async function preparePayment(
     useCase: "B2B",
     reasonForPayment: "PMT001",
     customerRefId: `demo-${quote.id.slice(0, 8)}`,
+    // Reaches the beneficiary's bank statement memo — unlike `customerRefId`,
+    // which never leaves Circle. It is the only string a real recipient could
+    // use to recognise this credit, so it carries the payment's own handle.
+    refCode: `RIVO-${quote.id.slice(0, 8)}`,
   });
   preparedTx.set(payment.id, { transaction, corridorKey: corridor.key });
 
@@ -358,6 +387,75 @@ export async function broadcastSignedPayment(paymentId: string, signature: Hex):
     if (last === "COMPLETED" || last === "FAILED") break;
   }
   return { transactionId: submitted.id, submittedStatus: submitted.status, lifecycle, finalStatus: last };
+}
+
+// ── The same corridor, as a RivoKit payout rail ────────────────────────
+
+/**
+ * Expose this corridor as a `PayoutRail` so `release()` can drive it.
+ *
+ * Everything a rail needs already lives in this module — the corridor, the
+ * beneficiary and travel-rule fields, the seller's signer, the Permit2
+ * allowance helper — so this composes them rather than restating them. A second
+ * copy of the travel-rule block would be a second thing to keep correct.
+ *
+ * The sender is the demo seller's EOA, which is also who bank-bound orders name
+ * as `receiver`: capture lands there, Permit2 pulls from there, and that wallet
+ * signs the intent. In production the seller signs in their own wallet and this
+ * is where `signIntent` would reach for it instead.
+ */
+export function payoutRailFor(corridorKey: string): PayoutRail {
+  const corridor = corridorFor(corridorKey);
+  const signer = getSellerSigner();
+  return createCpnPayoutRail({
+    ramp: getRampFor(corridor),
+    corridor: corridor.key,
+    destinationCountry: corridor.country,
+    senderAddress: signer.address,
+    details: () => ({
+      travelRule: [...buildTravelRule(corridor.address), ...(corridor.extraTravelRule ?? [])],
+      beneficiaryAccount: corridor.beneficiary,
+      useCase: "B2B",
+      reasonForPayment: "PMT001",
+    }),
+    signIntent: (message) => signPaymentIntent(signer, message),
+    ensureAllowance,
+  });
+}
+
+/**
+ * Move USDC out of the seller's wallet on Arc.
+ *
+ * Exists for the bank path's rebate. On the wallet path the surplus is EURC
+ * sitting with the merchant, but a bank order runs no swap, so its surplus is
+ * USDC sitting with the SELLER — a different token in a different wallet.
+ * Sending the merchant's EURC there would move the wrong asset from the wrong
+ * holder, and would succeed quietly enough to look correct.
+ */
+export async function sendSellerUsdc(to: string, amountMinor: bigint): Promise<{ txHash: string }> {
+  const signer = getSellerSigner();
+  const wallet = createWalletClient({ account: signer, chain: arcTestnet, transport: arcTransport() });
+  const pub = createPublicClient({ chain: arcTestnet, transport: arcTransport() });
+  const hash = await wallet.writeContract({
+    address: USDC_ADDRESS, abi: erc20Abi, functionName: "transfer", args: [to as `0x${string}`, amountMinor],
+  });
+  await pub.waitForTransactionReceipt({ hash });
+  return { txHash: hash };
+}
+
+/**
+ * Who a bank-bound order must name as `receiver`.
+ *
+ * Not cosmetic: the off-ramp pulls from whoever holds the captured USDC, so if
+ * the order paid a different address the payout would find nothing there.
+ */
+export function payoutSellerAddress(): string {
+  return getSellerSigner().address;
+}
+
+/** Whether the demo can off-ramp at all — the CPN key is server-only and optional. */
+export function payoutAvailable(): boolean {
+  return Boolean(process.env.CIRCLE_CPN_KEY && process.env.RELAYER_PRIVATE_KEY);
 }
 
 /** The raw intent the browser must sign, plus what Permit2 needs approved. */

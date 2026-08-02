@@ -15,13 +15,42 @@ export type Product = {
   priceEURMinor: string;
 };
 
+/**
+ * Six listings, split evenly either side of the bank threshold, because the
+ * price is what chooses the settlement destination — see `canPayoutToBank`.
+ * The three cheap ones can only end as EURC in a wallet; the three above it go
+ * all the way to a bank account over CPN.
+ *
+ * The dear half is capped at €15: the buyer pays in USDC plus a 400 bps buffer,
+ * and the demo buyer's Arc balance has to cover every one of them.
+ */
 export const CATALOG: Product[] = [
-  { id: "kbd", name: "Hot-Swap Mechanical Keyboard", blurb: "Aluminium case, linear switches, PBT keycaps", seller: "TechHaus Berlin", emoji: "⌨️", priceEURMinor: "3500000" },
-  { id: "hdp", name: "Studio Headphones", blurb: "Over-ear, 40mm drivers, detachable cable", seller: "AudioLab Wien", emoji: "🎧", priceEURMinor: "4900000" },
-  { id: "cam", name: "Instant Camera", blurb: "Prints on the spot, 60mm lens", seller: "Retro Optics Praha", emoji: "📷", priceEURMinor: "4500000" },
-  { id: "wch", name: "Automatic Watch", blurb: "Sapphire crystal, 50m water resistance", seller: "Horloge Genève", emoji: "⌚", priceEURMinor: "5000000" },
-  { id: "mug", name: "Enamel Ceramic Mug", blurb: "350ml, heat resistant, logo printed", seller: "Nordic Home Oslo", emoji: "☕", priceEURMinor: "2500000" },
+  // Under the threshold — wallet settlement (floored EURC on Arc).
+  { id: "tee", name: "Cotton Shirt", blurb: "Plain weave, regular fit", seller: "Baumwoll Berlin", emoji: "👕", priceEURMinor: "6500000" },
+  { id: "sck", name: "Wool Socks", blurb: "Merino blend, ribbed cuff", seller: "Nordic Home Oslo", emoji: "🧦", priceEURMinor: "8000000" },
+  { id: "cap", name: "Canvas Cap", blurb: "Six panel, adjustable strap", seller: "Atelier Lyon", emoji: "🧢", priceEURMinor: "9000000" },
+  // Above the threshold — bank settlement over CPN's EUR/SEPA corridor.
+  { id: "snk", name: "Canvas Sneakers", blurb: "Rubber sole, cotton laces", seller: "Calzature Milano", emoji: "👟", priceEURMinor: "11500000" },
+  { id: "bag", name: "Leather Tote", blurb: "Full grain, cotton lining", seller: "Cuir Bruxelles", emoji: "👜", priceEURMinor: "13000000" },
+  { id: "jkt", name: "Denim Jacket", blurb: "Rigid denim, button front", seller: "Werkraum Zürich", emoji: "🧥", priceEURMinor: "14500000" },
 ];
+
+/**
+ * Whether this listing settles to a bank rather than to a wallet.
+ *
+ * The buyer is not asked: CPN's EUR/SEPA corridor takes a minimum of ~11 USDC
+ * (≈ €9.4), enforced against the DESTINATION side, so a cheap order simply
+ * cannot reach a bank — `createOrder` refuses it rather than stalling after
+ * capture. Offering the choice would mean offering a checkout that fails, so
+ * the price decides instead.
+ *
+ * Still only a hint — the authority is `PayoutRail.limits()`, read live at
+ * `createOrder`, because that USDC minimum drifts with FX. The threshold sits
+ * deliberately above the observed €9.4 so nothing lands in the gap.
+ */
+export function canPayoutToBank(p: Product): boolean {
+  return BigInt(p.priceEURMinor) >= 10_000_000n;
+}
 
 export function productById(id: string): Product | undefined {
   return CATALOG.find((p) => p.id === id);

@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
-import { ArrowRight, Banknote, CircleCheck, Loader2, TriangleAlert, Wallet } from "lucide-react";
+import {
+  RiArrowRightLine, RiCashLine, RiCheckboxCircleLine, RiErrorWarningLine, RiLoader4Line, RiWallet3Line,
+} from "@remixicon/react";
 import { useAccount, usePublicClient, useSignTypedData, useSwitchChain, useWriteContract } from "wagmi";
 import { erc20Abi } from "viem";
 import {
@@ -16,24 +18,26 @@ import {
 } from "./ramp.actions";
 import { normalizeTypedData, type MessageToBeSigned } from "../../src/ramp/cpn-sign.ts";
 import { ARC_TESTNET_CHAIN_ID, PERMIT2_ADDRESS, USDC_ADDRESS } from "../../src/constants/arc.ts";
-import { cn } from "@/lib/utils";
+import { withToast } from "./toast";
+import { ToneBadge, railTone, statusLabel } from "./_ui";
 import { Button } from "@/components/ui/button";
+import {
+  Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
+} from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
-type Corridor = { key: string; label: string; currency: string; method: string; minUsdc: number };
+type Corridor = {
+  key: string; label: string; currency: string; method: string; minUsdc: number; roadmap: boolean;
+};
 
 /** Who signs the Permit2 intent that lets CPN pull the USDC. */
 type SignMode = "server" | "wallet";
 
 const two = (decimal: string | number) => Number(decimal).toFixed(2);
-
-const STATUS_TONE: Record<string, string> = {
-  COMPLETED: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  FAILED: "border-red-200 bg-red-50 text-red-700",
-  CRYPTO_FUNDS_PENDING: "border-sky-200 bg-sky-50 text-sky-700",
-  FIAT_PAYMENT_INITIATED: "border-amber-200 bg-amber-50 text-amber-700",
-};
 
 /**
  * The seller's multi-currency fiat cash-out, shown in the seller wallet panel. Reads
@@ -74,7 +78,9 @@ export default function SellerCashout() {
   useEffect(() => {
     cpnCorridorsAction().then((cs) => {
       setCorridors(cs);
-      if (cs[0]) setCorridorKey(cs[0].key);
+      // Never land on a corridor the toggle then refuses to select.
+      const first = cs.find((c) => !c.roadmap) ?? cs[0];
+      if (first) setCorridorKey(first.key);
     });
   }, []);
 
@@ -100,6 +106,7 @@ export default function SellerCashout() {
   }, [address, publicClient, broadcast]);
 
   const corridor = corridors.find((c) => c.key === corridorKey);
+  const roadmapLabels = corridors.filter((c) => c.roadmap).map((c) => c.label).join(" · ");
   const minUsdc = corridor?.minUsdc ?? 11;
   const activeBalMinor = signMode === "wallet" ? walletBalMinor : balMinor;
   const balNum = activeBalMinor ? Number(activeBalMinor) / 1e6 : 0;
@@ -107,15 +114,18 @@ export default function SellerCashout() {
   const enough = amtNum >= minUsdc && amtNum <= balNum;
 
   const reset = () => { setPrepared(null); setBroadcast(null); setConfirmed(false); setError(null); };
-  const pickCorridor = (key: string) => { setCorridorKey(key); reset(); };
-  const pickMode = (m: SignMode) => { setSignMode(m); reset(); };
+  // Base UI's ToggleGroup reports the whole pressed set; single-select means one
+  // entry, and an empty array when the pressed item is clicked again.
+  const pickCorridor = ([key]: string[]) => { if (!key) return; setCorridorKey(key); reset(); };
+  const pickMode = ([m]: string[]) => { if (!m) return; setSignMode(m as SignMode); reset(); };
 
   const prepare = () =>
     start(async () => {
       setBusy("prepare"); setError(null); setBroadcast(null); setConfirmed(false);
       // The sender address is baked into the intent, so it must be decided now:
       // an intent prepared for one address cannot later be signed by another.
-      const r = await cpnPrepareAction(amount, corridorKey, signMode === "wallet" ? address : undefined);
+      const r = await withToast("Quoting CPN and preparing the payment intent",
+        () => cpnPrepareAction(amount, corridorKey, signMode === "wallet" ? address : undefined));
       if (r.ok) setPrepared(r.prepared);
       else { setPrepared(null); setError(r.error); }
       setBusy(null);
@@ -124,7 +134,8 @@ export default function SellerCashout() {
   /** Server-held key signs and broadcasts — the path proven to COMPLETED. */
   const doBroadcastServer = async (paymentId: string) => {
     setBusy("broadcast");
-    const r = await cpnBroadcastAction(paymentId);
+    const r = await withToast("Broadcasting to CPN — following the payment to a terminal status",
+      () => cpnBroadcastAction(paymentId));
     if (r.ok) { setBroadcast(r.result); loadBalance(); } else setError(r.error);
   };
 
@@ -168,7 +179,8 @@ export default function SellerCashout() {
     } as unknown as Parameters<typeof signTypedDataAsync>[0]);
 
     setBusy("broadcast");
-    const r = await cpnBroadcastSignedAction(paymentId, signature);
+    const r = await withToast("Broadcasting the wallet-signed intent to CPN",
+      () => cpnBroadcastSignedAction(paymentId, signature));
     if (r.ok) setBroadcast(r.result); else setError(r.error);
   };
 
@@ -190,122 +202,130 @@ export default function SellerCashout() {
     busy === "approve" ? "Approving Permit2…" : busy === "sign" ? "Waiting for signature…" : "Broadcasting…";
 
   return (
-    <div className="rounded-lg border bg-card p-3 shadow-xs">
-      <div className="flex items-center gap-2">
-        <span className="flex size-7 items-center justify-center rounded-md bg-emerald-50 text-emerald-600">
-          <Banknote className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium">Cash out to fiat · CPN</div>
-          <p className="truncate text-xs text-muted-foreground">Sales proceeds in USDC → local currency in a bank</p>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <RiCashLine className="size-4 text-muted-foreground" />
+          Cash out to fiat · CPN
+        </CardTitle>
+        <CardDescription className="truncate">
+          Sales proceeds in USDC → local currency in a bank
+        </CardDescription>
+        <CardAction>
+          <span className="text-xs text-muted-foreground">
+            <b className="tabular-nums text-foreground">{activeBalMinor ? two(balNum) : "…"}</b> USDC
+          </span>
+        </CardAction>
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        {/* Who signs. The distinction is the point, so it is never implicit. */}
+        <div className="space-y-1.5">
+          <ToggleGroup variant="outline" size="sm" value={[signMode]} onValueChange={pickMode}>
+            <ToggleGroupItem value="server">Demo key</ToggleGroupItem>
+            <ToggleGroupItem value="wallet" disabled={!isConnected}>
+              <RiWallet3Line /> My wallet
+            </ToggleGroupItem>
+          </ToggleGroup>
+          <p className="text-xs text-muted-foreground">
+            {signMode === "wallet"
+              ? "the wallet holding the USDC signs — no server key"
+              : "a server-held testnet key stands in for the seller"}
+          </p>
         </div>
-        <span className="shrink-0 text-xs text-muted-foreground">
-          <b className="tabular-nums text-foreground">{activeBalMinor ? two(balNum) : "…"}</b> USDC
-        </span>
-      </div>
 
-      {/* Who signs. The distinction is the point, so it is never implicit. */}
-      <div className="mt-3 flex items-center gap-1.5 text-xs">
-        <button onClick={() => pickMode("server")}
-          className={cn("rounded-md border px-2.5 py-1 font-medium transition",
-            signMode === "server" ? "border-primary bg-accent text-foreground ring-1 ring-primary/20" : "bg-card text-muted-foreground hover:bg-accent")}>
-          Demo key
-        </button>
-        <button onClick={() => pickMode("wallet")} disabled={!isConnected}
-          className={cn("flex items-center gap-1 rounded-md border px-2.5 py-1 font-medium transition disabled:opacity-40",
-            signMode === "wallet" ? "border-primary bg-accent text-foreground ring-1 ring-primary/20" : "bg-card text-muted-foreground hover:bg-accent")}>
-          <Wallet className="size-3" /> My wallet
-        </button>
-        <span className="ml-auto truncate text-[10px] text-muted-foreground">
-          {signMode === "wallet"
-            ? "the wallet holding the USDC signs — no server key"
-            : "a server-held testnet key stands in for the seller"}
-        </span>
-      </div>
-
-      {/* Corridor selector */}
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {corridors.map((c) => (
-          <button key={c.key} onClick={() => pickCorridor(c.key)}
-            className={cn(
-              "rounded-md border px-2.5 py-1 text-xs font-medium transition",
-              c.key === corridorKey
-                ? "border-primary bg-accent text-foreground ring-1 ring-primary/20"
-                : "bg-card text-muted-foreground hover:bg-accent",
-            )}>
-            {c.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-2 flex items-center gap-2">
-        <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
-          className="h-8 flex-1 text-xs" placeholder="USDC amount" aria-label="USDC amount" />
-        <Button size="xs" variant="ghost" onClick={() => setAmount(two(balNum))}>Max</Button>
-        <Button size="sm" disabled={busy !== null || !enough || !corridorKey} onClick={prepare}>
-          {busy === "prepare" ? <Loader2 className="size-3.5 animate-spin" /> : "Cash out"}
-        </Button>
-      </div>
-      {amount !== "" && activeBalMinor != null && !enough && (
-        <p className="mt-1.5 text-xs text-amber-600">
-          {amtNum < minUsdc
-            ? `Min ${minUsdc} USDC for ${corridor?.currency ?? "this corridor"}.`
-            : signMode === "wallet" ? "More than this wallet holds on Arc." : "More than the seller holds."}
-        </p>
-      )}
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-
-      {prepared && !broadcast && (
-        <div className="mt-3 space-y-2 rounded-md border bg-muted/30 p-3">
-          <div className="flex items-center justify-center gap-2 text-sm font-semibold tabular-nums">
-            <span>{two(prepared.source.amount)} USDC</span>
-            <ArrowRight className="size-3.5 text-muted-foreground" />
-            <span className="text-emerald-600">{two(prepared.destination.amount)} {prepared.destination.currency}</span>
-          </div>
-          <div className="text-center text-xs text-muted-foreground">
-            fee {prepared.fee} {prepared.feeCurrency} · margin {prepared.spreadBps} bps · {prepared.status}
-          </div>
-          {signMode === "wallet" && (
-            <p className="text-center text-[10px] text-muted-foreground">
-              Your wallet will be asked twice: approve Permit2, then sign the payment intent.
+        {/* Corridor selector. The order is the server's — EUR/SEPA and USD/WIRE
+            first, the roadmap corridors after them. */}
+        <div className="space-y-1.5">
+          <ToggleGroup variant="outline" size="sm" value={[corridorKey]} onValueChange={pickCorridor}
+            className="flex-wrap">
+            {corridors.map((c) => (
+              <ToggleGroupItem key={c.key} value={c.key} disabled={c.roadmap}>{c.label}</ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          {roadmapLabels && (
+            <p className="text-xs text-muted-foreground">
+              {roadmapLabels} — implemented, and on the roadmap. This phase cashes out over EUR/SEPA and USD/WIRE.
             </p>
           )}
-          <label className="flex items-start gap-2 text-xs text-muted-foreground">
-            <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5" />
-            <span>
-              <TriangleAlert className="mr-1 inline size-3.5 text-amber-600" />
-              Broadcast is <strong className="text-foreground">irreversible</strong> — the seller's USDC leaves (testnet funds).
-            </span>
-          </label>
-          <Button size="sm" variant="destructive" className="w-full" disabled={!confirmed || busy !== null} onClick={doBroadcast}>
-            {busy !== null && busy !== "prepare"
-              ? <><Loader2 className="size-3.5 animate-spin" /> {busyLabel}</>
-              : "Broadcast (irreversible)"}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
+            className="flex-1" placeholder="USDC amount" aria-label="USDC amount" />
+          <Button size="sm" variant="ghost" onClick={() => setAmount(two(balNum))}>Max</Button>
+          <Button size="sm" disabled={busy !== null || !enough || !corridorKey} onClick={prepare}>
+            {busy === "prepare" ? <RiLoader4Line className="animate-spin" /> : "Cash out"}
           </Button>
         </div>
-      )}
+        {amount !== "" && activeBalMinor != null && !enough && (
+          <p className="text-xs text-muted-foreground">
+            {amtNum < minUsdc
+              ? `Min ${minUsdc} USDC for ${corridor?.currency ?? "this corridor"}.`
+              : signMode === "wallet" ? "More than this wallet holds on Arc." : "More than the seller holds."}
+          </p>
+        )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
 
-      {broadcast && (
-        <div className="mt-3 space-y-2 rounded-md border bg-muted/30 p-3">
-          <div className="flex items-center gap-1.5 text-xs font-medium">
-            {broadcast.finalStatus === "COMPLETED"
-              ? <CircleCheck className="size-3.5 text-emerald-600" />
-              : <TriangleAlert className="size-3.5 text-amber-600" />}
-            Cash-out
-            <Badge variant="outline" className={cn("ml-auto", STATUS_TONE[broadcast.finalStatus])}>
-              {broadcast.finalStatus || "—"}
-            </Badge>
-          </div>
-          <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
-            {broadcast.lifecycle.map((s, i) => (
-              <span key={s} className="flex items-center gap-1">
-                {i > 0 && <ArrowRight className="size-2.5" />}
-                <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{s}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+        {prepared && !broadcast && (
+          <>
+            <Separator />
+            <div className="flex items-center justify-center gap-2 text-sm font-semibold tabular-nums">
+              <span>{two(prepared.source.amount)} USDC</span>
+              <RiArrowRightLine className="size-3.5 text-muted-foreground" />
+              <span>{two(prepared.destination.amount)} {prepared.destination.currency}</span>
+            </div>
+            <p className="text-center text-xs text-muted-foreground">
+              fee {prepared.fee} {prepared.feeCurrency} · margin {prepared.spreadBps} bps · {prepared.status}
+            </p>
+            {signMode === "wallet" && (
+              <p className="text-center text-xs text-muted-foreground">
+                Your wallet will be asked twice: approve Permit2, then sign the payment intent.
+              </p>
+            )}
+            <div className="flex items-start gap-2">
+              <Checkbox id="cpn-confirm" checked={confirmed}
+                onCheckedChange={(c) => setConfirmed(c === true)} className="mt-0.5" />
+              <Label htmlFor="cpn-confirm" className="text-xs font-normal text-muted-foreground">
+                <RiErrorWarningLine className="size-3.5" />
+                <span>
+                  Broadcast is <strong className="text-foreground">irreversible</strong> — the seller&apos;s USDC
+                  leaves (testnet funds).
+                </span>
+              </Label>
+            </div>
+            <Button size="sm" variant="destructive" className="w-full" disabled={!confirmed || busy !== null}
+              onClick={doBroadcast}>
+              {busy !== null && busy !== "prepare"
+                ? <><RiLoader4Line className="animate-spin" /> {busyLabel}</>
+                : "Broadcast (irreversible)"}
+            </Button>
+          </>
+        )}
+
+        {broadcast && (
+          <>
+            <Separator />
+            <div className="flex items-center gap-1.5 text-xs font-medium">
+              {broadcast.finalStatus === "COMPLETED"
+                ? <RiCheckboxCircleLine className="size-3.5" />
+                : <RiErrorWarningLine className="size-3.5" />}
+              Cash-out
+              <ToneBadge tone={railTone(broadcast.finalStatus)} className="ml-auto">
+                {statusLabel(broadcast.finalStatus)}
+              </ToneBadge>
+            </div>
+            <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+              {broadcast.lifecycle.map((s, i) => (
+                <span key={s} className="flex items-center gap-1">
+                  {i > 0 && <RiArrowRightLine className="size-3" />}
+                  <ToneBadge tone={railTone(s)}>{statusLabel(s)}</ToneBadge>
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

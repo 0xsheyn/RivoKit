@@ -1,9 +1,12 @@
 "use server";
 
-import { mintBalance, mintDepositInfo, mintRedeem } from "../lib/mint.server.ts";
+import { mintBalance, mintDepositInfo, mintPayouts, mintRedeem } from "../lib/mint.server.ts";
 
 export type MintBalanceView = { amount: string; currency: string };
-export type MintPayoutView = { id: string; status: string; amount: string; currency: string; bankName: string };
+export type MintPayoutView = {
+  id: string; status: string; amount: string; currency: string; bankName: string;
+  rail?: "sepa" | "wire"; createdAt?: string;
+};
 export type MintDepositView = {
   address: string;
   chains: string[];
@@ -25,10 +28,21 @@ export async function mintBalanceAction(): Promise<MintBalanceResult> {
   }
 }
 
-/** Redeem `amount` (USD in sandbox) from the Mint balance to a bank. */
-export async function mintRedeemAction(amount: string): Promise<MintRedeemResult> {
+export type MintHistoryResult = { ok: true; payouts: MintPayoutView[] } | { ok: false; error: string };
+
+/** Past Circle Mint redemptions, newest first — the panel's history. */
+export async function mintHistoryAction(limit = 8): Promise<MintHistoryResult> {
   try {
-    return { ok: true, payout: await mintRedeem(amount) };
+    return { ok: true, payouts: await mintPayouts(limit) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Redeem `amount` of `currency` from the Mint balance to a linked bank. */
+export async function mintRedeemAction(amount: string, currency = "EUR"): Promise<MintRedeemResult> {
+  try {
+    return { ok: true, payout: await mintRedeem(amount, currency) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
