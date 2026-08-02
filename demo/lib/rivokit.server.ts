@@ -14,9 +14,12 @@
 import { randomUUID } from "node:crypto";
 import { AppKit, BridgeChain } from "@circle-fin/app-kit";
 import { createViemAdapterFromPrivateKey } from "@circle-fin/adapter-viem-v2";
-import { createPublicClient, createWalletClient, erc20Abi, getAddress, http, type Address, type Hex } from "viem";
+import {
+  createPublicClient, createWalletClient, erc20Abi, fallback, getAddress, http, type Address, type Hex,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { arcTestnet, sepolia } from "viem/chains";
+import { arcTestnet, avalancheFuji, baseSepolia, sepolia } from "viem/chains";
+import { SOURCE_CHAINS, sourceChain, type SourceChainId } from "./source-chain.ts";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import { createCircleClient } from "../../scripts/lib/circle.mjs";
 import { loadRootEnv } from "../../scripts/lib/env.mjs";
@@ -32,6 +35,11 @@ import { createUnifiedBalance } from "../../src/funding/unified-balance.ts";
 import { createOrderStore } from "../../src/orchestrator/order-store.ts";
 import { createComplianceGate, createCircleScreener } from "../../src/events/compliance.ts";
 import { createRivoKit, paymentInfoFromRecord } from "../../src/sdk/rivokit.ts";
+import type { PayoutRail } from "../../src/payout/rail.ts";
+import { payoutAvailable, payoutRailFor, payoutSellerAddress, sendSellerUsdc } from "./cpn.server.ts";
+
+/** The corridor bank-bound demo orders pay out to. EUR/SEPA is the proven one. */
+const PAYOUT_CORRIDOR = process.env.RIVO_PAYOUT_CORRIDOR ?? "EUR-SEPA";
 
 loadRootEnv();
 
@@ -112,10 +120,23 @@ function build() {
       }
     : undefined;
 
-  const payRebate = sendEurc
-    ? async ({ to, amountMinor }: { orderId: string; to: Address; amountMinor: bigint }) =>
-        sendEurc(to, amountMinor, "rebate")
-    : undefined;
+  /**
+   * Return the buyer's surplus, in whatever token the surplus is actually in.
+   *
+   * The token is read, not assumed. A wallet-path order's surplus is EURC the
+   * swap produced, held by the merchant. A bank-path order runs no swap, so its
+   * surplus is USDC held by the SELLER. Ignoring `token` here would send the
+   * merchant's EURC for a bank order — the wrong asset out of the wrong wallet,
+   * failing only if the merchant happened to be short.
+   */
+  const payRebate =
+    sendEurc || payoutAvailable()
+      ? async ({ to, amountMinor, token }: { orderId: string; to: Address; amountMinor: bigint; token: string }) => {
+          if (token === "USDC") return sendSellerUsdc(to, amountMinor);
+          if (!sendEurc) throw new Error("rebate in EURC needs MERCHANT_WALLET_ID");
+          return sendEurc(to, amountMinor, "rebate");
+        }
+      : undefined;
 
   const escrow = createEscrow({ escrowAddress: ESCROW, publicClient: arcClient as never, operator: operatorSender });
   const fx = createSettlementFx({
@@ -123,7 +144,9 @@ function build() {
   });
 
   // Funding rails share one App Kit. The buyer's adapters let the demo move USDC
-  // onto Arc from Sepolia (bridge) or Gateway (unified balance) before authorize.
+  // onto Arc from the source chain (bridge) or Gateway (unified balance) before
+  // authorize. Both rails start on ONE chain — see demo/lib/source-chain.ts for
+  // which, and why finality time is what picks it.
   const appKit = new AppKit();
   const bridge = createBridge(appKit);
   const ub = createUnifiedBalance(appKit);
@@ -132,25 +155,61 @@ function build() {
   // `chain` is honoured at runtime (proven in scripts/live-*.mjs) but absent from
   // the adapter's published type, hence the cast.
   const arcAdapter = createViemAdapterFromPrivateKey({ privateKey: BUYER_PK, chain: BridgeChain.Arc_Testnet } as never);
-  const sepAdapter = createViemAdapterFromPrivateKey({ privateKey: BUYER_PK, chain: BridgeChain.Ethereum_Sepolia } as never);
+  // One adapter and one read client per source chain: the demo buyer may hold
+  // USDC on any of them, and the rail the UI offers is only real if the balance
+  // behind it was read from that same chain.
+  const srcAdapters = Object.fromEntries(
+    SOURCE_CHAINS.map((c) => [c.key, createViemAdapterFromPrivateKey({ privateKey: BUYER_PK, chain: c.name } as never)]),
+  ) as Record<SourceChainId, unknown>;
+  const srcAdapter = srcAdapters[sourceChain(undefined).key];
 
-  const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238" as const;
-  const sepoliaClient = createPublicClient({ chain: sepolia, transport: http() });
+  // Read clients keyed the same way. Written out rather than derived so adding a
+  // chain to the table without giving it a viem definition fails to compile.
+  //
+  // `fallback` over OUR endpoint list, never viem's default: the default for
+  // Ethereum Sepolia is a free endpoint that answers 403 under load, and a
+  // single-endpoint transport turns that into a rail that simply never works.
+  const srcTransport = (key: SourceChainId) =>
+    fallback(sourceChain(key).rpcUrls.map((url) => http(url)));
+  const srcClients = {
+    fuji: createPublicClient({ chain: avalancheFuji, transport: srcTransport("fuji") }),
+    base: createPublicClient({ chain: baseSepolia, transport: srcTransport("base") }),
+    sepolia: createPublicClient({ chain: sepolia, transport: srcTransport("sepolia") }),
+  } satisfies Record<SourceChainId, unknown>;
+
   const erc20Balance = (client: typeof arcClient, token: Address, owner: string) =>
     client.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [owner as Address] });
 
+  /** USDC held by `owner` on every source chain, keyed the way the UI keys its rails. */
+  async function srcUsdcByChain(owner: string): Promise<Record<SourceChainId, string>> {
+    const read = SOURCE_CHAINS.map(async (c) => {
+      try {
+        const b = await srcClients[c.key].readContract({
+          address: c.usdc as Address, abi: erc20Abi, functionName: "balanceOf", args: [getAddress(owner)],
+        });
+        return [c.key, (b as bigint).toString()] as const;
+      } catch {
+        // A public RPC that rate-limits must not take the other chains' rails
+        // down with it — an unreadable balance reads as 0, which shows the rail
+        // as unusable rather than pretending it is funded.
+        return [c.key, "0"] as const;
+      }
+    });
+    return Object.fromEntries(await Promise.all(read)) as Record<SourceChainId, string>;
+  }
+
   /** Live wallet balances for the marketplace header (before/after transactions). */
   async function balances() {
-    const [buyerArcUsdc, buyerSepUsdc, sellerEurc] = await Promise.all([
+    const [buyerArcUsdc, buyerSrcUsdc, sellerEurc] = await Promise.all([
       erc20Balance(arcClient, USDC_ADDRESS, buyer.address),
-      sepoliaClient.readContract({ address: SEPOLIA_USDC, abi: erc20Abi, functionName: "balanceOf", args: [buyer.address] }),
+      srcUsdcByChain(buyer.address),
       erc20Balance(arcClient, EURC_ADDRESS, MERCHANT),
     ]);
     let gateway = 0n;
-    try { gateway = (await ub.getBalance(sepAdapter)).confirmedMinor; } catch { /* Gateway unreachable — show 0 */ }
+    try { gateway = (await ub.getBalance(srcAdapter)).confirmedMinor; } catch { /* Gateway unreachable — show 0 */ }
     return {
       buyerArcUsdc: buyerArcUsdc.toString(),
-      buyerSepUsdc: (buyerSepUsdc as bigint).toString(),
+      buyerSrcUsdc,
       buyerGatewayUsdc: gateway.toString(),
       sellerEurc: sellerEurc.toString(),
     };
@@ -193,9 +252,26 @@ function build() {
   /** Operator's native (gas) balance on Arc, in wei. */
   const operatorGas = () => arcClient.getBalance({ address: OPERATOR });
 
+  // The fiat off-ramp, for orders created with `payoutTo: "bank"`.
+  //
+  // Built lazily and only when the CPN key is present: without it the rail
+  // cannot exist, and an eager construction would take the whole demo down over
+  // a capability most of it does not need. Absent, `payoutTo: "bank"` is refused
+  // at `createOrder` and every order settles to a wallet — the original
+  // behaviour, unchanged.
+  let payoutRail: PayoutRail | undefined;
+  if (payoutAvailable()) {
+    try {
+      payoutRail = payoutRailFor(PAYOUT_CORRIDOR);
+    } catch (e) {
+      console.warn(`[rivokit] payout rail unavailable, bank orders disabled: ${String((e as Error).message)}`);
+    }
+  }
+
   const kit = createRivoKit({
     store, escrow, fx, bridge, fund: fund as never, payRebate, compliance: gate,
     operatorGas,
+    ...(payoutRail ? { payoutRail } : {}),
     config: {
       chainId: ARC_TESTNET_CHAIN_ID, escrowAddress: ESCROW, operator: OPERATOR, token: USDC_ADDRESS as Address,
       refundCollector: REFUND_COLLECTOR, settlementAddress: MERCHANT,
@@ -209,13 +285,8 @@ function build() {
   const addrArcUsdc = async (address: string) =>
     (await erc20Balance(arcClient, USDC_ADDRESS, getAddress(address))).toString();
 
-  /** Sepolia USDC balance of an arbitrary address — the source of both cross-chain rails. */
-  const addrSepUsdc = async (address: string) =>
-    (
-      (await sepoliaClient.readContract({
-        address: SEPOLIA_USDC, abi: erc20Abi, functionName: "balanceOf", args: [getAddress(address)],
-      })) as bigint
-    ).toString();
+  /** Per-source-chain USDC of an arbitrary address — for a connected browser wallet. */
+  const addrSrcUsdc = (address: string) => srcUsdcByChain(address);
 
   /**
    * The ERC-3009 typed data for a stored order, ready for a browser wallet to sign.
@@ -272,16 +343,34 @@ function build() {
   };
 
   return {
-    kit, store, balances, addrArcUsdc, addrSepUsdc, authTypedDataFor, resolveWebhookPublicKey,
+    kit, store, balances, addrArcUsdc, addrSrcUsdc, authTypedDataFor, resolveWebhookPublicKey,
     relay: { operatorGas, minGasWei: MIN_OPERATOR_GAS_WEI, feeBps: FEE_BPS, feeReceiver: FEE_RECEIVER },
     sendEurc,
+    /**
+     * What the UI needs to offer a bank payout, and who such an order must pay.
+     *
+     * `receiver` is not the merchant here. A bank order's captured USDC is what
+     * the off-ramp spends, so it has to land on the wallet that signs the
+     * Permit2 intent — the seller's. Paying the merchant instead would leave the
+     * payout with nothing to pull from.
+     */
+    payout: {
+      enabled: Boolean(payoutRail),
+      corridor: PAYOUT_CORRIDOR,
+      receiver: payoutRail ? payoutSellerAddress() : null,
+    },
     /** EURC balance of an arbitrary address — a connected seller wallet. */
     addrEurc: async (address: string) =>
       (await erc20Balance(arcClient, EURC_ADDRESS, getAddress(address))).toString(),
     addresses: { buyer: buyer.address as string, merchant: MERCHANT as string },
     funding: {
-      bridge, ub, arcAdapter, sepAdapter, buyer: buyer.address as string, kitKey: KIT_KEY,
-      chains: { arc: BridgeChain.Arc_Testnet, sepolia: BridgeChain.Ethereum_Sepolia },
+      bridge, ub, arcAdapter, srcAdapter, buyer: buyer.address as string, kitKey: KIT_KEY,
+      /** Adapter + App Kit chain name for one source chain; unknown keys fall back to the default. */
+      source: (from?: SourceChainId) => {
+        const c = sourceChain(from);
+        return { adapter: srcAdapters[c.key], chain: c.name as BridgeChain, label: c.label };
+      },
+      chains: { arc: BridgeChain.Arc_Testnet },
     },
   };
 }

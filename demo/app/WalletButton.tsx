@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
-import { LogOut, Wallet } from "lucide-react";
+import { RiLogoutBoxRLine, RiWallet3Line } from "@remixicon/react";
 import { mpAddrArcUsdc } from "./marketplace.actions";
 import { Button } from "@/components/ui/button";
 import { shortAddr, usd } from "./_ui";
@@ -32,9 +32,9 @@ export default function WalletButton() {
   if (!isConnected) {
     return (
       <div className="flex items-center gap-2">
-        {error && <span className="hidden text-xs text-red-600 lg:inline">{error.message.slice(0, 60)}</span>}
+        {error && <span className="hidden text-xs text-destructive lg:inline">{error.message.slice(0, 60)}</span>}
         <Button size="sm" disabled={isPending || !injected} onClick={() => injected && connect({ connector: injected })}>
-          <Wallet className="size-4" />
+          <RiWallet3Line className="size-4" />
           {isPending ? "Connecting…" : "Connect wallet"}
         </Button>
       </div>
@@ -42,16 +42,21 @@ export default function WalletButton() {
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-md border bg-card py-1 pl-3 pr-1 shadow-xs">
+    // Sized and squared to match a `size="sm"` Button, because that is what sits
+    // either side of it in the header: h-7 and the preset's square corners. The
+    // disconnect button is `size="xs"` (24px), which leaves 2px of inset.
+    <div className="flex h-7 items-center gap-2 rounded-none border bg-card pr-0.5 pl-2.5">
       <span className="flex items-center gap-2 text-xs">
-        <span className="size-1.5 rounded-full bg-emerald-500" />
+        <span className="size-1.5 rounded-full bg-primary" />
         <span className="font-mono text-foreground">{shortAddr(address!)}</span>
-        <span className="text-muted-foreground">
+        {/* The balance is the first thing to go on a narrow screen — the panels
+            below show it too, the address is what identifies the session. */}
+        <span className="hidden text-muted-foreground md:inline">
           Arc <b className="tabular-nums text-foreground">{usd(arcUsdc)}</b> USDC
         </span>
       </span>
       <Button variant="ghost" size="xs" onClick={() => disconnect()} aria-label="Disconnect wallet">
-        <LogOut className="size-3.5" />
+        <RiLogoutBoxRLine className="size-3.5" />
       </Button>
     </div>
   );
