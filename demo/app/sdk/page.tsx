@@ -1,4 +1,4 @@
-import { CheckCircle2, ExternalLink } from "lucide-react";
+import { RiCheckboxCircleLine, RiExternalLinkLine } from "@remixicon/react";
 import {
   ARC_TESTNET_CHAIN_ID,
   ARC_TESTNET_EXPLORER_URL,
@@ -6,8 +6,11 @@ import {
   USDC_ADDRESS,
 } from "../../../src/constants/arc";
 import DemoPanels from "../DemoPanels";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ToneBadge } from "../_ui";
+import {
+  Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle,
+} from "@/components/ui/card";
 
 const ARC_TX = (h: string) => `${ARC_TESTNET_EXPLORER_URL}/tx/${h}`;
 const SEP_TX = (h: string) => `https://sepolia.etherscan.io/tx/${h}`;
@@ -15,15 +18,16 @@ const SEP_TX = (h: string) => `https://sepolia.etherscan.io/tx/${h}`;
 // The public SDK surface (src/sdk/rivokit.ts) — the one object the whole flow
 // runs through (Phase 5 exit criterion).
 const SDK_API: Array<[string, string]> = [
-  ["createOrder(params)", "Lock the FX quote, derive usdcAmount, screen the addresses, store the order."],
+  ["createOrder(params)", "Lock the FX quote, derive usdcAmount, screen the addresses, store the order. `payoutTo` decides the shape of everything after it."],
   ["fund(orderId)", "Cross-chain USDC → Arc (unified balance / bridge) → authorize into escrow."],
-  ["release(orderId, proof)", "Capture → floored swap (≥ €P) → MOCK payout instruction."],
+  ["release(orderId, proof)", "wallet: capture → floored swap (≥ €P) → MOCK instruction. bank: capture → CPN quote pinned to €P → broadcast."],
+  ["refreshPayout(orderId)", "Re-read the rail and settle the ledger row with its Arc hash — the same path a webhook takes."],
   ["refund(orderId)", "void / refund → bridge back to receivingChain (invariant 5)."],
   ["status(orderId)", "Read the current order."],
-  ["on(event, handler)", "Subscribe to status events: funded / released / refunded / …"],
+  ["on(event, handler)", "Subscribe to status events: funded / released / payout_pending / paid_out / refunded / …"],
 ];
 
-const LIFECYCLE = ["created", "funding_pending", "funded", "released", "refunded"];
+const LIFECYCLE = ["created", "funding_pending", "funded", "released", "payout_pending", "paid_out"];
 
 // Real testnet transactions from the live proofs (scripts/live-*.mjs).
 type Leg = { label: string; hash: string; url: (h: string) => string };
@@ -96,7 +100,7 @@ function short(h: string) {
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{children}</h2>;
+  return <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">{children}</h2>;
 }
 
 export default function Page() {
@@ -108,11 +112,15 @@ export default function Page() {
         Commerce Payments Protocol escrow, never on a server.
       </p>
 
-      <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        <strong className="font-semibold">Testnet only — unaudited.</strong> The fiat leg
-        (EURC→EUR) is <span className="font-mono text-[13px]">mocked</span> and belongs to a licensed host.
-        Do not use real funds or mainnet private keys.
-      </div>
+      <Alert variant="destructive" className="mt-6">
+        <AlertTitle>Testnet only — unaudited</AlertTitle>
+        <AlertDescription>
+          A <span className="font-mono">wallet</span> order stops at EURC on Arc and hands the host a
+          <span className="font-mono"> MOCK</span> payout instruction — no fiat moves. A
+          <span className="font-mono"> bank</span> order really does broadcast to a payment network and cannot be
+          recalled. Do not use real funds or mainnet private keys.
+        </AlertDescription>
+      </Alert>
 
       <div className="mt-10">
         <DemoPanels />
@@ -127,7 +135,7 @@ export default function Page() {
         <dl className="mt-4 divide-y border-y">
           {SDK_API.map(([sig, desc]) => (
             <div key={sig} className="flex flex-col gap-1 py-3 sm:flex-row sm:gap-6">
-              <dt className="w-64 shrink-0 font-mono text-sm text-emerald-600">{sig}</dt>
+              <dt className="w-64 shrink-0 font-mono text-sm text-muted-foreground">{sig}</dt>
               <dd className="text-sm text-foreground">{desc}</dd>
             </div>
           ))}
@@ -140,7 +148,7 @@ export default function Page() {
         <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
           {LIFECYCLE.map((s, i) => (
             <span key={s} className="flex items-center gap-2">
-              <span className="rounded-md border bg-muted px-2 py-1 font-mono text-foreground">{s}</span>
+              <span className="border bg-muted px-2 py-1 font-mono text-foreground">{s}</span>
               {i < LIFECYCLE.length - 1 && <span className="text-muted-foreground">→</span>}
             </span>
           ))}
@@ -156,17 +164,17 @@ export default function Page() {
         <SectionTitle>Gasless — the buyer pays no gas</SectionTitle>
         <p className="mt-2 text-sm text-muted-foreground">
           The buyer <span className="font-medium text-foreground">signs an ERC-3009 authorization</span>{" "}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-emerald-600">receiveWithAuthorization</code>{" "}
+          <code className="bg-muted px-1 py-0.5 font-mono text-xs">receiveWithAuthorization</code>{" "}
           off-chain (no transaction). The operator <span className="font-medium text-foreground">relays</span>{" "}
           the on-chain collection through <span className="font-mono text-xs">ERC3009PaymentCollector</span> and pays the gas.
           The buyer's USDC moves; the buyer never needs a native gas token.
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-          <span className="rounded-md border bg-muted px-2 py-1 text-foreground">buyer signs (off-chain, no gas)</span>
+          <span className="border bg-muted px-2 py-1 text-foreground">buyer signs (off-chain, no gas)</span>
           <span className="text-muted-foreground">→</span>
-          <span className="rounded-md border bg-muted px-2 py-1 text-foreground">operator relays (pays gas)</span>
+          <span className="border bg-muted px-2 py-1 text-foreground">operator relays (pays gas)</span>
           <span className="text-muted-foreground">→</span>
-          <span className="rounded-md border bg-muted px-2 py-1 text-foreground">USDC into escrow</span>
+          <span className="border bg-muted px-2 py-1 text-foreground">USDC into escrow</span>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           Operator relay, not a generic paymaster — the nonce is a payer-agnostic hash (single use, replay-proof).
@@ -182,10 +190,10 @@ export default function Page() {
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           {SCENARIOS.map((s) => (
-            <Card key={s.wedge} className="gap-3 py-4">
+            <Card key={s.wedge}>
               <CardHeader>
                 <CardTitle className="text-sm">{s.title}</CardTitle>
-                <p className="font-mono text-xs text-emerald-600">{s.wedge}</p>
+                <CardDescription className="font-mono">{s.wedge}</CardDescription>
               </CardHeader>
               <CardContent>
                 <dl className="space-y-1.5 text-xs">
@@ -213,15 +221,15 @@ export default function Page() {
         </p>
         <div className="mt-4 space-y-4">
           {FLOWS.map((flow) => (
-            <Card key={flow.title} className="gap-3 py-4">
+            <Card key={flow.title}>
               <CardHeader>
-                <div className="flex items-baseline justify-between gap-4">
-                  <CardTitle className="text-sm">{flow.title}</CardTitle>
-                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
-                    <CheckCircle2 className="size-3" /> proven
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">{flow.result}</p>
+                <CardTitle className="text-sm">{flow.title}</CardTitle>
+                <CardDescription>{flow.result}</CardDescription>
+                <CardAction>
+                  <ToneBadge tone="success">
+                    <RiCheckboxCircleLine /> proven
+                  </ToneBadge>
+                </CardAction>
               </CardHeader>
               <CardContent>
                 <ul className="space-y-1.5">
@@ -229,8 +237,8 @@ export default function Page() {
                     <li key={leg.hash} className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
                       <span className="w-52 shrink-0 text-xs text-muted-foreground">{leg.label}</span>
                       <a href={leg.url(leg.hash)} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 break-all font-mono text-xs text-sky-600 hover:underline">
-                        {short(leg.hash)}<ExternalLink className="size-3" />
+                        className="inline-flex items-center gap-1 break-all font-mono text-xs text-primary underline-offset-4 hover:underline">
+                        {short(leg.hash)}<RiExternalLinkLine className="size-3" />
                       </a>
                     </li>
                   ))}
@@ -241,16 +249,16 @@ export default function Page() {
         </div>
 
         {/* Mock payout — clearly labeled */}
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-sm font-medium text-amber-900">Payout instruction (the EURC→EUR fiat leg)</h3>
-            <Badge className="bg-amber-500 text-white">MOCK</Badge>
-          </div>
-          <p className="mt-1 text-xs text-amber-800">
+        <Alert className="mt-4">
+          <AlertTitle className="flex items-baseline justify-between gap-2">
+            <span>Payout instruction (the EURC→EUR fiat leg)</span>
+            <ToneBadge tone="warning">MOCK</ToneBadge>
+          </AlertTitle>
+          <AlertDescription>
             RivoKit does not execute the fiat leg. It hands the host a structured instruction to run through a
-            licensed off-ramp. KYB/AML and fiat settlement are the host's responsibility.
-          </p>
-        </div>
+            licensed off-ramp. KYB/AML and fiat settlement are the host&apos;s responsibility.
+          </AlertDescription>
+        </Alert>
       </section>
 
       {/* Phase status */}
@@ -259,7 +267,7 @@ export default function Page() {
         <ul className="mt-4 divide-y border-y">
           {PHASES.map(([name, desc]) => (
             <li key={name} className="flex items-center gap-3 py-2.5 text-sm">
-              <CheckCircle2 className="size-4 text-emerald-600" />
+              <RiCheckboxCircleLine className="size-4 text-muted-foreground" />
               <span className="w-48 shrink-0 font-medium text-foreground">{name}</span>
               <span className="text-muted-foreground">{desc}</span>
             </li>

@@ -1,0 +1,15 @@
+import Withdraw from "../../Withdraw";
+
+export const metadata = {
+  title: "RivoKit — withdraw",
+  description: "Seller EURC on Arc, cashed out to a bank via CPN or Circle Mint. Testnet only.",
+};
+
+/** The fiat exits: a balance row over the CPN and Circle Mint panels. */
+export default function Page() {
+  return (
+    <main className="min-h-0 flex-1 overflow-y-auto p-3">
+      <Withdraw />
+    </main>
+  );
+}

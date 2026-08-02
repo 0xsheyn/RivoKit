@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { CircleCheck, Landmark, Loader2 } from "lucide-react";
+import { RiBankLine, RiCheckboxCircleLine, RiLoader4Line } from "@remixicon/react";
 import {
   mintBalanceAction,
   mintRedeemAction,
@@ -9,20 +9,33 @@ import {
   type MintDepositView,
   type MintPayoutView,
 } from "./mint.actions";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { withToast } from "./toast";
+import { ToneBadge, railTone, statusLabel } from "./_ui";
 import { Button } from "@/components/ui/button";
+import {
+  Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 const two = (v: string | number) => Number(v).toFixed(2);
+const SYMBOL: Record<string, string> = { EUR: "€", USD: "$" };
 
 /**
- * Circle Mint redemption — the euro-native path's final fiat leg (redeem the
- * Mint account balance to a bank). Complements CPN: this is the StableFX route
- * (USDC→EURC→Circle Mint→EUR bank). The sandbox account holds USD.
+ * Circle Mint redemption — the euro-native path's final fiat leg.
+ *
+ * EUR is the default, and not for cosmetic reasons: Circle exposes a **EUR
+ * deposit address on ARC**, so the floored EURC this SDK settles into goes
+ * straight from Arc into the Mint balance with no bridge, and out to a SEPA
+ * bank. The USD balance has no Arc deposit route at all — redeeming it is a
+ * real Circle payout, but it is sandbox money that never touched Arc. This is
+ * the exit CPN cannot serve, because CPN only takes USDC as a source currency.
  */
 export default function MintRedeem() {
   const [balances, setBalances] = useState<MintBalanceView[]>([]);
   const [deposit, setDeposit] = useState<MintDepositView | null>(null);
+  const [currency, setCurrency] = useState("EUR");
   const [amount, setAmount] = useState("10");
   const [payout, setPayout] = useState<MintPayoutView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,72 +44,105 @@ export default function MintRedeem() {
   const load = () => mintBalanceAction().then((r) => { if (r.ok) { setBalances(r.balances); setDeposit(r.deposit); } });
   useEffect(() => { load(); }, []);
 
-  const usd = balances.find((b) => b.currency === "USD") ?? balances[0];
-  const balNum = usd ? Number(usd.amount) : 0;
+  // Only the fiat balances Circle can redeem to a bank; the sandbox account also
+  // carries oddities like CIRBTC that have nothing to do with this panel.
+  const fiat = balances.filter((b) => b.currency === "EUR" || b.currency === "USD");
+  const held = fiat.find((b) => b.currency === currency);
+  const balNum = held ? Number(held.amount) : 0;
   const amtNum = Number(amount || "0");
   const enough = amtNum > 0 && amtNum <= balNum;
+  const sym = SYMBOL[currency] ?? "";
+
+  // Base UI's ToggleGroup reports the whole pressed set; single-select means one
+  // entry, and an empty array when the pressed item is clicked again.
+  const pickCurrency = ([c]: string[]) => { if (!c) return; setCurrency(c); setPayout(null); setError(null); };
 
   const redeem = () =>
     start(async () => {
       setError(null);
-      const r = await mintRedeemAction(amount);
+      const r = await withToast(`Redeeming ${amount} ${currency} to the linked bank`,
+        () => mintRedeemAction(amount, currency));
       if (r.ok) { setPayout(r.payout); load(); }
       else setError(r.error);
     });
 
   return (
-    <div className="rounded-lg border bg-card p-3 shadow-xs">
-      <div className="flex items-center gap-2">
-        <span className="flex size-7 items-center justify-center rounded-md bg-sky-50 text-sky-600">
-          <Landmark className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium">Circle Mint — redeem to a bank</div>
-          <p className="truncate text-xs text-muted-foreground">StableFX's final leg, redeemed 1:1 (sandbox: USD)</p>
-        </div>
-        <span className="shrink-0 text-xs text-muted-foreground">
-          <b className="tabular-nums text-foreground">{usd ? two(usd.amount) : "…"}</b> {usd?.currency ?? ""}
-        </span>
-      </div>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <RiBankLine className="size-4 text-muted-foreground" />
+          Circle Mint — redeem to a bank
+        </CardTitle>
+        <CardDescription className="truncate">
+          The EURC path&apos;s final leg, redeemed 1:1
+        </CardDescription>
+        <CardAction>
+          <span className="text-xs text-muted-foreground">
+            <b className="tabular-nums text-foreground">{held ? two(held.amount) : "…"}</b> {currency}
+          </span>
+        </CardAction>
+      </CardHeader>
 
-      {deposit?.address && (
-        <div className="mt-3 rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Top up:</span> send USDC to{" "}
-          <span className="font-mono text-foreground">{deposit.address.slice(0, 10)}…{deposit.address.slice(-6)}</span> on{" "}
-          {deposit.chains.join("/")}.
-          {/* Circle lists an EUR deposit address on ARC, so the seller's floored
-              EURC needs no bridge at all — proven by live-mint-arc-deposit.mjs. */}
-          {deposit.eurOnArc && (
-            <>
-              {" "}
-              <span className="text-emerald-600">
-                EURC on Arc goes straight in — no bridge.
-              </span>
-            </>
-          )}
-        </div>
-      )}
+      <CardContent className="space-y-3">
+        <ToggleGroup variant="outline" size="sm" value={[currency]} onValueChange={pickCurrency}>
+          {(["EUR", "USD"] as const).map((c) => {
+            const b = fiat.find((x) => x.currency === c);
+            return (
+              <ToggleGroupItem key={c} value={c}>
+                {c} <span className="tabular-nums text-muted-foreground">{b ? two(b.amount) : "…"}</span>
+              </ToggleGroupItem>
+            );
+          })}
+        </ToggleGroup>
 
-      <div className="mt-2 flex items-center gap-2">
-        <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
-          className="h-8 flex-1 text-xs" placeholder="amount" aria-label="Redeem amount" />
-        <Button size="xs" variant="ghost" onClick={() => setAmount(two(balNum))}>Max</Button>
-        <Button size="sm" disabled={pending || !enough} onClick={redeem}>
-          {pending ? <Loader2 className="size-3.5 animate-spin" /> : "Redeem"}
-        </Button>
-      </div>
-      {amount !== "" && balances.length > 0 && !enough && (
-        <p className="mt-1.5 text-xs text-amber-600">More than the Mint balance.</p>
-      )}
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        {/* Where this balance is topped up from — and for EUR that is Arc itself. */}
+        {currency === "EUR" && deposit?.eurOnArc ? (
+          <Alert>
+            <AlertDescription>
+              <span className="font-medium text-foreground">Top up from Arc:</span> send the seller&apos;s EURC to{" "}
+              <span className="font-mono text-foreground">
+                {deposit.eurOnArc.address.slice(0, 10)}…{deposit.eurOnArc.address.slice(-6)}
+              </span>{" "}
+              on {deposit.eurOnArc.chain} — no bridge, it credits this EUR balance directly.
+            </AlertDescription>
+          </Alert>
+        ) : deposit?.address ? (
+          <Alert>
+            <AlertDescription>
+              <span className="font-medium text-foreground">Top up:</span> send USDC to{" "}
+              <span className="font-mono text-foreground">
+                {deposit.address.slice(0, 10)}…{deposit.address.slice(-6)}
+              </span>{" "}
+              on {deposit.chains.join("/")}. Circle lists no Arc route for USD, so this balance cannot be fed from
+              Arc — the EUR one can.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        <div className="flex items-center gap-2">
+          <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
+            className="flex-1" placeholder="amount" aria-label={`Redeem amount in ${currency}`} />
+          <Button size="sm" variant="ghost" onClick={() => setAmount(two(balNum))}>Max</Button>
+          <Button size="sm" disabled={pending || !enough} onClick={redeem}>
+            {pending ? <RiLoader4Line className="animate-spin" /> : `Redeem ${sym}`}
+          </Button>
+        </div>
+        {amount !== "" && fiat.length > 0 && !enough && (
+          <p className="text-xs text-muted-foreground">More than the {currency} balance.</p>
+        )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </CardContent>
 
       {payout && (
-        <div className="mt-3 flex items-center gap-2 rounded-md border bg-muted/30 p-2 text-xs">
-          <CircleCheck className="size-3.5 shrink-0 text-emerald-600" />
-          <span className="truncate">Payout {two(payout.amount)} {payout.currency} → {payout.bankName}</span>
-          <Badge variant="outline" className="ml-auto">{payout.status}</Badge>
-        </div>
+        <CardFooter className="gap-2 text-xs">
+          <RiCheckboxCircleLine className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">
+            Payout {two(payout.amount)} {payout.currency} → {payout.bankName}
+            {payout.rail && <> · {payout.rail.toUpperCase()}</>}
+          </span>
+          <ToneBadge tone={railTone(payout.status)} className="ml-auto">{statusLabel(payout.status)}</ToneBadge>
+        </CardFooter>
       )}
-    </div>
+    </Card>
   );
 }

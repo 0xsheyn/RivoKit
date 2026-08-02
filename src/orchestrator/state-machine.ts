@@ -17,6 +17,8 @@ export const ORDER_STATES = [
   "settlement_pending",
   "shipped",
   "released",
+  "payout_pending",
+  "paid_out",
   "refund_pending",
   "refunded",
   "failed",
@@ -32,16 +34,19 @@ const TRANSITIONS: Record<OrderState, readonly OrderState[]> = {
   funding_pending: ["funded", "failed"],
 
   // Held in escrow. `shipped` is optional: digital goods release immediately.
-  funded: ["shipped", "released", "settlement_pending", "refund_pending", "failed"],
+  funded: ["shipped", "released", "payout_pending", "settlement_pending", "refund_pending", "failed"],
 
   // Captured, but the swap has not delivered the promised currency yet.
   //
   // The escrow is already empty and void/reclaim no longer apply, so this is
   // NOT recoverable by returning to `funded`. The only ways out are retrying
   // the swap, or giving up and refunding from the operator's own balance.
-  settlement_pending: ["released", "refund_pending", "failed"],
+  // The escrow is already empty and void/reclaim no longer apply, so a stuck
+  // settlement can still reach a bank: the USDC sitting with the receiver is
+  // exactly what the off-ramp consumes.
+  settlement_pending: ["released", "payout_pending", "refund_pending", "failed"],
 
-  shipped: ["released", "settlement_pending", "refund_pending", "failed"],
+  shipped: ["released", "payout_pending", "settlement_pending", "refund_pending", "failed"],
 
   // EXTENSION beyond API.md, which draws `released` as terminal.
   //
@@ -50,6 +55,23 @@ const TRANSITIONS: Record<OrderState, readonly OrderState[]> = {
   // and costlier path than a pre-capture void: OperatorRefundCollector pulls
   // the tokens from the OPERATOR's own balance, not from escrow.
   released: ["refund_pending"],
+
+  // The off-ramp has been BROADCAST and cannot be recalled. The seller's USDC
+  // has left their wallet; the fiat leg is with the payment network, which
+  // reports asynchronously (minutes for SEPA, and an RFI can stretch it).
+  //
+  // There is no edge back to `released`: that state means EURC was delivered on
+  // Arc, and on this path no swap ever ran. `settlement_pending` IS reachable,
+  // and it is where a FAILED payment lands — CPN returns the USDC to the refund
+  // address, which is the settlement wallet, so the order is once again
+  // "captured, holding USDC, not yet in the promised currency". Exactly what
+  // that state has always meant, reached by a different road.
+  payout_pending: ["paid_out", "settlement_pending", "failed"],
+
+  // Terminal, and deliberately so. Fiat has left the payment network for the
+  // beneficiary's bank; no operator refund can pull it back, and offering
+  // `refund_pending` here would imply a reversal RivoKit cannot perform.
+  paid_out: [],
 
   refund_pending: ["refunded", "failed"],
 
@@ -111,7 +133,9 @@ export function isFunded(state: OrderState): boolean {
     state === "funded" ||
     state === "settlement_pending" ||
     state === "shipped" ||
-    state === "released"
+    state === "released" ||
+    state === "payout_pending" ||
+    state === "paid_out"
   );
 }
 
@@ -123,5 +147,23 @@ export function isFunded(state: OrderState): boolean {
  * path is gone.
  */
 export function isCaptured(state: OrderState): boolean {
-  return state === "settlement_pending" || state === "released";
+  return (
+    state === "settlement_pending" ||
+    state === "released" ||
+    state === "payout_pending" ||
+    state === "paid_out"
+  );
+}
+
+/**
+ * True once the fiat leg is irreversible — broadcast, or already delivered.
+ *
+ * Distinct from `isCaptured`, which only says funds left escrow. Capture can
+ * still be undone by an operator-funded refund; a broadcast off-ramp cannot,
+ * because the USDC has left the seller's wallet for a payment network RivoKit
+ * does not control. Callers that offer a refund must check this, not just
+ * `isCaptured`.
+ */
+export function isOffRamped(state: OrderState): boolean {
+  return state === "payout_pending" || state === "paid_out";
 }

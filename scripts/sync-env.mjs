@@ -31,8 +31,11 @@ const MAPPING = {
   RELAYER_PRIVATE_KEY: "RELAYER_PRIVATE_KEY",
   DEPLOYER_PRIVATE_KEY: "DEPLOYER_PRIVATE_KEY",
   BUYER_PRIVATE_KEY: "BUYER_PRIVATE_KEY",
-  SELLER_ADDRESS: "SELLER_ADDRESS",
 };
+// No SELLER_ADDRESS here on purpose: nothing reads it. The demo's seller is the
+// relayer EOA (demo/lib/cpn.server.ts getSellerSigner) and the escrow receiver is
+// MERCHANT_ADDRESS, which setup writes. Mapping it only produced a permanent
+// "empty:" entry in this script's report.
 
 /** Values that are not secrets and have a sensible fixed default. */
 const DEFAULTS = {

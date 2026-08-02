@@ -46,6 +46,31 @@ export function toDecimalString(minorUnits: bigint): string {
 }
 
 /**
+ * Minor units → decimal string at an arbitrary scale — the inverse of
+ * `fromDecimalStringScaled`, for money that is not USDC/EURC.
+ *
+ * CPN quotes are requested in the DESTINATION currency, so a EUR floor held as
+ * 250 (2dp) has to reach the API as "2.50". Doing that through Number would
+ * reintroduce exactly the float error the scaled parser was written to avoid,
+ * so this stays in bigint and string space too.
+ *
+ * Trailing zeros are kept, unlike the 6dp `toDecimalString`: a fiat amount
+ * reads as "2.50", and some payment APIs validate the exponent.
+ */
+export function toDecimalStringScaled(minorUnits: bigint, scale: number): string {
+  if (!Number.isInteger(scale) || scale < 0 || scale > 18) {
+    throw new MoneyFormatError(`scale must be an integer in 0..18, got ${scale}`);
+  }
+  if (minorUnits < 0n) throw new MoneyFormatError("a money amount cannot be negative");
+  if (scale === 0) return minorUnits.toString();
+
+  const divisor = 10n ** BigInt(scale);
+  const whole = minorUnits / divisor;
+  const fraction = (minorUnits % divisor).toString().padStart(scale, "0");
+  return `${whole}.${fraction}`;
+}
+
+/**
  * Decimal string → minor units, truncating anything below 1e-6.
  *
  * Truncation is deliberate. The service returns values like
