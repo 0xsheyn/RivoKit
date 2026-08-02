@@ -46,23 +46,92 @@ Both target corridors have reached `COMPLETED` on live infrastructure:
 Every hash, every order id, and exactly what each run does *not* prove:
 **[PROOFS.md](PROOFS.md)**.
 
-## What it is
+## Overview
 
-A money-orchestration layer a marketplace, payout app or invoicing system embeds
-into its checkout. It moves value from *"the payer pays USDC from any chain"* to
-*"the recipient is paid"* — with a locked FX quote, escrow, automatic refunds,
-gasless UX, and a fiat exit.
+RivoKit is a **money-orchestration layer** that a marketplace, payout app or
+invoicing system embeds into its checkout. It moves value from *"the payer pays
+USDC from whatever chain they hold it on"* to *"the recipient is paid"* — with
+the recipient's amount fixed before anything moves.
 
-A buyer pays USDC from whichever chain they already hold it on. RivoKit routes it
-to Arc, holds it in a Commerce Payments Protocol escrow, and on release either
-settles to floor-guaranteed EURC on Arc or drives it through the Circle Payments
-Network into a local bank account. The seller is promised an exact amount in
-fiat terms before anything moves, and receives exactly that.
+A buyer pays USDC from any supported chain. RivoKit routes it to Arc, holds it in
+a Commerce Payments Protocol escrow, and on release takes **one of two endings,
+chosen once at `createOrder`**:
+
+- **`payoutTo: "wallet"`** — a floored swap USDC→EURC, ending at EURC on Arc.
+  The recipient decides later what to do with an accumulated balance.
+- **`payoutTo: "bank"`** — `release()` drives the off-ramp itself, in one call,
+  and the money lands in a local bank account. The currency follows the corridor.
+
+That second ending is the thing this project is actually about, and it is real:
+both target corridors have driven a payment to `COMPLETED` with USDC genuinely
+leaving a wallet on Arc.
+
+**What runs today, stated as narrowly as the evidence allows:**
+
+- RivoKit's **own** Commerce Payments Protocol instances on Arc Testnet, all four
+  source-verified full match.
+- Escrow lifecycle, floored swap, multi-chain funding and refund bridge-back —
+  proven against the real chain, not a fork.
+- `release()` reaching a bank in one call, driven from scripts, from the `/sdk`
+  page's UI, and from the marketplace's own server actions.
+- A **25 bps operator fee** grossed onto the payer and split at capture, never
+  touching the recipient's floor.
+- A cash-out the server **cannot forge**: a connected wallet signs the CPN intent
+  and the server only broadcasts it. Proven from a zero Permit2 allowance.
+- Webhooks that are **verified, not trusted** — signature-checked against the
+  live key before any reducer sees a body, with a one-digit edit refused.
+- **428 unit tests** across 24 files, runnable with no credentials at all.
+
+And the ceiling on all of it: **`COMPLETED` is CPN reporting the fiat leg
+finished, not anyone watching euros arrive.** That distinction is not a
+disclaimer at the bottom of this page — it is [a section of its own](#the-boundary-this-project-will-not-paper-over).
 
 RivoKit is **not** a marketplace, wallet, custodian, or licensed institution. It
 orchestrates; the licensed host that embeds it stays the party of record. It
 writes no primitives from scratch — it composes App Kit (bridge / swap / unified
 balance), the Commerce Payments Protocol (escrow) and CPN (fiat) behind one API.
+
+## The problem it solves
+
+Three frictions that converge on the same point:
+
+**The payer's balance is scattered; the recipient does not want crypto.** A
+crypto-native business holds USDC across many chains. A European contractor wants
+euros in a bank account. Bridging that today means manual off-ramps, opaque FX,
+and a settlement path the platform has to babysit.
+
+**The recipient needs certainty, not a rate.** They want a *guaranteed* local
+amount — not exposure to whatever FX does between checkout and settlement. "Best
+effort" is not a payment. RivoKit fixes the recipient's number at `createOrder`
+and makes the chain enforce it: the swap carries `stopLimit = priceEUR`, so a bad
+rate reverts and leaves the funds in escrow. On the bank path the CPN quote plays
+the same role, and RivoKit refuses to broadcast one that delivers less. **There
+is no code path in which the recipient quietly receives less.**
+
+**Platforms must assemble the plumbing themselves.** Offering "pay in USDC,
+receive local" means stitching bridging + escrow + FX + payout across four
+protocols, each with its own failure mode, none of them the platform's core
+competency — and then discovering the parts do not compose. CPN accepts USDC
+only, so a settlement that ends in EURC cannot be off-ramped through it at all.
+That is the kind of thing you find after building both halves.
+
+RivoKit closes all three: the payer pays from any chain, the recipient is
+guaranteed their number and can be paid into a bank without a second manual step,
+and the platform calls a handful of functions instead of becoming a payment
+company.
+
+## Why RivoKit
+
+| | |
+|---|---|
+| 🌉 **Multi-chain by default** | Payers pay from a USDC balance on any chain (unified balance / CCTP) — RivoKit routes it to Arc. |
+| 🎯 **The recipient's number is fixed first** | `stopLimit` on the wallet path, the CPN quote on the bank path. Either way: at least the promised amount, or nothing moves. |
+| 🏦 **One call reaches a bank** | `payoutTo: "bank"` makes `release()` capture, quote and broadcast. Not a printed instruction, not a second manual cash-out. |
+| 🔒 **Non-custodial, and keyless** | Funds sit in the escrow contract. RivoKit holds no key at all — every signer is injected by the host, so broadcasting is always an explicit decision. |
+| ⛽ **Gasless, and it pays for itself** | ERC-3009 + operator relay: the payer never holds Arc gas. The operator fee is grossed *onto* the payer, so the relay's cost never comes out of the recipient's floor. |
+| 💶 **The buffer comes back** | The payer overpays a buffer to absorb rate drift and gets the surplus returned — in the right token for the path, EURC or USDC. |
+| 🔁 **Refunds know where they came from** | On failure or expiry the USDC is bridged back to the payer's origin chain. |
+| ✅ **Verifiable, not asserted** | Every contract is source-verified on the explorer, `check-cpp.mjs` asserts the wiring instead of trusting it, and every claim in [PROOFS.md](PROOFS.md) carries a hash — next to what it does *not* prove. |
 
 **The four rules that do not bend:**
 
