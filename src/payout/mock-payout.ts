@@ -1,44 +1,24 @@
 /**
  * Payout instruction — a STRUCTURED, MOCK, non-executing hand-off.
  *
- * RivoKit stops at the on-chain boundary. Once settlement delivers EURC to the
- * receiver on Arc, the fiat leg (EURC → EUR into a bank) belongs to the host,
- * who must run it through a licensed off-ramp (CLAUDE.md §0.6, §0.7). This module
- * does NOT move fiat and must never be mistaken for something that does — it
- * emits an instruction the host executes, clearly stamped as a mock.
+ * This is the payout an order gets when no rail is wired: settlement delivered
+ * EURC on Arc and the fiat leg belongs to the host, who must run it through a
+ * licensed off-ramp (CLAUDE.md §0.6, §0.7). This module does NOT move fiat and
+ * must never be mistaken for something that does — it emits an instruction the
+ * host executes, clearly stamped as a mock.
  *
  * The label is not decoration. Golden rule §0.6 requires every mock to be
  * obvious in code, UI, and README; §0.7 forbids any claim that RivoKit performs
  * KYB/AML or fiat settlement. So `kind` is the literal `"mock"`, `executed` is
- * always false, and a disclaimer travels with every instruction. A caller that
- * wants to treat this as a real payout has to override those fields on purpose —
- * it cannot happen by accident.
+ * always false, `reference` is null, and a disclaimer travels with every
+ * instruction. A caller that wants to treat this as a real payout has to
+ * override those fields on purpose — it cannot happen by accident.
+ *
+ * The executing counterpart lives in `./cpn-payout.ts`, and the shape they both
+ * share is in `./instruction.ts`.
  */
 import type { Address } from "viem";
-
-/** The only kind this module produces on testnet. There is no "real". */
-export type PayoutKind = "mock";
-
-export type PayoutInstruction = {
-  kind: PayoutKind;
-  /** Human/UI banner text. Always present, always "MOCK". */
-  label: "MOCK";
-  orderId: string;
-  /** Who the fiat is owed to — the on-chain receiver of the EURC. */
-  beneficiary: Address;
-  /** What RivoKit actually delivered on-chain. */
-  source: { currency: "EURC"; chain: "Arc_Testnet"; amountMinor: bigint; settlementTxHash?: string | undefined };
-  /**
-   * The fiat leg the HOST must execute. `amountMinor` is the nominal 1:1 EURC→EUR
-   * figure BEFORE the off-ramp's own rate and fees — an estimate, not a promise.
-   */
-  target: { currency: "EUR"; amountMinor: bigint; estimated: true };
-  /** Always false here: no fiat has moved. */
-  executed: false;
-  /** Explicit boundary statement carried with the instruction. */
-  disclaimer: string;
-  createdAt: number;
-};
+import type { PayoutInstruction } from "./instruction.ts";
 
 export type MockPayoutParams = {
   orderId: string;
@@ -77,43 +57,25 @@ export function mockPayout(params: MockPayoutParams): PayoutInstruction {
       amountMinor: params.eurcMinor,
       settlementTxHash: params.settlementTxHash,
     },
-    target: { currency: "EUR", amountMinor: params.eurcMinor, estimated: true },
+    // Same 6-decimal scale as the EURC it mirrors: nothing has been quoted, so
+    // there is no rail scale to convert into yet.
+    target: { currency: "EUR", amountMinor: params.eurcMinor, scale: 6, estimated: true },
     executed: false,
+    reference: null,
     disclaimer: DISCLAIMER,
     createdAt: params.now,
   };
 }
 
-/** True for anything this module produced — a guard for "never ship a mock as real". */
-export function isMockPayout(p: PayoutInstruction): boolean {
-  return p.kind === "mock" && p.label === "MOCK" && p.executed === false;
-}
-
-/**
- * The instruction as it is persisted.
- *
- * Amounts become strings: JSON cannot carry a bigint at all (`JSON.stringify`
- * throws on one), and going through a JS number would reintroduce the rounding
- * that integer minor units exist to prevent. String in, bigint out — the same
- * boundary rule the order store applies to its money columns.
- */
-export type PayoutInstructionWire = Omit<PayoutInstruction, "source" | "target"> & {
-  source: Omit<PayoutInstruction["source"], "amountMinor"> & { amountMinor: string };
-  target: Omit<PayoutInstruction["target"], "amountMinor"> & { amountMinor: string };
-};
-
-export function toPayoutWire(p: PayoutInstruction): PayoutInstructionWire {
-  return {
-    ...p,
-    source: { ...p.source, amountMinor: p.source.amountMinor.toString() },
-    target: { ...p.target, amountMinor: p.target.amountMinor.toString() },
-  };
-}
-
-export function fromPayoutWire(w: PayoutInstructionWire): PayoutInstruction {
-  return {
-    ...w,
-    source: { ...w.source, amountMinor: BigInt(w.source.amountMinor) },
-    target: { ...w.target, amountMinor: BigInt(w.target.amountMinor) },
-  };
-}
+/* Re-exported so existing importers of this module keep working. The
+   definitions now live in ./instruction.ts, next to the live payout they share
+   a shape with. */
+export {
+  isMockPayout,
+  isLivePayout,
+  toPayoutWire,
+  fromPayoutWire,
+  type PayoutKind,
+  type PayoutInstruction,
+  type PayoutInstructionWire,
+} from "./instruction.ts";

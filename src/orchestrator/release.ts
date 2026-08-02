@@ -144,6 +144,54 @@ export async function release(
   }
 }
 
+export type CaptureForPayoutOutcome = {
+  capturedMinor: bigint;
+  /** What the settlement wallet actually received — gross minus the operator fee. */
+  netMinor: bigint;
+  captureTxHash?: string | undefined;
+  manualOverride: boolean;
+};
+
+/**
+ * Capture for an order whose money is bound for a bank, not a wallet.
+ *
+ * Same first three steps as `release` — check the proof, refuse an illegal
+ * lifecycle move, capture — and then it stops. No swap runs, because on this
+ * path there is nothing for a swap to guarantee: the off-ramp's own quote locks
+ * the fiat the seller receives, and converting to EURC first would pay a spread
+ * to reach a currency that is immediately spent to reach another one.
+ *
+ * Kept separate from `release` rather than added as a flag, because the two
+ * differ in the state they are allowed to enter and therefore in what
+ * `assertTransition` must check. A boolean would make that guard depend on an
+ * argument, which is exactly how an illegal transition slips through.
+ *
+ * The off-ramp itself is NOT here. Capture is the last step RivoKit can take
+ * with only chain access; everything after it needs the host's payout
+ * credentials, so it belongs to an injected `PayoutRail` driven by the facade.
+ */
+export async function captureForPayout(
+  deps: Pick<ReleaseDeps, "escrow">,
+  req: Omit<ReleaseRequest, "priceOutMinor">,
+): Promise<CaptureForPayoutOutcome> {
+  const proofCheck = assertReleaseProof(req.wedge, req.proof);
+  assertTransition(req.currentState, "payout_pending");
+
+  const capture = await deps.escrow.capture(
+    req.paymentInfo,
+    req.amountMinor,
+    req.feeBps ?? 0,
+    req.feeReceiver ?? ZERO,
+  );
+
+  return {
+    capturedMinor: req.amountMinor,
+    netMinor: netOfFee(req.amountMinor, req.feeBps ?? 0),
+    captureTxHash: capture.txHash,
+    manualOverride: proofCheck.manualOverride,
+  };
+}
+
 /**
  * Retry settlement for an order stuck at `settlement_pending`.
  *

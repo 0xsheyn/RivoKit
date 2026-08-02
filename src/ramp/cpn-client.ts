@@ -145,12 +145,39 @@ export type CpnPayment = {
   expireDate: string;
   createDate: string;
   fees: CpnFees;
-  onChainTransactions?: unknown[];
+  /**
+   * The funding transfers CPN saw on-chain. `transactionHash` is the only place
+   * the Arc hash for a broadcast payout surfaces — `submitTransaction` returns
+   * before the transaction is mined and so cannot carry one (verified live
+   * 2026-07-31 against payment `61d22d57…`).
+   */
+  onChainTransactions?: Array<{
+    type?: string;
+    id?: string;
+    status?: string;
+    transactionHash?: string;
+  }>;
   rfis?: unknown[];
   refunds?: unknown[];
   metadata?: Record<string, unknown>;
   failureReason?: string;
   failureCode?: string;
+  /**
+   * The rail's own reference for the fiat transfer — and the ONLY artefact that
+   * crosses into the beneficiary's world.
+   *
+   * Circle returns it when the rail cannot carry the sender's name or a memo
+   * separately, and documents it as "visible to the beneficiary on their bank
+   * statement" (cpn/concepts/payments/payment-reference). That makes it the
+   * handle a real recipient would use to confirm the money arrived — which
+   * matters because nothing on our side can observe the fiat leg landing.
+   *
+   * Observed live on the USD/WIRE payment as `RE78dzv7…`. Optional: rails with
+   * full metadata support carry `refCode` in the memo instead.
+   */
+  fiatNetworkPaymentRef?: string;
+  /** Rail's estimate of when fiat settles, e.g. `{min:"1", max:"3", unit:"days"}`. */
+  fiatSettlementTime?: { min: string; max: string; unit: string };
 };
 
 export type CreatePaymentParams = {

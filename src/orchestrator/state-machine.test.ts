@@ -5,6 +5,7 @@ import {
   canTransition,
   isCaptured,
   isFunded,
+  isOffRamped,
   isTerminal,
   nextStates,
   type OrderState,
@@ -18,17 +19,23 @@ const ALLOWED: ReadonlyArray<[OrderState, OrderState]> = [
   ["funding_pending", "failed"],
   ["funded", "shipped"],
   ["funded", "released"],
+  ["funded", "payout_pending"],
   ["funded", "settlement_pending"],
   ["funded", "refund_pending"],
   ["funded", "failed"],
   ["settlement_pending", "released"],
+  ["settlement_pending", "payout_pending"],
   ["settlement_pending", "refund_pending"],
   ["settlement_pending", "failed"],
   ["shipped", "released"],
+  ["shipped", "payout_pending"],
   ["shipped", "settlement_pending"],
   ["shipped", "refund_pending"],
   ["shipped", "failed"],
   ["released", "refund_pending"],
+  ["payout_pending", "paid_out"],
+  ["payout_pending", "settlement_pending"],
+  ["payout_pending", "failed"],
   ["refund_pending", "refunded"],
   ["refund_pending", "failed"],
   ["failed", "refund_pending"],
@@ -72,14 +79,24 @@ describe("sifat struktural", () => {
     for (const s of ORDER_STATES) expect(canTransition(s, s)).toBe(false);
   });
 
-  it("refunded is the only terminal state", () => {
-    expect(ORDER_STATES.filter(isTerminal)).toEqual(["refunded"]);
+  // `paid_out` joined `refunded` as terminal, and the reason is not symmetry —
+  // it is that RivoKit genuinely cannot reverse it. Fiat has reached the
+  // beneficiary's bank through a payment network; no operator-funded refund
+  // reaches across that boundary. Offering an edge out of it would encode a
+  // capability this system does not have.
+  it("refunded and paid_out are the terminal states", () => {
+    expect(ORDER_STATES.filter(isTerminal)).toEqual(["paid_out", "refunded"]);
   });
 
-  it("every state can reach refunded (funds are never stranded)", () => {
+  it("every state except paid_out can reach refunded (funds are never stranded)", () => {
     // Breadth-first from each state; a state with no path to `refunded` would
     // mean funds that can never be returned to the payer.
-    for (const start of ORDER_STATES) {
+    //
+    // `paid_out` is the one exception, and it is excluded rather than quietly
+    // passing: the money is not stranded there, it is DELIVERED. A refund from
+    // that point is a commercial matter between buyer and seller, not a
+    // transition this machine can offer.
+    for (const start of ORDER_STATES.filter((s) => s !== "paid_out")) {
       const seen = new Set<OrderState>([start]);
       const queue: OrderState[] = [start];
       let reached = start === "refunded";
@@ -107,7 +124,7 @@ describe("isFunded menjaga invariant 3 PRD §10", () => {
     expect(isFunded("funding_pending")).toBe(false);
   });
 
-  it.each(["funded", "settlement_pending", "shipped", "released"] as const)(
+  it.each(["funded", "settlement_pending", "shipped", "released", "payout_pending", "paid_out"] as const)(
     "%s dianggap funded",
     (s) => {
       expect(isFunded(s)).toBe(true);
@@ -116,9 +133,12 @@ describe("isFunded menjaga invariant 3 PRD §10", () => {
 });
 
 describe("isCaptured — funds have left escrow", () => {
-  it.each(["settlement_pending", "released"] as const)("%s is captured", (s) => {
-    expect(isCaptured(s)).toBe(true);
-  });
+  it.each(["settlement_pending", "released", "payout_pending", "paid_out"] as const)(
+    "%s is captured",
+    (s) => {
+      expect(isCaptured(s)).toBe(true);
+    },
+  );
 
   it.each(["created", "funding_pending", "funded", "shipped"] as const)(
     "%s is NOT captured yet — void is still cheap",
@@ -137,6 +157,32 @@ describe("isCaptured — funds have left escrow", () => {
     "%s BUKAN funded",
     (s) => {
       expect(isFunded(s)).toBe(false);
+    },
+  );
+});
+
+describe("isOffRamped — the fiat leg is beyond recall", () => {
+  it.each(["payout_pending", "paid_out"] as const)("%s is off-ramped", (s) => {
+    expect(isOffRamped(s)).toBe(true);
+  });
+
+  // The distinction that matters: `released` and `settlement_pending` are both
+  // captured, so `isCaptured` cannot tell a refundable order from an
+  // unrefundable one. A caller offering a refund has to ask this instead —
+  // after a broadcast the USDC has left the seller's wallet for a payment
+  // network, and no operator-funded refund reaches it.
+  it.each(["settlement_pending", "released"] as const)(
+    "%s is captured but NOT off-ramped — a refund is still possible",
+    (s) => {
+      expect(isCaptured(s)).toBe(true);
+      expect(isOffRamped(s)).toBe(false);
+    },
+  );
+
+  it.each(["created", "funding_pending", "funded", "shipped", "refunded", "failed"] as const)(
+    "%s is not off-ramped",
+    (s) => {
+      expect(isOffRamped(s)).toBe(false);
     },
   );
 });

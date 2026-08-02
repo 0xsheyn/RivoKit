@@ -20,12 +20,19 @@ import type { SettlementFx, FxToken } from "../settlement-fx/swap.ts";
 import type { OrderRecord, OrderStore } from "../orchestrator/order-store.ts";
 import { isCaptured, type OrderState } from "../orchestrator/state-machine.ts";
 import { expiriesFor, timeoutPolicyFor, type ReleaseProof, type Wedge } from "../orchestrator/policy.ts";
-import { release as runRelease } from "../orchestrator/release.ts";
+import { release as runRelease, captureForPayout } from "../orchestrator/release.ts";
 import { refund as runRefund } from "../orchestrator/refund.ts";
 import type { Bridge, BridgeParams } from "../funding/bridge.ts";
 import { createEmitter, type Emitter } from "../events/emitter.ts";
 import type { ComplianceGate } from "../events/compliance.ts";
-import { mockPayout, type PayoutInstruction } from "../payout/mock-payout.ts";
+import { mockPayout } from "../payout/mock-payout.ts";
+import { livePayout, type PayoutInstruction } from "../payout/instruction.ts";
+import {
+  toDestinationMinor,
+  type PayoutLimits,
+  type PayoutRail,
+  type PayoutTarget,
+} from "../payout/rail.ts";
 import { assertFeeBps, grossUpForFee, InvalidFeeError } from "./fee.ts";
 
 /** Public order shape — money as strings, per API.md. */
@@ -38,6 +45,7 @@ export type Order = {
   usdcAmount: string | null;
   receivingChain: string;
   mode: "escrow" | "direct";
+  payoutTo: PayoutTarget;
   wedge: Wedge;
   state: OrderState;
   createdAt: string;
@@ -53,6 +61,16 @@ export type CreateOrderParams = {
   receivingChain: string;
   wedge: Wedge;
   mode?: "escrow" | "direct";
+  /**
+   * Where the seller's money ends up. Defaults to "wallet" — the original
+   * behaviour, where `release()` settles to EURC on Arc and stops.
+   *
+   * "bank" needs `deps.payoutRail`, and is checked against that rail's live
+   * corridor limits HERE rather than at release: a payout the rail would refuse
+   * must fail while nothing has moved, not after the escrow has been captured
+   * and the funds are already out.
+   */
+  payoutTo?: PayoutTarget;
   bufferBps?: number;
   /** Operator fee in bps for this order; falls back to `config.feeBps`. */
   feeBps?: number;
@@ -93,6 +111,15 @@ export type RebatePayer = (args: {
   /** The payer, who overpaid the buffer and is owed the surplus. */
   to: Address;
   amountMinor: bigint;
+  /**
+   * Which token the surplus is denominated in. EURC on the wallet path, where
+   * the surplus is what the swap yielded above the floor; USDC on the bank
+   * path, where no swap runs and the surplus is the captured amount the payout
+   * quote did not need. Defaulted to the settlement token for callers written
+   * before the bank path existed — but a host wiring `payoutTo: "bank"` must
+   * read it, or it will send the wrong asset.
+   */
+  token: FxToken;
 }) => Promise<{ txHash: string }>;
 
 export type RivoKitConfig = {
@@ -139,6 +166,16 @@ export type RivoKitDeps = {
   fund: FundExecutor;
   /** Returns the settlement surplus to the payer. Omit to leave it with the seller. */
   payRebate?: RebatePayer | undefined;
+  /**
+   * The fiat off-ramp, for orders created with `payoutTo: "bank"`.
+   *
+   * Injected because every off-ramp needs a payout API key, the funds owner's
+   * signer, and the beneficiary's PII — three things RivoKit must not hold
+   * (CLAUDE.md §5, §6). Omit it and `payoutTo: "bank"` is refused at
+   * `createOrder`, which keeps the default build free of any payout capability
+   * rather than half-wired.
+   */
+  payoutRail?: PayoutRail | undefined;
   config: RivoKitConfig;
   compliance?: ComplianceGate;
   emitter?: Emitter;
@@ -180,6 +217,25 @@ export class OperatorGasLowError extends Error {
   }
 }
 
+/**
+ * A bank-bound order was refused before anything moved.
+ *
+ * Every case this covers is knowable at checkout: no rail is wired, or the
+ * amount falls outside what the corridor accepts. Discovering either one after
+ * capture would leave the order in `settlement_pending` holding USDC that the
+ * off-ramp will never take — recoverable, but only by hand.
+ */
+export class PayoutUnavailableError extends Error {
+  readonly code = "PAYOUT_UNAVAILABLE";
+  readonly limits: PayoutLimits | null;
+
+  constructor(message: string, limits: PayoutLimits | null = null) {
+    super(message);
+    this.name = "PayoutUnavailableError";
+    this.limits = limits;
+  }
+}
+
 function toOrder(r: OrderRecord): Order {
   return {
     id: r.id,
@@ -190,6 +246,9 @@ function toOrder(r: OrderRecord): Order {
     usdcAmount: r.usdc_amount,
     receivingChain: r.receiving_chain,
     mode: r.mode,
+    // Rows written before the bank path existed have no column at all; they
+    // were all wallet orders, so that is what they report.
+    payoutTo: r.payout_to ?? "wallet",
     wedge: r.wedge,
     state: r.state,
     createdAt: r.created_at,
@@ -243,10 +302,253 @@ export function createRivoKit(deps: RivoKitDeps) {
     if (balance < floor) throw new OperatorGasLowError(balance, floor, config.operator);
   }
 
+  /** The wired rail, or a clear refusal naming what is missing. */
+  function requireRail(context: string): PayoutRail {
+    const rail = deps.payoutRail;
+    if (!rail) {
+      throw new PayoutUnavailableError(
+        `${context} requires deps.payoutRail, which is not wired. ` +
+          'Inject a PayoutRail (see createCpnPayoutRail) or use payoutTo: "wallet".',
+      );
+    }
+    return rail;
+  }
+
+  /**
+   * Size a bank-bound order from the payout rail, then check it can be paid.
+   *
+   * Returns the NET the escrow must hand the settlement wallet: what the rail
+   * says the floor costs today, plus the buffer that absorbs the drift between
+   * now and release. Falls back to the FX quote for a rail that cannot
+   * estimate — the buffer then has to cover a spread it was not measured
+   * against, which is why `estimate` is worth implementing.
+   */
+  async function sizeForPayout(priceOutMinor: bigint, bufferBps: number): Promise<bigint> {
+    const rail = requireRail('payoutTo: "bank"');
+    const limits = await rail.limits();
+
+    let net: bigint;
+    if (rail.estimate) {
+      const destinationMinor = toDestinationMinor(priceOutMinor, limits.destinationScale);
+      const { requiredSourceMinor } = await rail.estimate(destinationMinor);
+      net = requiredSourceMinor + (requiredSourceMinor * BigInt(bufferBps)) / 10_000n;
+    } else {
+      const q = await deps.fx.lockQuote({
+        address: config.settlementAddress, tokenIn, tokenOut,
+        priceOutMinor, bufferBps, probeInMinor: priceOutMinor,
+      });
+      net = q.amountInMinor;
+    }
+
+    assertWithinCorridor(net, rail, limits);
+    return net;
+  }
+
+  /**
+   * Refuse a bank-bound order the off-ramp could not actually pay out.
+   *
+   * The limits come from the rail, live, rather than from a constant here.
+   * CPN enforces its minimum against the DESTINATION side, so the USDC figure
+   * that clears moves with FX — 11 USDC to EUR/SEPA is refused while 12 is
+   * accepted (CLAUDE.md). Anything hardcoded in this repo would be wrong within
+   * a week and wrong silently.
+   */
+  function assertWithinCorridor(netSourceMinor: bigint, rail: PayoutRail, limits: PayoutLimits): void {
+    if (netSourceMinor < limits.minSourceMinor) {
+      throw new PayoutUnavailableError(
+        `Order nets ${netSourceMinor} ${limits.sourceCurrency} but the ${rail.corridor} corridor ` +
+          `takes at least ${limits.minSourceMinor}. Too small to reach a bank — settle to a wallet instead.`,
+        limits,
+      );
+    }
+    if (netSourceMinor > limits.maxSourceMinor) {
+      throw new PayoutUnavailableError(
+        `Order nets ${netSourceMinor} ${limits.sourceCurrency}, above the ${rail.corridor} corridor ` +
+          `ceiling of ${limits.maxSourceMinor}.`,
+        limits,
+      );
+    }
+  }
+
   async function get(orderId: string): Promise<OrderRecord> {
     const r = await deps.store.get(orderId);
     if (!r) throw new Error(`RivoKit: no such order ${orderId}`);
     return r;
+  }
+
+  /**
+   * Capture, then off-ramp — the bank-bound half of `release`.
+   *
+   * THE ORDER OF OPERATIONS IS THE DESIGN
+   *
+   * A payout quote lives 30-60 seconds and the capture has already happened by
+   * the time one is asked for, so every avoidable delay between quoting and
+   * broadcasting is a real risk of PAYMENT_EXPIRED on money that is already out
+   * of escrow. That is why `ready()` runs first (allowance approvals are
+   * transactions), why the floor check is two integer comparisons, and why the
+   * rebate — the one remaining optional step — is deliberately moved to AFTER
+   * the broadcast. On the wallet path the rebate goes first, because there the
+   * swap has already fixed everything and nothing is racing a clock. Here the
+   * priority is inverted: get the irreversible step done while the quote is
+   * alive, then tidy up.
+   *
+   * FAILING SAFE
+   *
+   * Every refusal before `submit` lands the order in `settlement_pending` with
+   * a stated reason. That state is exactly true of this situation: captured,
+   * holding USDC, not yet in the promised currency. The funds sit in the
+   * settlement wallet and the payout can be retried without touching the
+   * escrow again.
+   */
+  async function releaseToBank(args: {
+    order: OrderRecord;
+    paymentInfo: PaymentInfo;
+    hash: Hex;
+    priceOutMinor: bigint;
+    proof: ReleaseProof;
+  }): Promise<void> {
+    const { order, paymentInfo, hash, priceOutMinor, proof } = args;
+    const orderId = order.id;
+    // Not reachable through `createOrder`, which refuses a bank order without a
+    // rail — but a record can outlive the wiring that created it, and losing
+    // the rail between create and release must not capture funds that then have
+    // nowhere to go. Hence the check before the capture, not after.
+    const rail = requireRail(`Order ${orderId} is bank-bound and`);
+
+    // Read the corridor BEFORE capturing. It is the last thing that can fail
+    // harmlessly, and it decides the scale the floor has to be converted into.
+    const limits = await rail.limits();
+    const destinationMinor = toDestinationMinor(priceOutMinor, limits.destinationScale);
+
+    const cap = await captureForPayout(
+      { escrow: deps.escrow },
+      {
+        paymentInfo,
+        amountMinor: BigInt(order.max_amount),
+        wedge: order.wedge,
+        proof,
+        currentState: order.state,
+        feeBps: paymentInfo.minFeeBps,
+        feeReceiver: paymentInfo.feeReceiver,
+      },
+    );
+
+    if (cap.captureTxHash) {
+      await deps.store.recordPaymentIdempotent({
+        orderId, nonce: `${hash}:capture`, kind: "capture",
+        status: "confirmed", txHash: cap.captureTxHash, chain: "Arc_Testnet",
+        amountMinor: BigInt(order.max_amount),
+      });
+    }
+
+    /** Captured, but the fiat leg did not start. Funds are safe; say why. */
+    const stall = async (reason: string): Promise<void> => {
+      await deps.store.transition(orderId, "settlement_pending", { failureReason: reason });
+    };
+
+    if (cap.netMinor < limits.minSourceMinor) {
+      await stall(
+        `Captured ${cap.netMinor} ${limits.sourceCurrency}, below the ${rail.corridor} minimum of ${limits.minSourceMinor}.`,
+      );
+      return;
+    }
+
+    await rail.ready?.(cap.netMinor);
+
+    let quote;
+    try {
+      quote = await rail.quote({ orderId, destinationMinor, availableSourceMinor: cap.netMinor });
+    } catch (e) {
+      await stall(`Payout quote failed: ${String((e as Error)?.message ?? e).slice(0, 300)}`);
+      return;
+    }
+
+    // The floor, checked here and not inside the rail. A host-supplied rail
+    // does not get to decide whether the seller was paid enough.
+    if (quote.destinationMinor < destinationMinor) {
+      await stall(
+        `Payout quote delivers ${quote.destinationMinor} ${quote.destinationCurrency}, below the floor of ${destinationMinor}.`,
+      );
+      return;
+    }
+    if (quote.requiredSourceMinor > cap.netMinor) {
+      await stall(
+        `Payout needs ${quote.requiredSourceMinor} ${limits.sourceCurrency} to clear the floor but only ` +
+          `${cap.netMinor} was captured. Nothing was broadcast.`,
+      );
+      return;
+    }
+    if (now() >= quote.expiresAt) {
+      await stall(`Payout quote expired at ${quote.expiresAt} before it could be broadcast.`);
+      return;
+    }
+
+    // ── Past this line the payout is irreversible. ──────────────────────
+    const submission = await rail.submit(quote);
+
+    // Persisted before the transition, not after: `offramp_states_have_live_payout`
+    // refuses `payout_pending` on an order with no live payout record, and that
+    // constraint is what stops an order from claiming an irreversible action
+    // with no evidence it happened.
+    await deps.store.savePayout(
+      orderId,
+      livePayout({
+        orderId,
+        beneficiary: order.receiver as Address,
+        rail: rail.id,
+        corridor: rail.corridor,
+        paymentId: submission.paymentId,
+        status: submission.status,
+        source: {
+          currency: limits.sourceCurrency,
+          chain: "Arc_Testnet",
+          amountMinor: submission.requiredSourceMinor,
+          txHash: submission.txHash,
+        },
+        target: {
+          currency: submission.destinationCurrency,
+          amountMinor: submission.destinationMinor,
+          scale: submission.destinationScale,
+        },
+        now: now(),
+      }),
+    );
+
+    await deps.store.recordPaymentIdempotent({
+      orderId, nonce: `${hash}:payout`, kind: "payout",
+      status: "pending", chain: "Arc_Testnet", amountMinor: submission.requiredSourceMinor,
+      ...(submission.txHash ? { txHash: submission.txHash } : {}),
+    });
+
+    await deps.store.transition(orderId, "payout_pending");
+
+    // The surplus: what the payer overpaid as buffer and the quote did not
+    // need. USDC here, not EURC — no swap ran — so the token travels with the
+    // amount or a host would send the wrong asset.
+    let rebateTxHash: string | undefined;
+    const rebateMinor = cap.netMinor - submission.requiredSourceMinor;
+    if (deps.payRebate && rebateMinor > 0n) {
+      const r = await deps.payRebate({
+        orderId, to: order.payer as Address, amountMinor: rebateMinor, token: tokenIn,
+      });
+      rebateTxHash = r.txHash;
+      await deps.store.recordPaymentIdempotent({
+        orderId, nonce: `${hash}:rebate`, kind: "rebate",
+        status: "confirmed", txHash: r.txHash, chain: "Arc_Testnet", amountMinor: rebateMinor,
+      });
+    }
+
+    emitter.emit("payout_pending", {
+      orderId,
+      paymentId: submission.paymentId,
+      rail: rail.id,
+      corridor: rail.corridor,
+      sourceMinor: submission.requiredSourceMinor,
+      destinationMinor: submission.destinationMinor,
+      destinationCurrency: submission.destinationCurrency,
+      rebateMinor,
+      rebateTxHash,
+    });
   }
 
   return {
@@ -262,6 +564,109 @@ export function createRivoKit(deps: RivoKitDeps) {
      */
     payoutFor: (orderId: string): Promise<PayoutInstruction | null> =>
       deps.store.getPayout(orderId),
+
+    /**
+     * Ask the rail where a broadcast payout has got to, and advance the order
+     * if it has finished.
+     *
+     * The FALLBACK path, not the source of truth. Webhooks are what should
+     * drive a payout to its terminal state; this exists for hosts and scripts
+     * with no public endpoint, and it writes only what the rail reports. It
+     * cannot invent progress: a non-terminal status updates the stored
+     * reference and leaves the order in `payout_pending`.
+     *
+     * A FAILED payout returns the order to `settlement_pending` rather than
+     * `failed`, because that is what is actually true — CPN sends the USDC back
+     * to the refund address, which is the settlement wallet, so the order is
+     * once again captured-but-not-converted and the payout can be retried.
+     */
+    async refreshPayout(orderId: string): Promise<PayoutInstruction | null> {
+      const order = await get(orderId);
+      const payout = await deps.store.getPayout(orderId);
+      if (!payout?.reference) return payout;
+      // `paid_out` is included deliberately. The order is finished, but its
+      // ledger row may not be: the row is written `pending` at broadcast and
+      // settled on a later read, so a run that ended before the hash existed
+      // leaves a gap. Excluding terminal orders would make that gap permanent —
+      // the one state that can never self-heal.
+      if (order.state !== "payout_pending" && order.state !== "paid_out") return payout;
+
+      const rail = deps.payoutRail;
+      if (!rail?.status) return payout;
+
+      const observed = await rail.status(payout.reference.paymentId);
+      // Nothing to learn: the status is unchanged AND we already hold every
+      // artefact this read could add. The fiat reference is part of that test
+      // and not an afterthought — it can appear on a read AFTER the hash, so
+      // testing the hash alone would return early and lose it permanently.
+      // Phrased as "the rail offered none" rather than "we hold one" because
+      // rails that carry `refCode` in the memo never issue a reference at all,
+      // and demanding one would make every later read do pointless work.
+      const holdsFiatRef =
+        payout.reference.fiatNetworkPaymentRef != null || observed.fiatNetworkPaymentRef == null;
+      const settled =
+        observed.status === payout.reference.status && payout.reference.txHash != null && holdsFiatRef;
+      if (settled || (observed.status === payout.reference.status && !observed.terminal && holdsFiatRef)) {
+        return payout;
+      }
+
+      // The on-chain hash only exists once the transfer is mined, so it arrives
+      // here rather than at broadcast. Never overwrite a hash we already hold
+      // with an absent one — a later read that omits it is silence, not news.
+      // The same rule applies to the fiat reference.
+      const txHash = observed.txHash ?? payout.reference.txHash;
+      const fiatRef = observed.fiatNetworkPaymentRef ?? payout.reference.fiatNetworkPaymentRef;
+      const updated: PayoutInstruction = {
+        ...payout,
+        source: { ...payout.source, settlementTxHash: txHash },
+        reference: {
+          ...payout.reference,
+          status: observed.status,
+          txHash,
+          ...(fiatRef ? { fiatNetworkPaymentRef: fiatRef } : {}),
+        },
+      };
+      await deps.store.savePayout(orderId, updated);
+
+      // Settle the ledger row too. It was written `pending` at submit time
+      // because that was the truth then; leaving it there once the payout is
+      // terminal would make the ledger disagree with the order it describes.
+      const nonce = `${getPaymentInfoHash(
+        paymentInfoFromRecord(order), config.chainId, config.escrowAddress,
+      )}:payout`;
+      if (observed.delivered && txHash) {
+        await deps.store.advancePayment(nonce, { status: "confirmed", txHash });
+      } else if (observed.terminal && !observed.delivered) {
+        await deps.store.advancePayment(nonce, {
+          status: "failed",
+          errorReason: observed.failureReason ?? `${payout.reference.rail} reported ${observed.status}`,
+        });
+      }
+
+      // Only move an order that is still in flight. Re-running this against an
+      // order already at `paid_out` settles its ledger row and stops there —
+      // `paid_out → paid_out` is not a legal transition, and re-emitting a
+      // terminal event would tell a host something happened twice.
+      if (order.state !== "payout_pending") return updated;
+
+      if (observed.delivered) {
+        await deps.store.transition(orderId, "paid_out", { settledAt: new Date() });
+        emitter.emit("paid_out", {
+          orderId,
+          paymentId: payout.reference.paymentId,
+          destinationMinor: payout.target.amountMinor,
+          destinationCurrency: payout.target.currency,
+        });
+      } else if (observed.terminal) {
+        await deps.store.transition(orderId, "settlement_pending", {
+          failureReason:
+            `Payout ${payout.reference.paymentId} failed on ${payout.reference.rail}` +
+            `${observed.failureReason ? `: ${observed.failureReason}` : ""}. ` +
+            "Funds return to the settlement wallet as the source token.",
+        });
+      }
+      return updated;
+    },
 
     /** FX quote without executing. Money as strings, like every other wire value. */
     async estimateSwap(params: { address: string; amountInMinor: bigint }): Promise<{
@@ -303,15 +708,29 @@ export function createRivoKit(deps: RivoKitDeps) {
         throw new InvalidFeeError("feeBps > 0 but feeReceiver is empty — the fee would burn to the zero address.");
       }
 
-      // Invert the settlement quote to find how much USDC clears priceEUR + buffer.
-      const { amountInMinor: netUsdcAmount } = await deps.fx.lockQuote({
-        address: params.payer,
-        tokenIn,
-        tokenOut,
-        priceOutMinor: params.priceEURMinor,
-        bufferBps,
-        probeInMinor: params.priceEURMinor, // ~1:1 stablecoins; a probe near value
-      });
+      // How much USDC clears priceEUR + buffer.
+      //
+      // Which market to ask depends on where the money is going. A wallet order
+      // is sized by inverting the settlement swap, because that swap is what
+      // has to clear the floor. A bank order is sized from the PAYOUT rail:
+      // the swap never runs, and pricing the buffer against StableFX's spread
+      // when CPN's is what the order will actually pay is sizing against the
+      // wrong market — the kind of mismatch that shows up as a stalled payout
+      // after the escrow has already been captured.
+      const payoutTo = params.payoutTo ?? "wallet";
+      let netUsdcAmount: bigint;
+      if (payoutTo === "bank") {
+        netUsdcAmount = await sizeForPayout(params.priceEURMinor, bufferBps);
+      } else {
+        ({ amountInMinor: netUsdcAmount } = await deps.fx.lockQuote({
+          address: params.payer,
+          tokenIn,
+          tokenOut,
+          priceOutMinor: params.priceEURMinor,
+          bufferBps,
+          probeInMinor: params.priceEURMinor, // ~1:1 stablecoins; a probe near value
+        }));
+      }
 
       // The payer authorizes the fee ON TOP of the net, so what the escrow hands
       // the receiver still clears priceEUR + buffer and the floored swap holds.
@@ -346,6 +765,7 @@ export function createRivoKit(deps: RivoKitDeps) {
         bufferBps,
         receivingChain: params.receivingChain,
         mode: params.mode ?? "escrow",
+        payoutTo,
         wedge: params.wedge,
         timeoutKind: timeoutPolicyFor(params.wedge),
         timeoutDeadline: exp.authorizationExpiry,
@@ -393,6 +813,16 @@ export function createRivoKit(deps: RivoKitDeps) {
       const hash = getPaymentInfoHash(paymentInfo, config.chainId, config.escrowAddress);
       const priceOutMinor = BigInt(order.price_eur);
 
+      // Bank-bound orders take a different road entirely: no swap, and the
+      // fiat rate is locked by the off-ramp's quote instead of the swap's
+      // stopLimit. Branching here rather than inside `runRelease` keeps the two
+      // state machines apart — this path ends in `payout_pending`, that one in
+      // `released`, and nothing should be able to confuse them.
+      if ((order.payout_to ?? "wallet") === "bank") {
+        await releaseToBank({ order, paymentInfo, hash, priceOutMinor, proof });
+        return;
+      }
+
       const outcome = await runRelease(
         { escrow: deps.escrow, fx: deps.fx, settlementAddress: config.settlementAddress, tokenIn, tokenOut },
         {
@@ -430,7 +860,7 @@ export function createRivoKit(deps: RivoKitDeps) {
         let rebateTxHash: string | undefined;
         if (deps.payRebate && outcome.rebateMinor > 0n) {
           const r = await deps.payRebate({
-            orderId, to: order.payer as Address, amountMinor: outcome.rebateMinor,
+            orderId, to: order.payer as Address, amountMinor: outcome.rebateMinor, token: tokenOut,
           });
           rebateTxHash = r.txHash;
           await deps.store.recordPaymentIdempotent({

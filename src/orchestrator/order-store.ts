@@ -20,7 +20,8 @@ import type { PaymentInfo } from "../escrow/payment-info.ts";
 import {
   fromPayoutWire, toPayoutWire,
   type PayoutInstruction, type PayoutInstructionWire,
-} from "../payout/mock-payout.ts";
+} from "../payout/instruction.ts";
+import type { PayoutTarget } from "../payout/rail.ts";
 import type { CpnPaymentState } from "../ramp/cpn-state.ts";
 import { assertTransition, type OrderState } from "./state-machine.ts";
 import type { TimeoutKind, Wedge } from "./policy.ts";
@@ -41,6 +42,8 @@ export type OrderRecord = {
   fee_receiver: string;
   receiving_chain: string;
   mode: "escrow" | "direct";
+  /** Where the money ends up: the seller's Arc wallet, or their bank. */
+  payout_to: PayoutTarget;
   wedge: Wedge;
   state: OrderState;
   timeout_kind: TimeoutKind;
@@ -59,7 +62,9 @@ export type OrderRecord = {
 
 export type PaymentKind =
   | "funding" | "authorize" | "capture" | "void"
-  | "refund" | "reclaim" | "swap" | "rebate" | "bridge_back";
+  | "refund" | "reclaim" | "swap" | "rebate" | "bridge_back"
+  /** The off-ramp broadcast — source token leaving for a payment network. */
+  | "payout";
 
 export type RecordPaymentParams = {
   orderId: string;
@@ -89,6 +94,8 @@ export type CreateOrderParams = {
   bufferBps: number;
   receivingChain: string;
   mode: "escrow" | "direct";
+  /** Defaults to "wallet" — settle to EURC on Arc and stop, the original behaviour. */
+  payoutTo?: PayoutTarget;
   wedge: Wedge;
   timeoutKind: TimeoutKind;
   timeoutDeadline: number;
@@ -159,6 +166,24 @@ export interface OrderStore {
   recordPayment(params: RecordPaymentParams): Promise<unknown>;
   /** Returns the existing row on a nonce collision instead of throwing. */
   recordPaymentIdempotent(params: RecordPaymentParams): Promise<unknown>;
+  /**
+   * Settle a payment row that was written before its outcome was known.
+   *
+   * Most rows are written once, already confirmed, because the transaction had
+   * landed before the write. An off-ramp broadcast is the exception: it is
+   * recorded at submit time, when it is genuinely `pending` and its on-chain
+   * hash does not exist yet. Without this the row would still say `pending` on
+   * an order that has since been paid out — a ledger disagreeing with the
+   * thing it is a ledger of.
+   *
+   * `txHash` is not optional in practice for a confirmed row: `confirmed_has_tx`
+   * rejects one without it, on the principle that an unverifiable confirmation
+   * is worth less than an honest `pending`.
+   */
+  advancePayment(
+    nonce: string,
+    patch: { status: "confirmed" | "failed"; txHash?: string; errorReason?: string },
+  ): Promise<PaymentRecord | null>;
   recordEvent(params: {
     orderId?: string;
     type: string;
@@ -257,6 +282,7 @@ export function createOrderStore(url: string, serviceKey: string): OrderStore {
       bufferBps: number;
       receivingChain: string;
       mode: "escrow" | "direct";
+      payoutTo?: PayoutTarget;
       wedge: Wedge;
       timeoutKind: TimeoutKind;
       timeoutDeadline: number;
@@ -281,6 +307,7 @@ export function createOrderStore(url: string, serviceKey: string): OrderStore {
           fee_receiver: pi.feeReceiver,
           receiving_chain: params.receivingChain,
           mode: params.mode,
+          payout_to: params.payoutTo ?? "wallet",
           wedge: params.wedge,
           state: "created",
           timeout_kind: params.timeoutKind,
@@ -404,6 +431,39 @@ export function createOrderStore(url: string, serviceKey: string): OrderStore {
         fail("recordPaymentIdempotent", error);
       }
       return normalizeAmount(data);
+    },
+
+    /**
+     * Settle an already-recorded payment row. Keyed by nonce because that is
+     * the column the idempotency guard already makes unique — the same handle
+     * the row was written under.
+     */
+    async advancePayment(
+      nonce: string,
+      patch: { status: "confirmed" | "failed"; txHash?: string; errorReason?: string },
+    ): Promise<PaymentRecord | null> {
+      if (patch.status === "confirmed" && !patch.txHash) {
+        // Caught here rather than left to the constraint: the database would
+        // reject it too, but with a message about `confirmed_has_tx` instead of
+        // about the caller that had no hash to give.
+        throw new Error(
+          `advancePayment(${nonce}): a confirmed payment needs a txHash — ` +
+            "an unverifiable confirmation is worse than an honest pending.",
+        );
+      }
+      const { data, error } = await db
+        .from("payments")
+        .update({
+          status: patch.status,
+          ...(patch.txHash ? { tx_hash: patch.txHash } : {}),
+          ...(patch.errorReason ? { error_reason: patch.errorReason } : {}),
+          confirmed_at: patch.status === "confirmed" ? new Date().toISOString() : null,
+        })
+        .eq("nonce", nonce)
+        .select()
+        .maybeSingle();
+      fail("advancePayment", error);
+      return data ? (normalizeAmount(data) as PaymentRecord) : null;
     },
 
     async recordEvent(params: {
