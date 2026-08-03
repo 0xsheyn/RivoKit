@@ -42,10 +42,10 @@ export default function WalletButton() {
   }
 
   return (
-    // Sized and squared to match a `size="sm"` Button, because that is what sits
-    // either side of it in the header: h-7 and the preset's square corners. The
-    // disconnect button is `size="xs"` (24px), which leaves 2px of inset.
-    <div className="flex h-7 items-center gap-2 rounded-none border bg-card pr-0.5 pl-2.5">
+    // Sized and rounded to match a `size="sm"` Button, because that is what sits
+    // either side of it in the header: h-8 and the preset's pill corners. The
+    // disconnect button is `size="xs"` (24px), which leaves 4px of inset.
+    <div className="flex h-8 items-center gap-2 rounded-4xl border bg-card pr-1 pl-3">
       <span className="flex items-center gap-2 text-xs">
         <span className="size-1.5 rounded-full bg-primary" />
         <span className="font-mono text-foreground">{shortAddr(address!)}</span>

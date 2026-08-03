@@ -59,47 +59,58 @@ export default function Withdraw() {
 
   return (
     <div className="flex flex-col gap-3">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <RiWallet3Line className="size-4 text-muted-foreground" />
-            Seller balances · EURC on Arc
-          </CardTitle>
-          <CardDescription>
-            Proceeds of the floored settlement, and the two exits below: CPN (USDC→local fiat) or Circle Mint (1:1
-            bank redemption).
-          </CardDescription>
-          {sellerWallet && (
-            <CardAction>
-              <Button size="xs" variant="ghost" onClick={() => pick(null)}>Change</Button>
-            </CardAction>
-          )}
-        </CardHeader>
+      {/* Balances and the Mint top-up sit on one row: both are about the EURC
+          the seller already holds, and neither is an exit. No `items-start`
+          here, unlike the exits below — the grid's default `stretch` is what
+          makes the pair one symmetric block, both cards as tall as the taller
+          of the two. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base font-bold">
+              <RiWallet3Line className="size-4 text-muted-foreground" />
+              Seller balances · EURC on Arc
+            </CardTitle>
+            <CardDescription>
+              Proceeds of the floored settlement, and the two exits below: CPN (USDC→local fiat) or Circle Mint (1:1
+              bank redemption).
+            </CardDescription>
+            {sellerWallet && (
+              <CardAction>
+                <Button size="xs" variant="ghost" onClick={() => pick(null)}>Change</Button>
+              </CardAction>
+            )}
+          </CardHeader>
 
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Metric label="EURC · settlement wallet" value={`€${usd(bal?.sellerEurc)}`} />
-          <Metric label="EURC · seller wallet" value={ownEurcValue()} />
-          <Metric label="Seller wallet"
-            value={sellerWallet
-              ? <span className="font-mono text-xs">{shortAddr(sellerWallet)}</span>
-              : <span className="text-xs font-normal text-muted-foreground">none chosen</span>} />
-        </CardContent>
-
-        {!sellerWallet && (
-          <CardContent>
-            <SellerWalletPicker candidates={candidates} onPick={pick} />
+          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Metric label="EURC · settlement wallet" value={`€${usd(bal?.sellerEurc)}`} />
+            <Metric label="EURC · seller wallet" value={ownEurcValue()} />
+            <Metric label="Seller wallet"
+              value={sellerWallet
+                ? <span className="font-mono text-sm">{shortAddr(sellerWallet)}</span>
+                : <span className="text-sm font-normal text-muted-foreground">none chosen</span>} />
           </CardContent>
-        )}
 
-        <CardFooter>
-          <p className="text-xs text-muted-foreground">
-            {sellerWallet
-              ? <>The settlement wallet runs the floored swap and forwards the floor to the seller wallet — so it is
-                a <span className="font-medium text-foreground">hop</span>, not the destination.</>
-              : <>No second wallet chosen, so the settlement wallet keeps the floored EURC itself.</>}
-          </p>
-        </CardFooter>
-      </Card>
+          {!sellerWallet && (
+            <CardContent>
+              <SellerWalletPicker candidates={candidates} onPick={pick} />
+            </CardContent>
+          )}
+
+          <CardFooter>
+            <p className="text-sm text-muted-foreground">
+              {sellerWallet
+                ? <>The settlement wallet runs the floored swap and forwards the floor to the seller wallet — so it is
+                  a <span className="font-medium text-foreground">hop</span>, not the destination.</>
+                : <>No second wallet chosen, so the settlement wallet keeps the floored EURC itself.</>}
+            </p>
+          </CardFooter>
+        </Card>
+
+        {/* EURC on Arc into the Mint EUR balance — the step that has to happen
+            before the redemption panel below has anything to redeem. */}
+        <SendEurcToMint sellerWallet={sellerWallet} balanceMinor={ownEurc} onSent={refreshEurc} />
+      </div>
 
       {eurcError && (
         <Alert variant="destructive">
@@ -119,19 +130,22 @@ export default function Withdraw() {
         </Alert>
       )}
 
-      {/* Each exit keeps its own history directly underneath it. */}
-      <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
-        <div className="flex flex-col gap-3">
-          <SellerCashout />
-          <CpnHistory />
-        </div>
-        <div className="flex flex-col gap-3">
-          {/* Feeding the Mint balance sits directly above redeeming it: EURC on
-              Arc in, EUR to a bank out, in the order they happen. */}
-          <SendEurcToMint sellerWallet={sellerWallet} balanceMinor={ownEurc} onSent={refreshEurc} />
-          <MintRedeem />
-          <MintHistory />
-        </div>
+      {/* Each exit keeps its history directly underneath it — the CPN column's
+          one covers both ways a CPN payment can happen, the manual cash-out
+          above it and the automatic payout at the end of a bank-bound order, so
+          it is titled for all payments rather than for this panel. One flat grid
+          rather than two stacked columns, because only siblings on the same row
+          can be made the same height. The DOM order stays exit-then-its-history
+          so the single-column layout below `lg` still reads in pairs; the
+          explicit row/column placement is what splits it into two rows above
+          it. The exits stretch to match each other, the histories keep their
+          own heights (`self-start`) — they grow with the number of rows, and
+          padding the shorter one out to the taller buys nothing. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <SellerCashout className="lg:col-start-1 lg:row-start-1" />
+        <CpnHistory className="lg:col-start-1 lg:row-start-2 lg:self-start" />
+        <MintRedeem className="lg:col-start-2 lg:row-start-1" />
+        <MintHistory className="lg:col-start-2 lg:row-start-2 lg:self-start" />
       </div>
     </div>
   );

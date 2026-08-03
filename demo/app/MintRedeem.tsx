@@ -32,7 +32,8 @@ const SYMBOL: Record<string, string> = { EUR: "€", USD: "$" };
  * real Circle payout, but it is sandbox money that never touched Arc. This is
  * the exit CPN cannot serve, because CPN only takes USDC as a source currency.
  */
-export default function MintRedeem() {
+/** `className` is how the withdraw page places this panel on its grid. */
+export default function MintRedeem({ className }: { className?: string }) {
   const [balances, setBalances] = useState<MintBalanceView[]>([]);
   const [deposit, setDeposit] = useState<MintDepositView | null>(null);
   const [currency, setCurrency] = useState("EUR");
@@ -67,9 +68,9 @@ export default function MintRedeem() {
     });
 
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm">
+        <CardTitle className="flex items-center gap-2 text-base font-bold">
           <RiBankLine className="size-4 text-muted-foreground" />
           Circle Mint — redeem to a bank
         </CardTitle>
@@ -77,7 +78,7 @@ export default function MintRedeem() {
           The EURC path&apos;s final leg, redeemed 1:1
         </CardDescription>
         <CardAction>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             <b className="tabular-nums text-foreground">{held ? two(held.amount) : "…"}</b> {currency}
           </span>
         </CardAction>
@@ -128,13 +129,13 @@ export default function MintRedeem() {
           </Button>
         </div>
         {amount !== "" && fiat.length > 0 && !enough && (
-          <p className="text-xs text-muted-foreground">More than the {currency} balance.</p>
+          <p className="text-sm text-muted-foreground">More than the {currency} balance.</p>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
       </CardContent>
 
       {payout && (
-        <CardFooter className="gap-2 text-xs">
+        <CardFooter className="gap-2 text-sm">
           <RiCheckboxCircleLine className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate">
             Payout {two(payout.amount)} {payout.currency} → {payout.bankName}

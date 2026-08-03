@@ -55,7 +55,8 @@ const two = (decimal: string | number) => Number(decimal).toFixed(2);
  *     like, because the wallet that HOLDS the USDC is the one authorizing it to
  *     leave. Written and wired; not yet executed on-chain.
  */
-export default function SellerCashout() {
+/** `className` is how the withdraw page places this panel on its grid. */
+export default function SellerCashout({ className }: { className?: string }) {
   const [corridors, setCorridors] = useState<Corridor[]>([]);
   const [corridorKey, setCorridorKey] = useState<string>("");
   const [balMinor, setBalMinor] = useState<string | null>(null);
@@ -202,9 +203,9 @@ export default function SellerCashout() {
     busy === "approve" ? "Approving Permit2…" : busy === "sign" ? "Waiting for signature…" : "Broadcasting…";
 
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm">
+        <CardTitle className="flex items-center gap-2 text-base font-bold">
           <RiCashLine className="size-4 text-muted-foreground" />
           Cash out to fiat · CPN
         </CardTitle>
@@ -212,7 +213,7 @@ export default function SellerCashout() {
           Sales proceeds in USDC → local currency in a bank
         </CardDescription>
         <CardAction>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             <b className="tabular-nums text-foreground">{activeBalMinor ? two(balNum) : "…"}</b> USDC
           </span>
         </CardAction>
@@ -227,7 +228,7 @@ export default function SellerCashout() {
               <RiWallet3Line /> My wallet
             </ToggleGroupItem>
           </ToggleGroup>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {signMode === "wallet"
               ? "the wallet holding the USDC signs — no server key"
               : "a server-held testnet key stands in for the seller"}
@@ -244,7 +245,7 @@ export default function SellerCashout() {
             ))}
           </ToggleGroup>
           {roadmapLabels && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               {roadmapLabels} — implemented, and on the roadmap. This phase cashes out over EUR/SEPA and USD/WIRE.
             </p>
           )}
@@ -259,13 +260,13 @@ export default function SellerCashout() {
           </Button>
         </div>
         {amount !== "" && activeBalMinor != null && !enough && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {amtNum < minUsdc
               ? `Min ${minUsdc} USDC for ${corridor?.currency ?? "this corridor"}.`
               : signMode === "wallet" ? "More than this wallet holds on Arc." : "More than the seller holds."}
           </p>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         {prepared && !broadcast && (
           <>
@@ -275,18 +276,18 @@ export default function SellerCashout() {
               <RiArrowRightLine className="size-3.5 text-muted-foreground" />
               <span>{two(prepared.destination.amount)} {prepared.destination.currency}</span>
             </div>
-            <p className="text-center text-xs text-muted-foreground">
+            <p className="text-center text-sm text-muted-foreground">
               fee {prepared.fee} {prepared.feeCurrency} · margin {prepared.spreadBps} bps · {prepared.status}
             </p>
             {signMode === "wallet" && (
-              <p className="text-center text-xs text-muted-foreground">
+              <p className="text-center text-sm text-muted-foreground">
                 Your wallet will be asked twice: approve Permit2, then sign the payment intent.
               </p>
             )}
             <div className="flex items-start gap-2">
               <Checkbox id="cpn-confirm" checked={confirmed}
                 onCheckedChange={(c) => setConfirmed(c === true)} className="mt-0.5" />
-              <Label htmlFor="cpn-confirm" className="text-xs font-normal text-muted-foreground">
+              <Label htmlFor="cpn-confirm" className="text-sm font-normal text-muted-foreground">
                 <RiErrorWarningLine className="size-3.5" />
                 <span>
                   Broadcast is <strong className="text-foreground">irreversible</strong> — the seller&apos;s USDC
@@ -306,7 +307,7 @@ export default function SellerCashout() {
         {broadcast && (
           <>
             <Separator />
-            <div className="flex items-center gap-1.5 text-xs font-medium">
+            <div className="flex items-center gap-1.5 text-sm font-medium">
               {broadcast.finalStatus === "COMPLETED"
                 ? <RiCheckboxCircleLine className="size-3.5" />
                 : <RiErrorWarningLine className="size-3.5" />}
@@ -315,7 +316,7 @@ export default function SellerCashout() {
                 {statusLabel(broadcast.finalStatus)}
               </ToneBadge>
             </div>
-            <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
               {broadcast.lifecycle.map((s, i) => (
                 <span key={s} className="flex items-center gap-1">
                   {i > 0 && <RiArrowRightLine className="size-3" />}
