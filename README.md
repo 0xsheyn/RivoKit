@@ -4,7 +4,7 @@
 
 ### An embeddable cross-border settlement SDK on Arc — multi-chain USDC in, local-currency out.
 
-![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![contracts](https://img.shields.io/badge/contracts-verified%20on%20Arc-success) ![tests](https://img.shields.io/badge/tests-428%20passing-brightgreen) ![status](https://img.shields.io/badge/status-mvp%20%C2%B7%20testnet-orange) ![license](https://img.shields.io/badge/license-Apache--2.0-green)
+![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![contracts](https://img.shields.io/badge/contracts-verified%20on%20Arc-success) ![tests](https://img.shields.io/badge/tests-428%20passing-brightgreen) ![status](https://img.shields.io/badge/status-mvp%20%C2%B7%20testnet-orange) ![license](https://img.shields.io/badge/license-MIT-green)
 
 **[Getting started](STARTED.md)** · **[Architecture](ARCHITECTURE.md)** · **[Proofs](PROOFS.md)** · **[Limitations](LIMITATIONS.md)**
 
@@ -250,7 +250,7 @@ scope: **[LIMITATIONS.md](LIMITATIONS.md)**.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE). Testnet-stage sample software for
+MIT. See [LICENSE](LICENSE). Testnet-stage sample software for
 demonstration and education — not a licensed financial product, not legal or
 financial advice. The embedding host is fully responsible for the fiat leg,
 KYB/AML and compliance in its jurisdiction.
