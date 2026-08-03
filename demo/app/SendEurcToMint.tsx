@@ -92,7 +92,7 @@ export default function SendEurcToMint({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm">
+        <CardTitle className="flex items-center gap-2 text-base font-bold">
           <RiSendPlaneLine className="size-4 text-muted-foreground" />
           Send EURC → Circle Mint
         </CardTitle>
@@ -100,7 +100,7 @@ export default function SendEurcToMint({
           Arc → the Mint EUR balance, no bridge — then redeem it beside this
         </CardDescription>
         <CardAction>
-          <span className="text-xs text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             <b className="tabular-nums text-foreground">{usd(balanceMinor)}</b> EURC
           </span>
         </CardAction>
@@ -108,13 +108,13 @@ export default function SendEurcToMint({
 
       <CardContent className="space-y-3">
         {target ? (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Deposit address{" "}
             <span className="font-mono text-foreground">{shortAddr(target)}</span> on{" "}
             {deposit?.eurOnArc?.chain}. CPN cannot take EURC at all, so this is the only exit it has.
           </p>
         ) : (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Circle lists no EUR deposit address on Arc for this account — without one there is nothing to send to.
           </p>
         )}
@@ -148,20 +148,20 @@ export default function SendEurcToMint({
           </Button>
         </div>
         {busy && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {busy === "switch" ? "Waiting for the network switch…"
               : busy === "send" ? "Waiting for the signature…"
                 : "Waiting for the transaction to be mined…"}
           </p>
         )}
         {amount !== "" && !enough && balanceMinor != null && (
-          <p className="text-xs text-muted-foreground">More than the seller wallet holds.</p>
+          <p className="text-sm text-muted-foreground">More than the seller wallet holds.</p>
         )}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
       </CardContent>
 
       {txHash && (
-        <CardFooter className="gap-2 text-xs">
+        <CardFooter className="gap-2 text-sm">
           <span className="truncate">Sent — Circle credits the EUR balance asynchronously.</span>
           <a href={`${ARC_TESTNET_EXPLORER_URL}/tx/${txHash}`} target="_blank" rel="noopener noreferrer"
             className="ml-auto inline-flex shrink-0 items-center gap-0.5 font-mono text-primary underline-offset-4 hover:underline">

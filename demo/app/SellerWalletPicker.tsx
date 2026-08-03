@@ -67,7 +67,7 @@ export default function SellerWalletPicker({
 
       <div className="flex items-center gap-2">
         <Input value={manual} onChange={(e) => setManual(e.target.value)} spellCheck={false}
-          className="flex-1 font-mono text-xs" placeholder="0x… paste any address"
+          className="flex-1 font-mono text-sm" placeholder="0x… paste any address"
           aria-label="Seller wallet address" />
         <Button size="sm" disabled={!valid || isSelf} onClick={() => { onPick(trimmed); setManual(""); }}>
           Use
@@ -80,7 +80,7 @@ export default function SellerWalletPicker({
         </Button>
       )}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         {trimmed !== "" && !valid
           ? "Not a valid address."
           : isSelf
