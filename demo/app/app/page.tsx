@@ -7,13 +7,15 @@ export const metadata = {
 };
 
 /**
- * Single-screen board: the storefront over a grid of role columns — Buyer,
- * Seller, Host. Nothing below the fold; each column scrolls on its own. The
+ * The board: the storefront over a grid of role columns — Buyer, Host, Seller.
+ * Each column is capped at seven order rows and scrolls on its own past that,
+ * so the three end level whatever they hold. No scrollport here: the columns
+ * declare their own height, and the document takes whatever is left over. The
  * fiat exits live on /app/withdraw.
  */
 export default function Page() {
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto p-3 xl:overflow-hidden">
+    <main className="min-h-0 flex-1 p-3">
       <Marketplace />
     </main>
   );
