@@ -23,11 +23,17 @@ export const shortHash = (h: string) => `${h.slice(0, 8)}…${h.slice(-6)}`;
 /* ── panel shell ─────────────────────────────────────────────────────────── */
 
 /**
- * One quadrant of the 2×2 board: fixed header, independently scrolling body.
+ * One column of the board: fixed header, independently scrolling body.
  * Card, CardHeader and CardContent keep their stock shadcn styling — only the
  * layout classes needed to cap the height are added. `min-h-0` on both the card
- * and the body is what lets the grid row cap the height instead of the content
- * stretching the page.
+ * and the body is what lets the body scroll instead of the content stretching
+ * the page.
+ *
+ * The cap itself arrives as a pixel value rather than a class: the board sizes
+ * its columns to a whole number of order rows, and only the DOM knows how tall
+ * an order row is. `bodyRef` is what the measuring side reads. With no cap
+ * passed the panel is content-sized, which is what every panel wants before
+ * there are enough orders to need one.
  */
 export function Panel({
   title,
@@ -35,6 +41,8 @@ export function Panel({
   icon,
   action,
   className,
+  bodyRef,
+  bodyMaxHeight,
   children,
 }: {
   title: string;
@@ -42,19 +50,16 @@ export function Panel({
   icon: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
+  bodyRef?: React.Ref<HTMLDivElement>;
+  bodyMaxHeight?: number | null;
   children: React.ReactNode;
 }) {
   return (
-    <Card
-      className={cn(
-        "min-h-0 overflow-hidden",
-        // Below the 4-column breakpoint the page scrolls; cap each panel so all four stay reachable.
-        "max-h-[80vh] xl:max-h-none",
-        className,
-      )}
-    >
+    <Card className={cn("min-h-0 overflow-hidden", className)}>
       <CardHeader className="shrink-0">
-        <CardTitle className="flex items-center gap-2">
+        {/* Every panel heading across the demo is 16px bold — one step above the
+            cards nested inside it, which stay at 14px. */}
+        <CardTitle className="flex items-center gap-2 text-base font-bold">
           <span className="text-muted-foreground">{icon}</span>
           <span className="truncate">{title}</span>
         </CardTitle>
@@ -65,7 +70,13 @@ export function Panel({
           `ring-1`, which the scroll container clips flush against its own top
           and bottom — the first card's upper edge came out shaved off. One
           pixel of room inside the scrollport is enough to let the ring land. */}
-      <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto py-px">{children}</CardContent>
+      <CardContent
+        ref={bodyRef}
+        style={bodyMaxHeight != null ? { maxHeight: bodyMaxHeight } : undefined}
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto py-px"
+      >
+        {children}
+      </CardContent>
     </Card>
   );
 }
@@ -85,9 +96,12 @@ export function SectionLabel({ children, count }: { children: React.ReactNode; c
   );
 }
 
-export function Empty({ children }: { children: React.ReactNode }) {
+/** `className` exists for the history panels, which keep the smaller 12px body. */
+export function Empty({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <p className="border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">{children}</p>
+    <p className={cn("rounded-2xl border border-dashed px-3 py-6 text-center text-sm text-muted-foreground", className)}>
+      {children}
+    </p>
   );
 }
 
@@ -103,7 +117,7 @@ export function Metric({
 }) {
   return (
     <div className={cn("min-w-0", className)}>
-      <div className="truncate text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</div>
+      <div className="truncate text-sm font-medium tracking-wide text-muted-foreground uppercase">{label}</div>
       <div className="mt-0.5 truncate text-sm font-semibold tabular-nums">{value}</div>
     </div>
   );

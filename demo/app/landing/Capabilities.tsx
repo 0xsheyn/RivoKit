@@ -1,5 +1,5 @@
 import SectionHeader from "./SectionHeader";
-import Rail from "./Rail";
+import Integration from "./Integration";
 
 // Verbatim from README > API (src/index.ts is the source of truth) — RIVO_LP.md
 // §6.3 forbids inventing snippets, on purpose: a landing page's code is the
@@ -7,7 +7,7 @@ import Rail from "./Rail";
 const CELLS = [
   {
     title: "Any chain in",
-    snippet: "createOrder({ payer, receiver, priceEURMinor, receivingChain, wedge })",
+    snippet: "createOrder({ payer, receiver, priceEURMinor, receivingChain, wedge, payoutTo })",
     body: "Payer funds from a USDC balance on any chain; unified balance / CCTP routes it to Arc.",
   },
   {
@@ -17,8 +17,15 @@ const CELLS = [
   },
   {
     title: "A floor, enforced on-chain",
-    snippet: "release(orderId, proof) → capture → swap, stopLimit = €P",
+    snippet: 'payoutTo: "wallet" → capture → swap, stopLimit = €P',
     body: "The recipient gets ≥ €P or the swap reverts with funds safe. The chain enforces it, not the code.",
+  },
+  // The bank ending skips the swap entirely — CPN sources only USDC — and a
+  // page that showed release() as "capture → swap" was describing half the SDK.
+  {
+    title: "…or a bank account",
+    snippet: 'payoutTo: "bank" → capture → CPN quote pinned to €P → broadcast',
+    body: "No swap: CPN sources only USDC, and its own quote locks the euro. One call, escrow to bank.",
   },
   {
     title: "The surplus goes back",
@@ -32,29 +39,30 @@ const CELLS = [
   },
   {
     title: "Events, not polling",
-    snippet: "on(\"released\", handler)",
-    body: "funding_pending · funded · released · refund_pending · refunded. Wire it to your ledger.",
+    snippet: "on(\"paid_out\", handler)",
+    body: "funding_pending · funded · released · payout_pending · paid_out · refund_pending · refunded.",
   },
 ];
 
 export default function Capabilities() {
   return (
-    <section className="mx-auto w-full max-w-[1440px] px-5 py-16 md:px-16">
-      <SectionHeader number="02" title="WHAT RIVOKIT ACTUALLY DOES" />
+    <section className="mx-auto w-full max-w-[1440px] px-5 py-8 md:px-16">
+      <SectionHeader number="03" title="WHAT RIVOKIT ACTUALLY DOES" />
       <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-12">
         <h2 className="f-display text-[34px] leading-[0.95] text-[var(--bone)] md:col-span-6 md:text-[44px]">
-          Six calls, one integration.
+          A handful of calls, one integration.
         </h2>
         <p className="text-[15px] leading-relaxed text-[var(--bone)]/80 md:col-span-6 md:col-start-8">
-          The platform calls a handful of functions instead of becoming a payment company. Every snippet below is the
-          real API surface — <span className="f-mono text-[var(--sodium)]">createRivoKit</span> and{" "}
+          The platform calls a few functions instead of becoming a payment company. Every snippet below is the real API
+          surface — <span className="f-mono text-[var(--sodium)]">createRivoKit</span>,{" "}
+          <span className="f-mono text-[var(--sodium)]">createCpnPayoutRail</span> and{" "}
           <span className="f-mono text-[var(--sodium)]">createCpnRamp</span>, nothing invented.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-px overflow-hidden rounded-sm bg-[color:var(--ash)]/15 sm:grid-cols-2 md:grid-cols-3">
         {CELLS.map((c) => (
-          <div key={c.title} className="hover-step bg-[var(--ink-raised)] p-5">
+          <div key={c.title} className="hover-step hover-accent bg-[var(--ink-raised)] p-5">
             <p className="f-display text-[19px] text-[var(--bone)]">{c.title}</p>
             <pre className="f-mono mt-3 overflow-x-auto whitespace-pre-wrap break-all text-[12.5px] leading-relaxed text-[var(--sodium)]">
               {c.snippet}
@@ -64,9 +72,7 @@ export default function Capabilities() {
         ))}
       </div>
 
-      <div className="mt-12">
-        <Rail />
-      </div>
+      <Integration />
     </section>
   );
 }

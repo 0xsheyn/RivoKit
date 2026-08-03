@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAccount, useSignTypedData, useSwitchChain } from "wagmi";
 import { ARC_TESTNET_CHAIN_ID } from "../../src/constants/arc";
 import { fundsMayBeInFlight, walletErrorMessage } from "./wallet-errors";
 import {
-  RiBankLine, RiCheckboxCircleLine, RiCloseLine, RiEditLine, RiErrorWarningLine,
+  RiArrowDownSLine, RiBankLine, RiCheckboxCircleLine, RiCloseLine, RiEditLine, RiErrorWarningLine,
   RiExternalLinkLine, RiShoppingCartLine, RiStore2Line, RiTruckLine,
 } from "@remixicon/react";
 import { CATALOG, canPayoutToBank, fmtEUR } from "../lib/catalog";
@@ -32,12 +32,12 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 // so the rails module is pulled in on demand rather than at first paint.
 import type { Eip1193 } from "./wallet-rails";
 const rails = () => import("./wallet-rails");
-import { Empty, Metric, Panel, SectionLabel, StatusBadge, ToneBadge, num, shortAddr, shortHash, usd } from "./_ui";
+import { Empty, Panel, SectionLabel, StatusBadge, ToneBadge, num, shortAddr, shortHash, usd } from "./_ui";
 import { useSellerWallet } from "./seller-wallet";
 import { withActionToast, withToast } from "./toast";
 import SellerWalletPicker from "./SellerWalletPicker";
 import {
-  DEFAULT_SOURCE_CHAIN_ID, ENABLED_SOURCE_CHAINS, SOURCE_CHAINS, sourceChain, sourceChainByName, type SourceChainId,
+  DEFAULT_SOURCE_CHAIN_ID, SOURCE_CHAINS, sourceChain, sourceChainByName, type SourceChainId,
 } from "@/lib/source-chain";
 
 // Anything recorded against a source chain links to that chain's explorer;
@@ -75,6 +75,28 @@ const mmss = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
+/**
+ * The primary action, pinned to the bottom of the panel it lives in.
+ *
+ * Each role panel is its own scrollport (`Panel` in `_ui.tsx`), and the payment
+ * options stack tall enough that the button which actually moves money fell
+ * below the fold on a laptop — the buyer had to scroll to reach the one control
+ * the screen exists for. Pinning the footer keeps the options scrollable and the
+ * button where the hand already is.
+ *
+ * The cards between here and that scrollport must NOT clip: the preset's Card
+ * carries `overflow-hidden`, and a clipped ancestor becomes the scroll container
+ * sticky measures itself against — the footer would sit in flow and never move.
+ * Hence `overflow-visible` on the order card and on each pay card.
+ *
+ * `rounded-none` overrides the footer's stock bottom radius. Pinned mid-card,
+ * rounded corners would let two arcs of the content scrolling underneath show
+ * through; at rest the footer's box stops inside the card's own bottom padding,
+ * so square corners over the same `bg-card` are invisible either way.
+ */
+const STICKY_ACTION =
+  "sticky bottom-0 z-10 flex-col items-stretch gap-2 rounded-none bg-card/95 pt-3 shadow-[0_-1px_0_0_var(--border)] backdrop-blur";
+
 const STAGES = ["Paid", "Shipped", "Received", "Done"];
 const STAGE_OF: Record<string, number> = {
   waiting_payment: -1, processing_payment: -1,
@@ -100,6 +122,95 @@ const railsFor = (from: SourceChainId): Array<{
   ];
 };
 
+/* ── panel height ─────────────────────────────────────────────────────────── */
+
+/** How many order rows a role column shows before its body starts scrolling. */
+const PANEL_ROWS = 7;
+
+/** What `useRowCappedPanels` hands one column; spread straight onto its `Panel`. */
+type PanelCap = { bodyRef: React.Ref<HTMLDivElement>; bodyMaxHeight: number | null };
+
+/**
+ * One height for all three role columns: as tall as `PANEL_ROWS` order rows,
+ * and not a pixel taller.
+ *
+ * Measured off the DOM rather than declared, because an order row has no fixed
+ * height — a card carries a status badge and, while it is open, a tracker, a
+ * rail chooser or an alert, and the host's history rows are a different shape
+ * again. The distance from the top of a column's body to the top of its
+ * (PANEL_ROWS + 1)-th row IS the height that shows exactly seven and hides the
+ * eighth. The tallest of the three wins, so no column shows FEWER than seven;
+ * the one whose rows are shortest simply fits more before it scrolls.
+ *
+ * A column with seven rows or fewer contributes nothing: this is a ceiling, not
+ * a floor, and a demo with two orders should not open on two screens of blank
+ * card.
+ *
+ * The measurement adds `scrollTop`, which is what makes it survive its own cap:
+ * without it the first applied cap would move the rows it was measured from and
+ * the next pass would read a different number.
+ */
+function useRowCappedPanels(): [PanelCap, PanelCap, PanelCap] {
+  const bodies = useRef<Array<HTMLDivElement | null>>([]);
+  const [bodyMaxHeight, setBodyMaxHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    let frame: number | null = null;
+
+    const measure = () => {
+      frame = null;
+      let next: number | null = null;
+      for (const el of bodies.current) {
+        if (!el) continue;
+        // The first row that must NOT be visible. Absent, the column fits and
+        // has no opinion about the height.
+        const overflowing = el.querySelectorAll<HTMLElement>("[data-order-row]")[PANEL_ROWS];
+        if (!overflowing) continue;
+        const h =
+          overflowing.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+        next = Math.max(next ?? 0, Math.round(h));
+      }
+      // Sub-pixel churn would re-render all three columns on every poll.
+      setBodyMaxHeight((prev) => (prev != null && next != null && Math.abs(prev - next) < 1 ? prev : next));
+    };
+    const schedule = () => { if (frame == null) frame = requestAnimationFrame(measure); };
+
+    // Rows change size (a card opens, a label wraps) and rows come and go, so
+    // both are watched. The resize observer is re-pointed only from a DOM
+    // mutation, never from its own callback: re-observing always re-fires the
+    // initial size, and a callback that re-observes is a loop.
+    const ro = new ResizeObserver(schedule);
+    const attach = () => {
+      ro.disconnect();
+      for (const el of bodies.current) {
+        if (!el) continue;
+        ro.observe(el);
+        el.querySelectorAll<HTMLElement>("[data-order-row]").forEach((row) => ro.observe(row));
+      }
+    };
+    const mo = new MutationObserver(() => { attach(); schedule(); });
+    for (const el of bodies.current) if (el) mo.observe(el, { childList: true, subtree: true });
+
+    attach();
+    measure();
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      if (frame != null) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  // Memoised so the bodies are not detached and re-attached on every poll: the
+  // caps only change identity when the measured height itself moves.
+  return useMemo(() => {
+    const column = (i: number): PanelCap => ({
+      bodyRef: (el: HTMLDivElement | null) => { bodies.current[i] = el; },
+      bodyMaxHeight,
+    });
+    return [column(0), column(1), column(2)];
+  }, [bodyMaxHeight]);
+}
+
 /* ── order primitives ─────────────────────────────────────────────────────── */
 
 function Tracker({ status }: { status: string }) {
@@ -110,7 +221,7 @@ function Tracker({ status }: { status: string }) {
       {STAGES.map((s, i) => (
         <div key={s} className="flex min-w-0 flex-1 flex-col gap-1">
           <span className={cn("h-1 rounded-full", i <= cur ? "bg-primary" : "bg-border")} />
-          <span className={cn("truncate text-xs", i <= cur ? "text-foreground" : "text-muted-foreground")}>{s}</span>
+          <span className={cn("truncate text-sm", i <= cur ? "text-foreground" : "text-muted-foreground")}>{s}</span>
         </div>
       ))}
       {branched && <ToneBadge tone="danger" className="ml-1">disputed</ToneBadge>}
@@ -123,6 +234,8 @@ function TxList({ view }: { view: OrderView }) {
   return (
     <>
       <Separator />
+      {/* The only 12px left inside the order cards: a hash is a reference to
+          copy or click, not something anyone reads. */}
       <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
         {view.payments.map((p, i) => (
           <li key={i} className="flex items-baseline gap-1.5">
@@ -143,23 +256,102 @@ function TxList({ view }: { view: OrderView }) {
   );
 }
 
-/** Card wrapper shared by every order row across the panels. */
-function OrderCard({ v, busy, sub, children }: {
-  v: OrderView; busy: boolean; sub?: React.ReactNode; children?: React.ReactNode;
+/**
+ * Balances as one wrapping row of chips rather than a grid of `Metric` tiles.
+ *
+ * Five figures in a three-wide grid cost two rows plus a card header — well over
+ * a hundred pixels of the Buyer panel spent on numbers that are reference, not
+ * action, and spent directly above the pay button. The chips carry the same
+ * five figures in a single row.
+ */
+function BalanceStrip({ title, sub, muted, items }: {
+  title: string;
+  sub?: React.ReactNode;
+  muted?: boolean;
+  items: Array<{ label: string; value: string }>;
 }) {
   return (
-    <Card>
+    <div className={cn("space-y-1.5", muted && "opacity-70")}>
+      <div className="flex min-w-0 items-baseline gap-2">
+        <span className="shrink-0 text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</span>
+        {sub && <span className="truncate text-xs text-muted-foreground">{sub}</span>}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((i) => (
+          <span key={i.label} className="inline-flex items-baseline gap-1.5 rounded-full border px-2.5 py-1 text-xs">
+            <span className="text-muted-foreground">{i.label}</span>
+            <span className="font-semibold tabular-nums">{i.value}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * States in which an order is pure history: nothing left to do, nothing left to
+ * watch. These are the ones that open collapsed, so a panel with a dozen settled
+ * orders behind it still opens on the one order that needs something.
+ *
+ * `expired` is NOT here even though it is terminal — it still carries a "Close
+ * order" button, and a control nobody can see is a control nobody presses.
+ */
+const AT_REST = new Set(["completed", "refunded", "failed"]);
+
+/**
+ * Card wrapper shared by every order row across the panels, foldable per order.
+ *
+ * Collapsed it is a single line — emoji, name, amount, status — the same shape
+ * the host panel's "All orders" list has always had; expanded it shows the
+ * tracker, the controls and the full transaction list. The fold is per order
+ * rather than per panel because the panels mix two kinds of row: one order
+ * waiting on the user, and every order that already finished. A whole-list fold
+ * makes those share a fate, which is the wrong unit.
+ *
+ * `defaultOpen` is read once, at mount. That is deliberate: an order the user
+ * watches through checkout stays open as its status advances into `completed`,
+ * while the settled orders already on screen at first paint start folded.
+ */
+function OrderCard({ v, busy, sub, defaultOpen, children }: {
+  v: OrderView; busy: boolean; sub?: React.ReactNode; defaultOpen?: boolean; children?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen ?? !AT_REST.has(v.status));
+  const foldable = children != null;
+  return (
+    // `overflow-visible` is load-bearing, not cosmetic — see STICKY_ACTION.
+    // `data-order-row` is what useRowCappedPanels counts; every per-order row in
+    // a column carries it, cards and the host's compact history lines alike.
+    <Card className="overflow-visible" data-order-row>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <span className="text-lg leading-none">{v.product?.emoji ?? "📦"}</span>
-          <span className="truncate">{v.product?.name ?? "Order"}</span>
+        {/* A card inside a panel, so it sits a step below the panel heading. */}
+        <CardTitle className="flex items-center gap-2 text-sm">
+          {foldable ? (
+            <button
+              type="button"
+              onClick={() => setOpen((s) => !s)}
+              aria-expanded={open}
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+            >
+              <RiArrowDownSLine
+                className={cn("size-4 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")}
+              />
+              <span className="text-lg leading-none">{v.product?.emoji ?? "📦"}</span>
+              <span className="truncate">{v.product?.name ?? "Order"}</span>
+            </button>
+          ) : (
+            <>
+              <span className="text-lg leading-none">{v.product?.emoji ?? "📦"}</span>
+              <span className="truncate">{v.product?.name ?? "Order"}</span>
+            </>
+          )}
         </CardTitle>
-        <CardDescription className="truncate">{sub}</CardDescription>
+        {/* Indented to clear the chevron, so the two lines read as one block. */}
+        <CardDescription className={cn("truncate", foldable && "pl-6")}>{sub}</CardDescription>
         <CardAction>
           <StatusBadge status={v.status} label={v.statusLabel} busy={busy} />
         </CardAction>
       </CardHeader>
-      {children && <CardContent className="space-y-3">{children}</CardContent>}
+      {foldable && open && <CardContent className="space-y-3">{children}</CardContent>}
     </Card>
   );
 }
@@ -167,6 +359,10 @@ function OrderCard({ v, busy, sub, children }: {
 /**
  * The rail chooser, as a stock RadioGroup. Availability rides along as the
  * label's secondary line rather than as a colour.
+ *
+ * The `note` shows for the SELECTED rail only. Three rails each explaining
+ * themselves is three lines of prose about two rails the buyer is not taking,
+ * and it pushed the pay button down by roughly its own height.
  */
 function RailChooser({ name, rails, value, onChange, disabled, need }: {
   name: string;
@@ -177,7 +373,7 @@ function RailChooser({ name, rails, value, onChange, disabled, need }: {
   need: number;
 }) {
   return (
-    <RadioGroup value={value} onValueChange={(v) => onChange(v as PaySource)} disabled={disabled}>
+    <RadioGroup className="gap-2.5" value={value} onValueChange={(v) => onChange(v as PaySource)} disabled={disabled}>
       {rails.map((r) => {
         const enough = r.avail >= need + (r.fee ?? 0);
         const id = `${name}-${r.id}`;
@@ -187,7 +383,9 @@ function RailChooser({ name, rails, value, onChange, disabled, need }: {
             <Label htmlFor={id} className="flex min-w-0 flex-1 items-start gap-2 font-normal">
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{r.label}</span>
-                <span className="block truncate text-xs text-muted-foreground">{r.note}</span>
+                {value === r.id && (
+                  <span className="block truncate text-xs text-muted-foreground">{r.note}</span>
+                )}
               </span>
               <span className={cn("shrink-0 tabular-nums", enough ? "text-foreground" : "text-destructive")}>
                 {r.avail.toFixed(2)}
@@ -214,6 +412,9 @@ function SourceChainPicker({ value, onChange, usdcByChain, disabled }: {
   usdcByChain: Partial<Record<SourceChainId, string>> | null;
   disabled?: boolean;
 }) {
+  // One line rather than one paragraph per unavailable chain: the toggle already
+  // shows which chains are out by refusing to be picked, and this says why.
+  const unavailable = SOURCE_CHAINS.filter((c) => c.disabledReason);
   return (
     <div className="space-y-1.5">
       <span className="block text-xs font-medium tracking-wide text-muted-foreground uppercase">from chain</span>
@@ -231,12 +432,8 @@ function SourceChainPicker({ value, onChange, usdcByChain, disabled }: {
       </ToggleGroup>
       <p className="text-xs text-muted-foreground">
         {sourceChain(value).finality} · gas paid in {sourceChain(value).nativeCurrency.symbol}
+        {unavailable.map((c) => ` · ${c.label} unavailable (${c.disabledReason})`).join("")}
       </p>
-      {SOURCE_CHAINS.filter((c) => c.disabledReason).map((c) => (
-        <p key={c.key} className="text-xs text-muted-foreground">
-          {c.label} unavailable — {c.disabledReason}
-        </p>
-      ))}
     </div>
   );
 }
@@ -307,9 +504,13 @@ export default function Marketplace() {
     });
   const busy = (id: string) => pending && busyId === id;
 
+  // One cap for all three role columns, read off whichever of them has the
+  // tallest first PANEL_ROWS rows.
+  const caps = useRowCappedPanels();
+
   return (
     <>
-      <div className="flex min-h-0 flex-col gap-3 xl:h-full">
+      <div className="flex min-h-0 flex-col gap-3">
         <Storefront pending={pending} payer={isConnected ? address ?? null : null}
           onBuy={(id, payoutTo) =>
             run(
@@ -318,16 +519,20 @@ export default function Marketplace() {
               payoutTo === "bank" ? "Creating bank-bound order (screening + rail quote)" : "Creating order (screening + FX quote)",
             )} />
 
-        {/* Three roles only — the seller's fiat exits live on /app/withdraw. */}
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {/* Three roles only — the seller's fiat exits live on /app/withdraw.
+            The grid stretches its items by default, so pinning every body to
+            the same measured height is all it takes for the columns to end
+            level — no equal-height JS beyond the cap itself. */}
+        <div className="grid min-h-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           <BuyerPanel views={views} bal={bal} pending={pending} busy={busy} run={run}
             connectedAddress={isConnected ? address ?? null : null} walletUsdc={walletUsdc}
-            demoBuyer={demoBuyer} />
+            demoBuyer={demoBuyer} cap={caps[0]} />
           {/* Buyer → Host → Seller: the host sits between the two parties it
               arbitrates, and the money moves left to right. */}
-          <HostPanel views={views} busy={busy} run={run} />
+          <HostPanel views={views} busy={busy} run={run} cap={caps[1]} />
           <SellerPanel views={views} busy={busy} run={run}
-            sellerWallet={sellerWallet} candidates={sellerCandidates} onPick={pickSeller} />
+            sellerWallet={sellerWallet} candidates={sellerCandidates} onPick={pickSeller}
+            cap={caps[2]} />
         </div>
       </div>
 
@@ -376,7 +581,7 @@ function Storefront({ pending, payer, onBuy }: {
   return (
     <Card className="shrink-0">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle className="flex items-center gap-2 text-base font-bold">
           <RiShoppingCartLine className="size-4 text-muted-foreground" />
           Storefront
         </CardTitle>
@@ -404,7 +609,7 @@ function Storefront({ pending, payer, onBuy }: {
                     <span className="text-base leading-none">{p.emoji}</span>
                     <span className="truncate">{p.name}</span>
                   </CardTitle>
-                  <CardDescription className="truncate text-xs">{p.seller}</CardDescription>
+                  <CardDescription className="truncate text-sm">{p.seller}</CardDescription>
                   <CardAction>
                     <Badge variant="secondary" className="tabular-nums">{fmtEUR(p.priceEURMinor)}</Badge>
                   </CardAction>
@@ -413,7 +618,7 @@ function Storefront({ pending, payer, onBuy }: {
                   {/* The euro figure is the GUARANTEE; the USDC one is what the
                       buyer pays and is only ever approximate here — the binding
                       number is quoted at checkout, and it differs by destination. */}
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     Seller is guaranteed <span className="font-medium text-foreground">{fmtEUR(p.priceEURMinor)}</span>
                     {(toBank ? hint?.bankUsdc : hint?.walletUsdc) && (
                       <> · you pay ≈ {usd(toBank ? hint!.bankUsdc : hint!.walletUsdc)} USDC</>
@@ -426,7 +631,7 @@ function Storefront({ pending, payer, onBuy }: {
                       why the same wording settled two different ways. */}
                   <Button size="sm" variant={toBank ? "default" : "outline"} disabled={pending}
                     onClick={() => onBuy(p.id, toBank ? "bank" : "wallet")}>
-                    {toBank ? <><RiBankLine /> Buy → seller&apos;s bank</> : <>Buy → seller keeps EURC</>}
+                    {toBank ? <><RiBankLine /> BUY → EURO FIAT</> : <>BUY → EURC</>}
                   </Button>
                 </CardFooter>
               </Card>
@@ -440,9 +645,9 @@ function Storefront({ pending, payer, onBuy }: {
 
 /* ── 1. Buyer — storefront + own orders ───────────────────────────────────── */
 
-function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUsdc, demoBuyer }: {
+function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUsdc, demoBuyer, cap }: {
   views: OrderView[]; bal: Balances | null; pending: boolean; busy: (id: string) => boolean; run: RunFn;
-  connectedAddress: string | null; walletUsdc: string | null; demoBuyer: string | null;
+  connectedAddress: string | null; walletUsdc: string | null; demoBuyer: string | null; cap: PanelCap;
 }) {
   const [rail, setRail] = useState<Record<string, PaySource>>({});
   // Per order, because two orders can sensibly be funded from two chains — the
@@ -632,56 +837,47 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
   };
 
   return (
-    <Panel title="Buyer" hint="Shop and pay in USDC from any chain" icon={<RiShoppingCartLine className="size-4" />}>
+    <Panel title="Buyer" hint="Shop and pay in USDC from any chain" icon={<RiShoppingCartLine className="size-4" />}
+      {...cap}>
       {/* Two distinct accounts, deliberately: the connected browser wallet pays for
           its own orders, the server-signed demo buyer pays for the rest. */}
       {connectedAddress && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">My wallet · USDC</CardTitle>
-            <CardDescription className="truncate font-mono">{shortAddr(connectedAddress)}</CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-3 gap-2">
-            <Metric label="Arc" value={usd(walletUsdc)} />
-            <Metric label="Gateway" value={usd(gwUsdc)} />
-            {SOURCE_CHAINS.map((c) => (
-              <Metric key={c.key} label={c.label} value={usd(srcUsdc?.[c.key] ?? null)} />
-            ))}
-          </CardContent>
-        </Card>
+        <BalanceStrip
+          title="My wallet · USDC"
+          sub={<span className="font-mono">{shortAddr(connectedAddress)}</span>}
+          items={[
+            { label: "Arc", value: usd(walletUsdc) },
+            { label: "Gateway", value: usd(gwUsdc) },
+            ...SOURCE_CHAINS.map((c) => ({ label: c.label, value: usd(srcUsdc?.[c.key] ?? null) })),
+          ]}
+        />
       )}
       {(!connectedAddress || showDemo) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Demo buyer · server-signed (USDC)</CardTitle>
-            {connectedAddress && (
-              <CardDescription>
-                Disabled while your wallet is connected — balances shown for reference only.
-              </CardDescription>
-            )}
-          </CardHeader>
-          <CardContent className="grid grid-cols-3 gap-2">
-            <Metric label="Arc" value={usd(bal?.buyerArcUsdc)} />
-            <Metric label="Gateway" value={usd(bal?.buyerGatewayUsdc)} />
-            {SOURCE_CHAINS.map((c) => (
-              <Metric key={c.key} label={c.label} value={usd(bal?.buyerSrcUsdc?.[c.key] ?? null)} />
-            ))}
-          </CardContent>
-        </Card>
+        <BalanceStrip
+          title="Demo buyer · server-signed"
+          muted={Boolean(connectedAddress)}
+          sub={connectedAddress ? "disabled while your wallet is connected — reference only" : undefined}
+          items={[
+            { label: "Arc", value: usd(bal?.buyerArcUsdc) },
+            { label: "Gateway", value: usd(bal?.buyerGatewayUsdc) },
+            ...SOURCE_CHAINS.map((c) => ({ label: c.label, value: usd(bal?.buyerSrcUsdc?.[c.key] ?? null) })),
+          ]}
+        />
       )}
 
+      {/* One line, not an Alert: this is orientation the buyer reads once, and
+          it was costing four times its own weight directly above the button. The
+          rails it used to enumerate are listed by the rail chooser itself. */}
       {connectedAddress && (
-        <Alert>
-          <AlertTitle>You are the payer</AlertTitle>
-          <AlertDescription>
-            New orders use your address, and every rail (Arc · Gateway · a CCTP bridge from{" "}
-            {ENABLED_SOURCE_CHAINS.map((c) => c.label).join(", ")}) runs from your own wallet. The escrow authorization stays
-            gasless — the operator pays that gas.
-          </AlertDescription>
-        </Alert>
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">You are the payer</span> — new orders use your address and
+          every rail runs from your own wallet. The escrow authorization stays gasless; the operator pays that gas.
+        </p>
       )}
 
       <div className="flex items-center gap-2 pt-1">
+        {/* Hand-rolled rather than `SectionLabel` because of the toggle on the
+            right, but it has to read as the same divider — keep them in step. */}
         <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">My orders</span>
         {shown.length > 0 && <Badge variant="secondary" className="tabular-nums">{shown.length}</Badge>}
         <Separator className="flex-1" />
@@ -783,7 +979,7 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
             )}
 
             {payable && mine && (
-              <Card>
+              <Card size="sm" className="overflow-visible">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-1.5 text-sm">
                     <RiEditLine className="size-3.5" />{stalled ? "Retry payment" : "Pay from my wallet"}
@@ -797,8 +993,18 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
                     <SourceChainPicker value={from} usdcByChain={srcUsdc} disabled={pending}
                       onChange={(id) => setSrcChain((s) => ({ ...s, [v.id]: id }))} />
                   )}
+                  {/* What the chosen rail will actually do. It sits ABOVE the
+                      footer on purpose: the footer is pinned, and prose pinned
+                      to the screen edge is prose in the way. */}
+                  <p className="text-xs text-muted-foreground">
+                    {sel === "arc"
+                      ? "One ERC-3009 signature — no gas."
+                      : sel === "unified"
+                        ? `Gateway spend → Arc (sub-second) drawn from ${sourceChain(from).label}, then one ERC-3009 signature.`
+                        : `CCTP from ${sourceChain(from).label} — approve + burn (needs ${sourceChain(from).nativeCurrency.symbol} for gas), ${sourceChain(from).finality}, mint on Arc, then one ERC-3009 signature.`}
+                  </p>
                 </CardContent>
-                <CardFooter className="flex-col items-stretch gap-2">
+                <CardFooter className={STICKY_ACTION}>
                   {/*
                    * Only when the unified rail is the one selected AND short:
                    * offering a Gateway top-up next to "Pay via USDC on Arc"
@@ -825,13 +1031,6 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
                       ? `Pay via ${myRails.find((r) => r.id === sel)?.label}`
                       : `Not enough ${myRails.find((r) => r.id === sel)?.label}`}
                   </Button>
-                  <p className="text-xs text-muted-foreground">
-                    {sel === "arc"
-                      ? "One ERC-3009 signature — no gas."
-                      : sel === "unified"
-                        ? `Gateway spend to Arc (sub-second), drawn from ${sourceChain(from).label}, then the ERC-3009 signature.`
-                        : `CCTP bridge: approve + burn on ${sourceChain(from).label} (needs ${sourceChain(from).nativeCurrency.symbol} for gas), ${sourceChain(from).finality}, mint on Arc, then the ERC-3009 signature.`}
-                  </p>
                 </CardFooter>
               </Card>
             )}
@@ -849,7 +1048,7 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
             )}
 
             {payable && !mine && payableByServer && (
-              <Card>
+              <Card size="sm" className="overflow-visible">
                 <CardHeader>
                   <CardTitle className="text-sm">Pay with USDC from (demo buyer)</CardTitle>
                 </CardHeader>
@@ -869,7 +1068,7 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
                       onChange={(id) => setSrcChain((s) => ({ ...s, [v.id]: id }))} />
                   )}
                 </CardContent>
-                <CardFooter>
+                <CardFooter className={STICKY_ACTION}>
                   <Button size="sm" className="w-full" disabled={pending}
                     onClick={() => run(v.id, () => mpPay(v.id, sel, from), `Paying via ${railsFor(from).find((r) => r.id === sel)?.label ?? sel}`)}>
                     Pay via {railsFor(from).find((r) => r.id === sel)?.label} (gasless)
@@ -879,12 +1078,12 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
             )}
 
             {v.shippedResi && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 Tracking <span className="font-mono text-foreground">{v.shippedResi}</span>
               </p>
             )}
-            {v.disputeReason && <p className="text-xs text-destructive">Dispute: {v.disputeReason}</p>}
-            {v.status === "completed" && <p className="text-xs text-muted-foreground">Order complete.</p>}
+            {v.disputeReason && <p className="text-sm text-destructive">Dispute: {v.disputeReason}</p>}
+            {v.status === "completed" && <p className="text-sm text-muted-foreground">Order complete.</p>}
 
             {(v.status === "shipped" || ["paid", "confirmed"].includes(v.status)) && (
               <div className="flex flex-wrap gap-2">
@@ -918,38 +1117,39 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
 
 /* ── 2. Seller — fulfilment ───────────────────────────────────────────────── */
 
-function SellerPanel({ views, busy, run, sellerWallet, candidates, onPick }: {
+function SellerPanel({ views, busy, run, sellerWallet, candidates, onPick, cap }: {
   views: OrderView[]; busy: (id: string) => boolean; run: RunFn;
   sellerWallet: string | null; candidates: readonly string[];
-  onPick: (a: string | null) => void;
+  onPick: (a: string | null) => void; cap: PanelCap;
 }) {
   const [resi, setResi] = useState<Record<string, string>>({});
   const relevant = views.filter((v) => v.state !== "created");
   return (
-    <Panel title="Seller" hint="Incoming orders — guaranteed floored EURC on Arc" icon={<RiStore2Line className="size-4" />}>
+    <Panel title="Seller" hint="Incoming orders — guaranteed floored EURC on Arc" icon={<RiStore2Line className="size-4" />}
+      {...cap}>
       {/* Always offered: the seller address can be pasted, so it no longer
-          depends on a connected wallet having a second permitted account. */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">
-            Seller wallet <span className="font-normal text-muted-foreground">· optional</span>
-          </CardTitle>
-          <CardDescription>
-            The seller only receives, so no signature is needed. Pick a second address and the floored EURC is
-            forwarded there; leave it unset and the settlement wallet keeps it. Either way, checkout works.
-          </CardDescription>
+          depends on a connected wallet having a second permitted account.
+          A section header rather than a card — this is one optional setting,
+          and a card shell around it cost more height than the setting itself. */}
+      <div className="space-y-1.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Seller wallet · optional
+          </span>
+          <Separator className="flex-1" />
           {sellerWallet && (
-            <CardAction>
-              <Button size="xs" variant="ghost" onClick={() => onPick(null)}>Change</Button>
-            </CardAction>
+            <Button size="xs" variant="ghost" onClick={() => onPick(null)}>Change</Button>
           )}
-        </CardHeader>
-        <CardContent>
-          {sellerWallet
-            ? <span className="truncate font-mono text-sm">{shortAddr(sellerWallet)}</span>
-            : <SellerWalletPicker candidates={candidates} onPick={onPick} />}
-        </CardContent>
-      </Card>
+        </div>
+        {sellerWallet
+          ? <span className="block truncate font-mono text-sm">{shortAddr(sellerWallet)}</span>
+          : <SellerWalletPicker candidates={candidates} onPick={onPick} />}
+        <p className="text-xs text-muted-foreground">
+          The seller only receives, so no signature is needed. Set an address and the floored EURC is forwarded
+          there; leave it unset and the settlement wallet keeps it.
+        </p>
+      </div>
+      <SectionLabel count={relevant.length}>Incoming orders</SectionLabel>
       {relevant.length === 0 && <Empty>No paid orders yet.</Empty>}
       {relevant.map((v) => (
         <OrderCard key={v.id} v={v} busy={busy(v.id)} sub={`guaranteed ${fmtEUR(v.priceEURMinor)} EURC`}>
@@ -964,16 +1164,16 @@ function SellerPanel({ views, busy, run, sellerWallet, candidates, onPick }: {
             </div>
           )}
           {v.status === "completed" && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               {v.sellerAddress
                 ? `${fmtEUR(v.priceEURMinor)} EURC forwarded to ${shortAddr(v.sellerAddress)}.`
                 : v.eurcOutMinor ? `Received ${fmtEUR(v.eurcOutMinor)} EURC on Arc.` : "EURC received on Arc."}
             </p>
           )}
           {["shipped", "confirmed"].includes(v.status) && (
-            <p className="text-xs text-muted-foreground">Waiting on buyer confirmation / settlement.</p>
+            <p className="text-sm text-muted-foreground">Waiting on buyer confirmation / settlement.</p>
           )}
-          {v.status.startsWith("refund") && <p className="text-xs text-muted-foreground">Refunded to the buyer.</p>}
+          {v.status.startsWith("refund") && <p className="text-sm text-muted-foreground">Refunded to the buyer.</p>}
           <TxList view={v} />
         </OrderCard>
       ))}
@@ -983,7 +1183,9 @@ function SellerPanel({ views, busy, run, sellerWallet, candidates, onPick }: {
 
 /* ── 3. Host — the authority ──────────────────────────────────────────────── */
 
-function HostPanel({ views, busy, run }: { views: OrderView[]; busy: (id: string) => boolean; run: RunFn }) {
+function HostPanel({ views, busy, run, cap }: {
+  views: OrderView[]; busy: (id: string) => boolean; run: RunFn; cap: PanelCap;
+}) {
   // A clock, started after mount so the server and the client agree on the
   // first paint. Null until then, which reads as "window not yet known".
   const [now, setNow] = useState<number | null>(null);
@@ -1019,27 +1221,44 @@ function HostPanel({ views, busy, run }: { views: OrderView[]; busy: (id: string
 
   return (
     <Panel title="Host / Marketplace" hint="Only the host releases & refunds · 5% commission, illustrative"
-      icon={<RiBankLine className="size-4" />}>
-      <Alert variant={gasLow ? "destructive" : "default"}>
-        {gasLow && <RiErrorWarningLine />}
-        <AlertTitle className="flex items-start gap-3">
-          <Metric label="Operator gas (Arc)" value={relay?.gasUsdc == null ? "—" : `${relay.gasUsdc} USDC`} />
-          <Metric label="Operator fee" value={relay ? `${(relay.feeBps / 100).toFixed(2)}%` : "—"} className="text-right" />
-        </AlertTitle>
-        <AlertDescription>
-          {gasLow
-            ? `Below the ${relay?.minGasUsdc} USDC floor — new orders are REFUSED until the operator is topped up, so no buyer is stranded mid-flow.`
-            : relay?.feeBps
-              ? `The operator pays for the gasless relay; the fee is added on top of the price (never taken out of the seller floor) and withheld by the escrow at capture. Stop floor: ${relay?.minGasUsdc} USDC.`
-              : "Fee 0 — the operator subsidises all gas. Set RIVO_FEE_BPS to recover the cost."}
-        </AlertDescription>
-      </Alert>
+      icon={<RiBankLine className="size-4" />} {...cap}>
+      {/* Healthy, this is two numbers and a floor — the paragraph explaining how
+          the fee works was standing costs, not news, and it ran every render.
+          Below the floor it becomes an Alert again: there the prose IS the news,
+          because new orders stop being accepted. */}
+      {gasLow ? (
+        <Alert variant="destructive">
+          <RiErrorWarningLine />
+          <AlertTitle>Operator gas below floor</AlertTitle>
+          <AlertDescription>
+            {relay?.gasUsdc} USDC left against a {relay?.minGasUsdc} USDC floor — new orders are REFUSED until the
+            operator is topped up, so no buyer is stranded mid-flow.
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <>
+          <BalanceStrip
+            title="Operator"
+            items={[
+              { label: "gas (Arc)", value: relay?.gasUsdc == null ? "—" : `${relay.gasUsdc} USDC` },
+              { label: "fee", value: relay ? `${(relay.feeBps / 100).toFixed(2)}%` : "—" },
+              { label: "stop floor", value: relay?.minGasUsdc == null ? "—" : `${relay.minGasUsdc} USDC` },
+            ]}
+          />
+          {relay != null && relay.feeBps === 0 && (
+            <p className="text-xs text-muted-foreground">
+              Fee 0 — the operator subsidises all gas. Set <span className="font-mono">RIVO_FEE_BPS</span> to
+              recover it.
+            </p>
+          )}
+        </>
+      )}
 
       {disputes.length > 0 && (
         <>
           <SectionLabel count={disputes.length}>Disputes</SectionLabel>
           {disputes.map((v) => (
-            <Card key={v.id}>
+            <Card key={v.id} data-order-row>
               <CardHeader>
                 <CardTitle className="text-sm">
                   {v.product?.emoji} {v.product?.name} · {fmtEUR(v.priceEURMinor)}
@@ -1077,7 +1296,7 @@ function HostPanel({ views, busy, run }: { views: OrderView[]; busy: (id: string
                   : "Release & settle → seller"}
             </Button>
             {held && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 The buyer can still confirm or dispute. Settling the moment the seller says &ldquo;shipped&rdquo;
                 would leave them no window at all — confirming ends it early.
               </p>
@@ -1090,7 +1309,7 @@ function HostPanel({ views, busy, run }: { views: OrderView[]; busy: (id: string
       {active.length === 0 && <Empty>No activity yet.</Empty>}
       <div className="space-y-1.5">
         {active.map((v) => (
-          <div key={v.id} className="flex items-center gap-2 border px-2.5 py-2 text-xs">
+          <div key={v.id} data-order-row className="flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm">
             <span className="truncate">{v.product?.emoji} {v.product?.name ?? v.id.slice(0, 12)}</span>
             <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{fmtEUR(v.priceEURMinor)}</span>
             <StatusBadge status={v.status} label={v.statusLabel} busy={busy(v.id)} />

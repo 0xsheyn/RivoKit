@@ -1,6 +1,6 @@
 export default function ThesisBand() {
   return (
-    <section className="relative overflow-hidden bg-[var(--ink-raised)] py-24">
+    <section className="relative overflow-hidden bg-[var(--ink-raised)] py-12">
       <svg
         viewBox="0 0 1440 400"
         preserveAspectRatio="none"
@@ -19,7 +19,7 @@ export default function ThesisBand() {
             fontSize="10"
             fill="var(--ash)"
           >
-            {["stopLimit €12.92", "25 bps", "COMPLETED", "0x7910f1…037420"][i % 4]}
+            {["stopLimit = €P", "25 bps", "COMPLETED", "0x7910f1…037420"][i % 4]}
           </text>
         ))}
       </svg>
@@ -35,9 +35,14 @@ export default function ThesisBand() {
           <span className="block text-balance">The recipient gets at least €P,</span>
           <span className="block text-balance">or the swap reverts.</span>
         </p>
+        {/* Naming the path is not a hedge. Settling to a wallet the chain holds
+            the floor; settling to a bank there is no swap to revert, so the
+            guard is the corridor quote checked in the SDK before broadcast.
+            Claiming "on-chain" for both would be claiming a floor the chain
+            never sees. */}
         <p className="f-mono mt-6 text-[13px] text-[var(--ash)]">
-          ENFORCED ON-CHAIN BY stopLimit — NOT IN TYPESCRIPT · THERE IS NO PATH WHERE THE RECIPIENT QUIETLY RECEIVES
-          LESS
+          SETTLING TO A WALLET: ENFORCED ON-CHAIN BY stopLimit, NOT IN TYPESCRIPT · SETTLING TO A BANK: THE CPN QUOTE IS
+          PINNED TO €P BEFORE BROADCAST, OR THE ORDER IS REFUSED
         </p>
       </div>
     </section>
