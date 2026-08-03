@@ -21,7 +21,7 @@ export default function Footer() {
             Contracts (arcscan)
           </a>
           <a href="https://github.com/0xsheyn/RivoKit/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" className="link-step">
-            Apache-2.0
+            MIT
           </a>
         </div>
         <p className="eyebrow">Testnet-stage sample software — not a licensed financial product.</p>

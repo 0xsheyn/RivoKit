@@ -165,7 +165,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <FooterGroup title="Project">
             <FooterLink href="https://github.com/0xsheyn/RivoKit" external>GitHub</FooterLink>
             <FooterLink href="https://github.com/0xsheyn/RivoKit#readme" external>Docs</FooterLink>
-            <FooterLink href="https://github.com/0xsheyn/RivoKit/blob/main/LICENSE" external>Apache-2.0</FooterLink>
+            <FooterLink href="https://github.com/0xsheyn/RivoKit/blob/main/LICENSE" external>MIT</FooterLink>
             <FooterLink href="https://arc.network" external>Built on Arc</FooterLink>
           </FooterGroup>
 
