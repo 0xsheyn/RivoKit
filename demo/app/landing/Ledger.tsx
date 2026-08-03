@@ -14,6 +14,26 @@ const ROWS: Array<{ path: string; status: Status; detail: string; url?: string }
     status: "proven",
     detail: "proven on Arc",
   },
+  // The headline claim, and it was missing from this table entirely while the
+  // ❌ row below still said the browser rails had never run. Both are fixed
+  // against PROOFS.md rather than from memory.
+  {
+    path: "release() reaching a bank in ONE call — capture → CPN quote pinned to €P → broadcast",
+    status: "proven",
+    detail: "11.751140 USDC → €10.00 exactly · capture 0x631405…9966698",
+    url: TX("0x63140582f99e748e2af4c4f1f281fc086f5ee953f861668eb161adf7a9966698"),
+  },
+  {
+    path: "The bank path's rebate, checked against the chain rather than an event",
+    status: "proven",
+    detail: "buyer +0.474498 USDC · 0x50ef69…677c7c9e",
+    url: TX("0x50ef691a0e2123966b81451f09dee0cb0a4a9e1f9f30699419bd90f7677c7c9e"),
+  },
+  {
+    path: "Both demos reaching a bank through their own code, not a script",
+    status: "proven",
+    detail: "/sdk UI · marketplace server actions",
+  },
   {
     path: "Operator fee 25 bps split at capture, floor intact",
     status: "proven",
@@ -27,9 +47,16 @@ const ROWS: Array<{ path: string; status: Status; detail: string; url?: string }
     url: TX("0x11bf41510b5aa7943dde09b436ff499064e4f9b8bea6c85f20a1057540559bf4"),
   },
   {
-    path: "CPN EUR/SEPA end-to-end → COMPLETED",
+    path: "CPN EUR/SEPA → COMPLETED",
     status: "proven",
     detail: "twice · 15 USDC → 12.92 EUR",
+  },
+  // No link: PROOFS.md records this Arc tx only in abbreviated form, and a
+  // plausible-looking full hash is exactly the thing this table exists to not do.
+  {
+    path: "CPN USD/WIRE → COMPLETED, wallet-signed",
+    status: "proven",
+    detail: "62 USDC → 36.96 USD · flat 25 USDC fee · block 54765268",
   },
   {
     path: "Seller-signed cash-out — seller's own wallet signs the CPN intent",
@@ -53,16 +80,24 @@ const ROWS: Array<{ path: string; status: Status; detail: string; url?: string }
     detail: "1 EURC · 253.49 → 254.49 · 0x405164…2a8449e",
     url: TX("0x40516460af2571449291fa4448533793818dd287f9aeade449b1a13752a8449e"),
   },
-  { path: "CPN BRL / MXN / USD", status: "partial", detail: "requirements + quote + prepare only" },
   {
     path: "CPN webhook → signature verified → cash-out row advanced",
     status: "proven",
     detail: "live signatures · row reached COMPLETED",
   },
+  // Arrival was the open question and it closed: Circle validated the URL with
+  // HEAD and POSTed five signed events into our own route. What is still open
+  // is whether that URL survives the process that created it — a different
+  // claim, and the only one this row may make.
   {
-    path: "That webhook arriving over HTTP at our own route",
+    path: "That webhook arriving over HTTP at our own route, and only it moving the row",
+    status: "proven",
+    detail: "proven by REMOVING the competing writer, not out-racing it",
+  },
+  {
+    path: "A webhook endpoint that outlives the process which created it",
     status: "partial",
-    detail: "needs a publicly reachable endpoint",
+    detail: "the proof rode a quick tunnel · needs a durable host",
   },
   {
     path: "Wallet-side Permit2 approve — from a zero allowance",
@@ -70,7 +105,25 @@ const ROWS: Array<{ path: string; status: Status; detail: string; url?: string }
     detail: "0 → 15 → 0 USDC · 0xdeebf4…cf11177a",
     url: TX("0xdeebf45ad5e1747693e33e2de0dabca14ccef1323d27d29aaaf598f7cf11177a"),
   },
-  { path: "Browser-wallet funding rails", status: "never", detail: "written, never executed on-chain" },
+  {
+    path: "Browser-wallet funding rails, executed on-chain",
+    status: "proven",
+    detail: "Gateway spend 0xca092f…4d774517 · CCTP mint 0x35da17…fe945639",
+    url: TX("0xca092f363b2dab2d891d7e29e274422f2362227c7af2283d6d6a33c49d774517"),
+  },
+  // What is left of that row once the rails themselves are proven: a narrower
+  // claim, and still a genuine ❌ — no server key may stand in for a click.
+  {
+    path: "A human clicking the wallet's switch-chain and add-chain prompts",
+    status: "never",
+    detail: "driven by an EIP-1193 provider · every answer has a branch and a test",
+  },
+  { path: "A bank-payout button in the marketplace UI", status: "never", detail: "the /sdk page has the toggle" },
+  {
+    path: "Anyone watching euros arrive in a bank account",
+    status: "never",
+    detail: "sandbox settles nothing · every destination IBAN is fabricated",
+  },
 ];
 
 /** A ✅ row that names a tx should be checkable — otherwise it's still a claim. */
@@ -82,7 +135,9 @@ function Detail({ row }: { row: (typeof ROWS)[number] }) {
       href={row.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="underline decoration-dotted underline-offset-4"
+      // Dotted at rest, solid on hover: the row is claiming a hash you can go
+      // and open, and the underline firming up is that offer being taken up.
+      className="underline decoration-dotted underline-offset-4 transition-all hover:decoration-solid"
       style={{ color: s.color }}
     >
       {row.detail}
@@ -93,7 +148,20 @@ function Detail({ row }: { row: (typeof ROWS)[number] }) {
 export default function Ledger() {
   return (
     <div>
-      <p className="eyebrow mb-4">THIS TABLE IS COPIED FROM THE README — WE DON&apos;T HIDE THE ❌ COLUMN.</p>
+      <p className="eyebrow mb-4">
+        THIS TABLE FOLLOWS PROOFS.MD AND LIMITATIONS.MD — WE DON&apos;T HIDE THE ❌ COLUMN.
+      </p>
+
+      {/* The ceiling on every ✅ that touches fiat. PROOFS.md opens with it and
+          LIMITATIONS.md caps everything with it; a page titled "Proof, not
+          claims" that omitted it was the most expensive thing wrong here. */}
+      <p className="mb-6 max-w-3xl border-l-2 border-[color:var(--sodium)] pl-4 text-[13px] leading-relaxed text-[var(--bone)]/75">
+        <span className="text-[var(--bone)]">Read every ✅ on the fiat side with this ceiling.</span>{" "}
+        <span className="f-mono text-[var(--sodium)]">COMPLETED</span> means CPN reported the fiat leg finished — not
+        that anyone watched euros arrive. The sandbox is a simulator, every payout destination here is a fabricated
+        IBAN, and the one destination whose balance could actually be read was never credited. The on-chain legs are a
+        different grade of evidence entirely: hashes anyone can open, forever.
+      </p>
 
       {/* <768px: one card per row, status icon large — the honest column
           should never be the thing users have to scroll sideways to find */}
