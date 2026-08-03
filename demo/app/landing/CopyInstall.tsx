@@ -35,7 +35,7 @@ export default function CopyInstall() {
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         }}
-        className="f-mono shrink-0 rounded-sm border border-[color:var(--ash)]/30 px-3 py-1.5 text-[12px] text-[var(--bone)] hover-step"
+        className="f-mono btn-outline shrink-0 rounded-sm border border-[color:var(--ash)]/30 px-3 py-1.5 text-[12px] text-[var(--bone)]"
       >
         {copied ? "Copied" : "Copy"}
       </button>

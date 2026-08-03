@@ -119,6 +119,12 @@
   animation: rivo-fade-up 700ms ease-out forwards;
 }
 
+/* The hero's escrow used to pulse a dot here, which needed `transform-box:
+   fill-box` to keep `transform-origin: center` from resolving against the whole
+   SVG viewport. The escrow is a labelled box now and marks the hold by
+   brightening its own border — a transition, not a keyframe — so the rule went
+   with the dot rather than lingering as dead CSS. */
+
 /* ── Card stamp (order-states §6.4) ──────────────────────────────────────── */
 @keyframes rivo-stamp {
   0% {
@@ -152,11 +158,77 @@
 }
 
 /* ── Hover: background step only, never lift/shadow/scale (§7) ──────────── */
+/*
+ * The rule stands. What follows extends the vocabulary WITHIN it — colour and a
+ * drawn rule, both of which leave the box exactly where it was. Nothing here
+ * lifts, scales, or casts a shadow, because a page that stays still while you
+ * read it should not start moving because a cursor crossed it.
+ *
+ * `hover-step` alone was doing all the work, and a background that steps by one
+ * shade is easy to miss on a dark page — which is what read as stiffness. The
+ * additions give each kind of thing its own answer: a card grows a rule, a link
+ * warms, a button changes weight.
+ */
 .rivo-landing .hover-step {
   transition: background-color 120ms ease-out;
 }
 .rivo-landing .hover-step:hover {
   background-color: var(--ink-raised);
+}
+
+/* Cards: a sodium hairline sweeps across the bottom edge. Drawn, not moved —
+   the same gesture the section rails make, at the scale of one cell. */
+.rivo-landing .hover-accent {
+  position: relative;
+}
+.rivo-landing .hover-accent::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 1.5px;
+  background: var(--sodium);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.rivo-landing .hover-accent:hover::after {
+  transform: scaleX(1);
+}
+
+/* Links: warm to bone. A background block behind an inline link reads as a
+   selection, not as a hover. */
+.rivo-landing .link-step {
+  transition: color 140ms ease-out;
+}
+.rivo-landing .link-step:hover {
+  color: var(--bone);
+}
+
+/* Buttons. These had no hover state at all — the two most important controls on
+   the page did not answer the cursor, which is the single loudest way an
+   interface reads as dead. */
+.rivo-landing .btn-solid {
+  transition: background-color 140ms ease-out;
+}
+.rivo-landing .btn-solid:hover {
+  background-color: color-mix(in oklab, var(--sodium) 84%, var(--bone));
+}
+.rivo-landing .btn-outline {
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out;
+}
+.rivo-landing .btn-outline:hover {
+  background-color: var(--ink-raised);
+  border-color: color-mix(in oklab, var(--ash) 55%, var(--bone));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The hairline still appears — it just stops sweeping. */
+  .rivo-landing .hover-accent::after {
+    transition: none;
+  }
 }
 
 .rivo-landing :focus-visible {
