@@ -4,7 +4,7 @@
   "_comment_private": "Still private: nothing here is audited and the payout leg is MOCK, so it must not land on the public npm registry by accident. `npm pack` and git/file installs work regardless — see README > Installation.",
   "private": true,
   "description": "An embeddable cross-border settlement SDK on Arc — multi-chain USDC in, local-currency out.",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20"

@@ -6,6 +6,7 @@ import {
   USDC_ADDRESS,
 } from "../../../src/constants/arc";
 import DemoPanels from "../DemoPanels";
+import RivoMark from "../RivoMark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ToneBadge } from "../_ui";
 import {
@@ -106,7 +107,10 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 export default function Page() {
   return (
     <main className="mx-auto max-w-5xl px-6 py-14">
-      <h1 className="text-3xl font-semibold tracking-tight">RivoKit</h1>
+      <div className="flex items-center gap-3">
+        <RivoMark className="size-10 shrink-0" size={80} priority />
+        <h1 className="text-3xl font-semibold tracking-tight">RivoKit</h1>
+      </div>
       <p className="mt-2 text-sm text-muted-foreground">
         Cross-border settlement on Arc — multi-chain USDC in, floored EURC out. Non-custodial: funds always sit in the
         Commerce Payments Protocol escrow, never on a server.
@@ -148,7 +152,7 @@ export default function Page() {
         <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
           {LIFECYCLE.map((s, i) => (
             <span key={s} className="flex items-center gap-2">
-              <span className="border bg-muted px-2 py-1 font-mono text-foreground">{s}</span>
+              <span className="rounded-3xl border bg-muted px-2.5 py-1 font-mono text-foreground">{s}</span>
               {i < LIFECYCLE.length - 1 && <span className="text-muted-foreground">→</span>}
             </span>
           ))}
@@ -164,17 +168,17 @@ export default function Page() {
         <SectionTitle>Gasless — the buyer pays no gas</SectionTitle>
         <p className="mt-2 text-sm text-muted-foreground">
           The buyer <span className="font-medium text-foreground">signs an ERC-3009 authorization</span>{" "}
-          <code className="bg-muted px-1 py-0.5 font-mono text-xs">receiveWithAuthorization</code>{" "}
+          <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs">receiveWithAuthorization</code>{" "}
           off-chain (no transaction). The operator <span className="font-medium text-foreground">relays</span>{" "}
           the on-chain collection through <span className="font-mono text-xs">ERC3009PaymentCollector</span> and pays the gas.
           The buyer's USDC moves; the buyer never needs a native gas token.
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-          <span className="border bg-muted px-2 py-1 text-foreground">buyer signs (off-chain, no gas)</span>
+          <span className="rounded-3xl border bg-muted px-2.5 py-1 text-foreground">buyer signs (off-chain, no gas)</span>
           <span className="text-muted-foreground">→</span>
-          <span className="border bg-muted px-2 py-1 text-foreground">operator relays (pays gas)</span>
+          <span className="rounded-3xl border bg-muted px-2.5 py-1 text-foreground">operator relays (pays gas)</span>
           <span className="text-muted-foreground">→</span>
-          <span className="border bg-muted px-2 py-1 text-foreground">USDC into escrow</span>
+          <span className="rounded-3xl border bg-muted px-2.5 py-1 text-foreground">USDC into escrow</span>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           Operator relay, not a generic paymaster — the nonce is a payer-agnostic hash (single use, replay-proof).

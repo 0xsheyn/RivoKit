@@ -334,7 +334,7 @@ Redeploy the collector → allowance is 0 → `refund` reverts. Re-run
 
 Three layers, deliberately unequal.
 
-- **Unit** (`npm test`) — 428 green / 24 files, no credentials. State machines,
+- **Unit** (`npm test`) — 441 green / 25 files, no credentials. State machines,
   unit conversion, quote/rebate math, the fee gross-up round-trip, facade
   composition, compliance gating, webhook ECDSA verification, ERC-3009
   sign+recover, the whole CPN layer.

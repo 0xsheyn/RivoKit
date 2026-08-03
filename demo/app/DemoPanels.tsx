@@ -529,7 +529,7 @@ export default function DemoPanels() {
                   <li key={o.id}>
                     <button type="button" disabled={pending}
                       onClick={() => run(() => snapshotAction(o.id))}
-                      className="flex w-full flex-wrap items-baseline gap-2 px-2 py-1 text-left text-xs hover:bg-muted hover:text-muted-foreground disabled:opacity-50">
+                      className="flex w-full flex-wrap items-baseline gap-2 rounded-2xl px-3 py-1.5 text-left text-xs hover:bg-muted hover:text-muted-foreground disabled:opacity-50">
                       <span className="min-w-0 flex-1 truncate font-mono">{o.id}</span>
                       <span>{EUR(o.priceEUR)}</span>
                       <Badge variant="outline" className="font-mono">{o.payoutTo}</Badge>

@@ -407,20 +407,134 @@ export async function broadcastSignedPayment(paymentId: string, signature: Hex):
 export function payoutRailFor(corridorKey: string): PayoutRail {
   const corridor = corridorFor(corridorKey);
   const signer = getSellerSigner();
-  return createCpnPayoutRail({
-    ramp: getRampFor(corridor),
-    corridor: corridor.key,
-    destinationCountry: corridor.country,
-    senderAddress: signer.address,
-    details: () => ({
-      travelRule: [...buildTravelRule(corridor.address), ...(corridor.extraTravelRule ?? [])],
-      beneficiaryAccount: corridor.beneficiary,
-      useCase: "B2B",
-      reasonForPayment: "PMT001",
+  return recordingRail(
+    createCpnPayoutRail({
+      ramp: getRampFor(corridor),
+      corridor: corridor.key,
+      destinationCountry: corridor.country,
+      senderAddress: signer.address,
+      details: () => ({
+        travelRule: [...buildTravelRule(corridor.address), ...(corridor.extraTravelRule ?? [])],
+        beneficiaryAccount: corridor.beneficiary,
+        useCase: "B2B",
+        reasonForPayment: "PMT001",
+      }),
+      signIntent: (message) => signPaymentIntent(signer, message),
+      ensureAllowance,
     }),
-    signIntent: (message) => signPaymentIntent(signer, message),
-    ensureAllowance,
-  });
+    corridor,
+    signer.address,
+  );
+}
+
+/**
+ * The status a freshly broadcast payout is stored with.
+ *
+ * `PayoutSubmission.status` is "the rail's own status word", and for CPN that
+ * word comes from `submitTransaction` — which reports the TRANSACTION
+ * (`BROADCASTED`), not the PAYMENT. `cpn_payments.status` only accepts the five
+ * payment states, so writing the submission's word straight through violates
+ * `cpn_payments_status_check` and the row is never created. That failure is
+ * silent by design here (see `submit` below), which is exactly what makes it
+ * worth guarding against rather than trusting.
+ *
+ * So: use the word only if it IS a payment state — a different rail may well
+ * report one — and otherwise fall back to `CREATED`, the state a CPN payment is
+ * actually in at broadcast. The forward-only reducer takes it from there.
+ */
+function initialPaymentState(railWord: string): CpnPaymentState {
+  const states: readonly string[] = [
+    "CREATED", "CRYPTO_FUNDS_PENDING", "FIAT_PAYMENT_INITIATED", "COMPLETED", "FAILED",
+  ];
+  return states.includes(railWord) ? (railWord as CpnPaymentState) : "CREATED";
+}
+
+/**
+ * Wrap a rail so the payouts `release()` broadcasts land in `cpn_payments` —
+ * the same table the manual cash-out writes and the history panel reads.
+ *
+ * WHY A DECORATOR AND NOT A CHANGE TO THE SDK
+ *
+ * `cpn_payments` is the DEMO's ledger of CPN activity, not RivoKit's. The SDK
+ * already records a payout where it belongs: on the order, as a payout
+ * instruction plus `payout`/`rebate` ledger rows. Teaching it to also write a
+ * demo table would put a host's bookkeeping inside the library. The rail is the
+ * host's own code, so this is where the host's ledger gets written.
+ *
+ * WHY IT MATTERS AT ALL
+ *
+ * Without it a seller has no way to see that an order actually reached their
+ * bank: the payment exists at CPN and on the order, but the one screen that
+ * lists CPN payments would show only the cash-outs someone triggered by hand.
+ * The two paths are equally real payouts and belong in one list.
+ *
+ * `order_id` is what tells them apart afterwards — the manual cash-out never
+ * sets it, so a row that has one came from a release. The UI reads it exactly
+ * that way.
+ */
+function recordingRail(rail: PayoutRail, corridor: Corridor, senderAddress: string): PayoutRail {
+  // The orchestrator hands `submit` the very object `quote` returned, so the
+  // order id can ride along without widening the PayoutRail interface.
+  const orderIdOf = new WeakMap<object, string>();
+
+  return {
+    ...rail,
+
+    async quote(req) {
+      const q = await rail.quote(req);
+      orderIdOf.set(q, req.orderId);
+      return q;
+    },
+
+    async submit(q) {
+      const submission = await rail.submit(q);
+      // The broadcast already happened and cannot be undone. A failure to write
+      // our own history row must therefore never propagate: it would abort
+      // `release()` after the money left, leaving an order that looks unpaid
+      // while CPN is paying it. Logged and swallowed, deliberately.
+      try {
+        await cpnStore().recordCpnPayment({
+          paymentId: submission.paymentId,
+          orderId: orderIdOf.get(q) ?? null,
+          corridor: corridor.key,
+          senderAddress,
+          // The settlement wallet's key is held by this server (RELAYER_PRIVATE_KEY),
+          // unlike the browser cash-out where the seller signs. Say so honestly.
+          signedBy: "server",
+          sourceMinor: submission.requiredSourceMinor,
+          sourceCurrency: q.sourceCurrency,
+          destinationMinor: submission.destinationMinor,
+          destinationCurrency: submission.destinationCurrency,
+          destinationScale: submission.destinationScale,
+          status: initialPaymentState(submission.status),
+        });
+      } catch (e) {
+        // `error`, not `warn`: money moved and the history will not show it.
+        // The first version of this swallowed a constraint violation at `warn`
+        // and the row was simply absent, with nothing on screen to say why.
+        console.error(`[cpn] payout ${submission.paymentId} broadcast but NOT recorded: ${String((e as Error).message)}`);
+      }
+      return submission;
+    },
+
+    // Only wired when the underlying rail polls at all. Same forward-only
+    // reducer the webhook uses, so whichever arrives first wins and the other
+    // is a no-op — a released payout advances to COMPLETED in the history
+    // whether or not a webhook endpoint exists.
+    ...(rail.status
+      ? {
+          async status(paymentId: string) {
+            const observed = await rail.status!(paymentId);
+            try {
+              await persistStatus(paymentId, observed.status);
+            } catch (e) {
+              console.warn(`[cpn] status ${paymentId} not persisted: ${String((e as Error).message)}`);
+            }
+            return observed;
+          },
+        }
+      : {}),
+  };
 }
 
 /**
