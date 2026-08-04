@@ -6,8 +6,14 @@ export default function Footer() {
       <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 border-b border-[color:var(--ash)]/20 pb-8 text-[13px] text-[var(--bone)]/70">
         {/* The topbar's list, imported rather than retyped — see Topbar.tsx. The
             explorer link is the one addition: it leaves the page entirely, which
-            is why the topbar does not carry it. */}
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 f-mono">
+            is why the topbar does not carry it.
+
+            Serif italic, matching the bar at the other end of the page: the
+            same five links should not change face depending on which end of the
+            scroll you read them at. They were mono, which reads as data — and a
+            nav link is not data. The mono in this footer is now only on the
+            line that IS data, the chain id below. */}
+        <div className="f-display flex flex-wrap items-center gap-x-6 gap-y-2 text-[14px]">
           {NAV.map((item) => (
             <a key={item.href} href={item.href} className="link-step">
               {item.label}

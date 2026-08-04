@@ -122,8 +122,13 @@ CPN `134aa6f6…` `paid_out`, four ledger rows `confirmed` with hashes, rebate
 [`0x082480…25a955c4`](https://testnet.arcscan.app/tx/0x0824800d7b806300282302771030b530aaa014d4961308bcd2f6111e25a955c4).
 `scripts/live-demo-bank.mjs`, 12/12.
 
-**What this does not prove:** `Marketplace.tsx` still has no bank-payout button.
-This drove the server actions directly. The `/sdk` page *does* have the toggle.
+**The button, separately.** This run called the server actions directly, which is
+the same code path but not the same claim. `Marketplace.tsx` does ship a button —
+`Storefront` renders **BUY → EURO FIAT** on every listing `canPayoutToBank()`
+clears and passes `payoutTo: "bank"` into `mpCheckout` — and it has been pressed
+by hand through to `paid_out`. That last part is testimony, not an artifact; see
+the note under *Browser wallet funding rails* for why this class of claim can
+never carry a hash.
 
 ## The fiat corridors
 
@@ -251,10 +256,20 @@ Both rails in `demo/app/wallet-rails.ts` executed on-chain through
 `scripts/live-wallet-rails.mjs`, driven by an EIP-1193 provider
 (`scripts/lib/eip1193.mjs`).
 
-**What this does not prove:** no human clicked anything. The switch-chain and
-add-chain prompts, and a user declining them, remain unobserved. Every answer has
-a branch and a test (`demo/app/wallet-rails.test.ts`, `wallet-errors.test.ts`) —
-what is missing is the click, and no server key may stand in for it.
+**What this does not prove, and what closed it separately.** The run above is a
+provider driving the rails, so on its own it says nothing about a wallet's UI.
+That gap is closed, but by testimony rather than by an artifact: all six answers
+have since been exercised by hand in a real wallet — already on Arc (no prompt),
+switch accepted, switch declined (4001, surfacing as a refusal and not as a
+failure), add-chain (4902) accepted and then declined, and a two-chain bridge
+raising the switch prompt **twice**, confirming the `pinnedTo()` regression has
+not returned. Each answer also has a branch and a test
+(`demo/app/wallet-rails.test.ts`, `wallet-errors.test.ts`).
+
+There is no hash to attach and no run to replay, and there cannot be: what is
+being demonstrated is that **no server key may stand in for the user's
+decision**, so an artifact produced by a server key would disprove the claim
+rather than support it. Weigh it accordingly against the hashed rows here.
 
 **The bug this proof found, and fixed.** One provider-backed adapter cannot serve
 both sides of a cross-chain move: App Kit sent the Arc mint on Sepolia and failed

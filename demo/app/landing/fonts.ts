@@ -1,7 +1,8 @@
 import { Newsreader, Inter, Inter_Tight, JetBrains_Mono } from "next/font/google";
 
-// Display — serif italic, used only for the wordmark, section headlines and
-// state captions. Never for numbers (see §2 of RIVO_LP.md: mono is for proof).
+// Display — serif italic: section headlines, state captions, and now the
+// navigation at both ends of the page (topbar links, footer links). Never for
+// numbers (see §2 of RIVO_LP.md: mono is for proof).
 export const displaySerif = Newsreader({
   subsets: ["latin"],
   style: ["italic"],
@@ -10,11 +11,10 @@ export const displaySerif = Newsreader({
   display: "swap",
 });
 
-// Chrome — plain Inter, for the parts of the page that frame it rather than say
-// anything: the topbar wordmark and its nav links. Deliberately NOT the body
-// face: chrome that shares the body's font stops reading as a deliberate choice
-// and starts reading as an oversight, which is what happened when these links
-// merely dropped off the mono face.
+// Chrome — plain Inter, and now only for the topbar's logotype. The nav links
+// it also used to set moved to the display serif; what is left is the wordmark,
+// which should stay upright: an italic serif "rivokit" beside the mark reads as
+// a phrase, not as a name.
 export const uiSans = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600"],

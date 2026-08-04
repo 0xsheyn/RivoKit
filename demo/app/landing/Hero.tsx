@@ -116,35 +116,31 @@ export default function Hero() {
 
   return (
     // The sticky bar is in normal flow, so it eats from the first screen. Height
-    // is known and fixed: 28px strip + 56px nav, 64px from md. `svh` rather than
+    // is known and fixed: 36px strip + 56px nav, 64px from md. `svh` rather than
     // `vh` so a mobile browser's collapsing URL bar does not crop the section.
-    <section className="relative flex min-h-[calc(100svh-84px)] flex-col overflow-hidden md:min-h-[calc(100svh-92px)]">
+    // These two numbers are coupled to Topbar.tsx's h-9 and h-14/md:h-16 — change
+    // one and the "SCROLL" marker drifts off the fold.
+    <section className="relative flex min-h-[calc(100svh-92px)] flex-col overflow-hidden md:min-h-[calc(100svh-100px)]">
       {/* The warning strip and the nav that used to open this section now live
           in Topbar.tsx, where they stay put as the page scrolls. Two wordmarks
           and two routes to #install were stacked at the top of the page. */}
       <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col justify-center px-5 py-10 md:px-16">
-        {/* Never gated on the animation clock: the page's own name must be
-            legible on the first paint, whatever the rAF loop is doing. */}
-        <h1
-          className="f-display wordmark-in select-none text-center leading-[0.92] text-[var(--bone)]"
-          style={{ fontSize: "clamp(64px, 14vw, 200px)" }}
-        >
-          rivokit
-        </h1>
+        {/* The 200px "rivokit" that used to open this screen is gone, on the
+            owner's instruction, and the rail is what the hero now leads on.
+            The name is not lost with it: the sticky bar carries the mark and
+            the wordmark at every scroll position, which is a better place for
+            an identity than a slab of type competing with the one graphic that
+            explains the product. What the hero gains is the whole first screen
+            for the route.
 
-        {/* Below the wordmark, not behind it. Behind it, the route ran straight
-            through the middle of a 200px serif word and its labels were
-            unreadable at any size that did not swamp the name. In its own band
-            it gets the full hero width, so 11px type lands at ~13px on screen.
-            Still hidden below sm: at ~360px wide the labels would be back to
-            ~3px, and the type fallback underneath says the same thing.
+            The rail is still hidden below sm: at ~360px wide its labels would
+            render at ~3px, and the type fallback underneath says the same
+            thing.
 
-            The in/out pair travels WITH the rail. It used to sit above the
-            wordmark, which was right when the rail was behind it and wrong the
-            moment the rail moved: two labels naming the ends of a diagram, a
-            couple of hundred pixels away from the diagram. Eight pixels of gap
-            is the whole point — at that distance they read as its caption. */}
-        <div className="pointer-events-none mt-10 hidden sm:block">
+            The in/out pair travels WITH the rail — two labels naming the ends
+            of a diagram belong against the diagram, not a screen away from it.
+            Eight pixels of gap is the whole point. */}
+        <div className="pointer-events-none hidden sm:block">
           <div className="mb-2 flex items-baseline justify-between">
             <span className="eyebrow">MULTI-CHAIN USDC IN</span>
             <span className="eyebrow text-right">LOCAL CURRENCY OUT · EUR/SEPA · USD/WIRE</span>
@@ -170,11 +166,17 @@ export default function Hero() {
 
         <p className="f-mono mx-auto mt-6 max-h-5 text-center text-[11px] text-[var(--ash)]">{timerLabel}&nbsp;</p>
 
-        <p className="mx-auto mt-4 max-w-2xl text-center text-[15px] leading-relaxed text-[var(--bone)]/85 sm:text-[18px]">
+        {/* This sentence was already the hero's actual claim; with the wordmark
+            gone it becomes the h1 as well. An <h1> is not optional — it is the
+            page's one structural title, and dropping the heading along with the
+            type would leave the document without one. It stays at body weight
+            and body size on purpose: a headline sized to lead would just be the
+            wordmark's problem again, one face further down. */}
+        <h1 className="mx-auto mt-4 max-w-2xl text-center text-[15px] font-normal leading-relaxed text-[var(--bone)]/85 sm:text-[18px]">
           One embed moves value from &ldquo;the payer pays USDC from any chain&rdquo; to &ldquo;the recipient is
           paid&rdquo; — a floored quote, escrow, refunds, and a bank account at the end of{" "}
           <span className="f-mono text-[var(--sodium)]">release()</span>.
-        </p>
+        </h1>
 
         <div className="mx-auto mt-8 flex flex-wrap items-center justify-center gap-3">
           <a

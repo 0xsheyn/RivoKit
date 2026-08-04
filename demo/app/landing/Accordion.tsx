@@ -17,7 +17,11 @@ import { useState } from "react";
 export type QA = { q: string; a: string };
 
 export default function Accordion({ items }: { items: readonly QA[] }) {
-  const [open, setOpen] = useState<number | null>(0);
+  // Everything closed on arrival. One panel open by default put a paragraph of
+  // prose between the first question and the second, which reads as an answer
+  // the page decided you wanted — and it is the eight QUESTIONS that are the
+  // scannable thing here, not whichever one happens to sit first.
+  const [open, setOpen] = useState<number | null>(null);
 
   return (
     <div className="divide-y divide-[color:var(--ash)]/20 border-y border-[color:var(--ash)]/20">
@@ -40,9 +44,14 @@ export default function Accordion({ items }: { items: readonly QA[] }) {
               </span>
             </button>
             {isOpen && (
-              <p className="max-w-3xl px-1 pb-6 text-[14px] leading-relaxed text-[var(--bone)]/75 sm:text-[15px]">
-                {item.a}
-              </p>
+              // No max-width. It was capped at 3xl inside a 1440px section, so
+              // an answer set seven or eight short lines against half a screen
+              // of empty gutter — the panel looked broken rather than
+              // measured. Full width instead: the same words in three or four
+              // lines, ending where the rules above and below them end.
+              // Slightly larger, and the leading opened up, because a long
+              // measure needs the extra line spacing to stay trackable.
+              <p className="px-1 pb-6 text-[15px] leading-[1.75] text-[var(--bone)]/75 sm:text-[16px]">{item.a}</p>
             )}
           </div>
         );

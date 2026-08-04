@@ -1,8 +1,14 @@
 import CopyInstall from "./CopyInstall";
 
 export default function CtaInstall() {
+  // "Get the SDK" in the topbar targets this section's id, so it needs the same
+  // sticky-bar offset every other anchored section carries — 36px warning strip
+  // + 56px bar, 64 from md.
   return (
-    <section id="install" className="bg-[var(--ink-raised)] px-5 py-12 md:px-16">
+    <section
+      id="install"
+      className="scroll-mt-[92px] bg-[var(--ink-raised)] px-5 py-12 md:scroll-mt-[100px] md:px-16"
+    >
       <div className="mx-auto max-w-2xl text-center">
         <h2 className="f-display text-[34px] text-[var(--bone)] sm:text-[52px]">Ready to settle in one call?</h2>
         <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-[var(--bone)]/75">

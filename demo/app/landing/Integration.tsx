@@ -1,7 +1,7 @@
 /**
  * The code a host actually writes, in one block.
  *
- * The capabilities grid above shows six one-line snippets and never once shows
+ * The capabilities grid above shows nine one-line snippets and never once shows
  * them assembled — so the page claimed "one integration" without ever showing
  * the integration. This is the shape of `demo/lib/rivokit.server.ts`, the same
  * composition `scripts/live-sdk.mjs` drives against Arc Testnet, with the
@@ -67,6 +67,39 @@ export default function Integration() {
             PII. Leave the last one out and a build simply has no payout capability — refused at{" "}
             <span className="f-mono">createOrder</span> rather than half-wired.
           </p>
+
+          {/* The column ran about half the height of the code beside it, and
+              the gap under it was the emptiest part of this page. Filling it
+              with a decorative block would have been the wrong answer: what
+              belongs here is the reading key for the block on the right. Four
+              lines in that code carry a rule the rest of the page states in
+              prose, and naming them turns the snippet from something to skim
+              into something to check. */}
+          <dl className="mt-8 divide-y divide-[color:var(--ash)]/15 border-t border-[color:var(--ash)]/15">
+            {[
+              {
+                k: "priceEURMinor: 1000n",
+                v: "A bigint, in minor units. Money is never a float anywhere in this SDK, and the n is the type system enforcing it.",
+              },
+              {
+                k: 'receivingChain: "Ethereum_Sepolia"',
+                v: "Recorded at checkout because a refund has to go home. USDC returns to the chain it came from — never stranded on Arc.",
+              },
+              {
+                k: "feeBps: 25",
+                v: "The operator's gas, grossed onto the payer. It is never taken out of the recipient's guaranteed floor.",
+              },
+              {
+                k: 'payoutTo: "bank"',
+                v: "The one field that decides the ending — and the reason release() here is capture → quote → broadcast, with no swap in it.",
+              },
+            ].map((row) => (
+              <div key={row.k} className="py-3">
+                <dt className="f-mono text-[12px] text-[var(--sodium)]">{row.k}</dt>
+                <dd className="mt-1 text-[13px] leading-relaxed text-[var(--bone)]/70">{row.v}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
         <div className="md:col-span-7">
