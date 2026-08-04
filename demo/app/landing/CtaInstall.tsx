@@ -12,7 +12,7 @@ export default function CtaInstall() {
       <div className="mx-auto max-w-2xl text-center">
         <h2 className="f-display text-[34px] text-[var(--bone)] sm:text-[52px]">Ready to settle in one call?</h2>
         <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-[var(--bone)]/75">
-          Clone it, run 441 tests with no credentials at all, deploy the escrow to Arc testnet, and clear a full order
+          Clone it, run 462 tests with no credentials at all, deploy the escrow to Arc testnet, and clear a full order
           from multi-chain USDC to a bank payout.
         </p>
 

@@ -6,12 +6,17 @@ import {
   USDC_ADDRESS,
 } from "../../../src/constants/arc";
 import DemoPanels from "../DemoPanels";
-import RivoMark from "../RivoMark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ToneBadge } from "../_ui";
 import {
   Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/card";
+
+export const metadata = {
+  title: "RivoKit — SDK surface",
+  description:
+    "The RivoKit API, the order lifecycle, and the Arc Testnet transactions behind each leg. Testnet only.",
+};
 
 const ARC_TX = (h: string) => `${ARC_TESTNET_EXPLORER_URL}/tx/${h}`;
 const SEP_TX = (h: string) => `https://sepolia.etherscan.io/tx/${h}`;
@@ -19,13 +24,16 @@ const SEP_TX = (h: string) => `https://sepolia.etherscan.io/tx/${h}`;
 // The public SDK surface (src/sdk/rivokit.ts) — the one object the whole flow
 // runs through (Phase 5 exit criterion).
 const SDK_API: Array<[string, string]> = [
+  ["estimateSwap({ address, amountInMinor })", "Price a settlement before committing to one — what an order of this size would clear at today."],
   ["createOrder(params)", "Lock the FX quote, derive usdcAmount, screen the addresses, store the order. `payoutTo` decides the shape of everything after it."],
-  ["fund(orderId)", "Cross-chain USDC → Arc (unified balance / bridge) → authorize into escrow."],
+  ["fund(orderId, opts?)", "Cross-chain USDC → Arc (unified balance / bridge) → authorize into escrow. `opts.signature` is the payer's own ERC-3009, signed in their browser."],
   ["release(orderId, proof)", "wallet: capture → floored swap (≥ €P) → MOCK instruction. bank: capture → CPN quote pinned to €P → broadcast."],
+  ["retrySettlement(orderId)", "The way out of settlement_pending: swap again (wallet) or re-quote and broadcast (bank) — never a second capture."],
+  ["payoutFor(orderId)", "Read the payout instruction a settled order produced — from the store, so it survives a restart."],
   ["refreshPayout(orderId)", "Re-read the rail and settle the ledger row with its Arc hash — the same path a webhook takes."],
   ["refund(orderId)", "void / refund → bridge back to receivingChain (invariant 5)."],
   ["status(orderId)", "Read the current order."],
-  ["on(event, handler)", "Subscribe to status events: funded / released / payout_pending / paid_out / refunded / …"],
+  ["on / off(event, handler)", "Subscribe to status events: funding_pending / funded / released / payout_pending / paid_out / refund_pending / refunded."],
 ];
 
 const LIFECYCLE = ["created", "funding_pending", "funded", "released", "payout_pending", "paid_out"];
@@ -59,6 +67,20 @@ const FLOWS: Flow[] = [
     ],
   },
   {
+    // The headline flow, and the one this page had been leaving out: `release()`
+    // reaching a bank in a single call. It belongs here more than anywhere —
+    // order ord_1785608622_324408 was created from the panel above, not by a
+    // script (PROOFS.md records how that was established).
+    title: "Settlement — release() straight to a bank (payoutTo: \"bank\")",
+    result: "capture → CPN quote pinned to €12.00 → broadcast · CPN 0a44d36f… COMPLETED · order paid_out",
+    legs: [
+      { label: "authorize (Arc)", hash: "0xf83ad3465f2e09bb5407a684fd2d48bbce88c9a41b2fd36cd9ad1470e55e3299", url: ARC_TX },
+      { label: "capture (Arc)", hash: "0xe7338a7c49ff911b6b1722c9bdcf25f8be05a0539275621e13ef3f1bf18a0f97", url: ARC_TX },
+      { label: "payout 14.080788 USDC → CPN", hash: "0x3eb5ad125607911d9f7e1f05c73595b9ef196e92f51b516153b7b39756cf6b48", url: ARC_TX },
+      { label: "rebate 0.563208 USDC → buyer", hash: "0x9c914879b997b9af5278e4c93d26d21dabbcf8511a1ce00d06678097c22fb780", url: ARC_TX },
+    ],
+  },
+  {
     title: "Refund — bridge back to the source chain",
     result: "Arc escrow → Ethereum Sepolia · order refunded (invariant 5)",
     legs: [
@@ -69,6 +91,10 @@ const FLOWS: Flow[] = [
   },
 ];
 
+// This list stopped at phase 5 long after phase 15 had shipped — which read as
+// "the bank path does not exist yet" on the very page that demonstrates it.
+// Kept complete rather than trimmed to the interesting ones: a gap in a numbered
+// list is indistinguishable from something that was skipped.
 const PHASES = [
   ["0 · Setup", "CPP escrow deployed via Circle SCP"],
   ["1 · Escrow lifecycle", "fund → capture → refund on Arc"],
@@ -76,6 +102,17 @@ const PHASES = [
   ["3 · Multi-chain funding", "unified balance + bridge + refund-back"],
   ["4 · Events & compliance", "live screening + synced status + MOCK payout"],
   ["5 · SDK & demo", "the SDK surface plus this demo"],
+  ["6 · Hardening & docs", "the public surface, the limits, the proofs"],
+  ["6+ · CPN off-ramp", "quote → travel rule → Permit2 → broadcast · EUR/SEPA COMPLETED"],
+  ["7 · release() to a bank", "one call: capture → CPN quote pinned to €P → broadcast"],
+  ["8 · Browser wallet rails", "Gateway spend and CCTP bridge driven by an EIP-1193 provider"],
+  ["9 · The demos reach a bank", "both demo apps, through their own code paths"],
+  ["10 · USD/WIRE corridor", "COMPLETED, wallet-signed · 286 Arc routes catalogued"],
+  ["11 · Document sync", "the written status caught up with what had been proven"],
+  ["12 · One full flow on /sdk", "the interactive panel above, end to end"],
+  ["13 · The fiat-leg limit", "named rather than papered over — see the note below"],
+  ["14 · Restyle", "one preset across the demo, the mark, and the favicon"],
+  ["15 · Human-verified", "wallet prompts, a real phone, and the marketplace bank button — by hand"],
 ] as const;
 
 // The two B2B/payout wedges the demo targets (src/orchestrator/policy.ts).
@@ -107,10 +144,9 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 export default function Page() {
   return (
     <main className="mx-auto max-w-5xl px-6 py-14">
-      <div className="flex items-center gap-3">
-        <RivoMark className="size-10 shrink-0" size={80} priority />
-        <h1 className="text-3xl font-semibold tracking-tight">RivoKit</h1>
-      </div>
+      {/* The mark and the product name live in the shared header now, so this
+          heading names the PAGE rather than repeating the site. */}
+      <h1 className="text-3xl font-semibold tracking-tight">SDK surface</h1>
       <p className="mt-2 text-sm text-muted-foreground">
         Cross-border settlement on Arc — multi-chain USDC in, floored EURC out. Non-custodial: funds always sit in the
         Commerce Payments Protocol escrow, never on a server.
@@ -158,7 +194,9 @@ export default function Page() {
           ))}
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          Floor missed → <span className="font-mono">settlement_pending</span> (funds safe, retryable).
+          Floor missed → <span className="font-mono">settlement_pending</span>: captured, but not yet in the promised
+          currency. The funds are with the receiver as USDC and{" "}
+          <span className="font-mono">retrySettlement()</span> is the way out — it never captures twice.
           Refund is reachable from <span className="font-mono">funded</span> and <span className="font-mono">released</span>.
         </p>
       </section>
@@ -252,15 +290,28 @@ export default function Page() {
           ))}
         </div>
 
-        {/* Mock payout — clearly labeled */}
+        {/* Which half is mocked, and which half is not. This block used to say
+            flatly that "RivoKit does not execute the fiat leg" — true of a
+            wallet order, and false of the bank order proven three cards above.
+            The real limit is narrower and worth stating exactly. */}
         <Alert className="mt-4">
           <AlertTitle className="flex items-baseline justify-between gap-2">
-            <span>Payout instruction (the EURC→EUR fiat leg)</span>
-            <ToneBadge tone="warning">MOCK</ToneBadge>
+            <span>What the payout actually does — and where the proof stops</span>
+            <ToneBadge tone="warning">MOCK on the wallet path</ToneBadge>
           </AlertTitle>
-          <AlertDescription>
-            RivoKit does not execute the fiat leg. It hands the host a structured instruction to run through a
-            licensed off-ramp. KYB/AML and fiat settlement are the host&apos;s responsibility.
+          <AlertDescription className="space-y-2">
+            <p>
+              A <span className="font-mono">wallet</span> order ends as EURC on Arc and hands the host a structured{" "}
+              <span className="font-mono">MOCK</span> instruction to run through a licensed off-ramp — RivoKit
+              executes no fiat there. A <span className="font-mono">bank</span> order really does broadcast, through
+              CPN, and cannot be recalled.
+            </p>
+            <p>
+              Even so, <span className="font-medium text-foreground">nobody here has watched euros arrive.</span>{" "}
+              <span className="font-mono">COMPLETED</span> means CPN reported the fiat leg finished; the sandbox is a
+              simulator and every payout destination in this repo is a fictitious IBAN. KYB/AML and the fiat
+              relationship remain the host&apos;s responsibility.
+            </p>
           </AlertDescription>
         </Alert>
       </section>
@@ -281,7 +332,7 @@ export default function Page() {
 
       <footer className="mt-12 border-t pt-6 text-xs text-muted-foreground">
         Arc Testnet · chain {ARC_TESTNET_CHAIN_ID} · USDC <span className="font-mono">{USDC_ADDRESS.slice(0, 10)}…</span>{" "}
-        · EURC <span className="font-mono">{EURC_ADDRESS.slice(0, 10)}…</span> · 261 unit tests green
+        · EURC <span className="font-mono">{EURC_ADDRESS.slice(0, 10)}…</span> · 462 unit tests green
       </footer>
     </main>
   );

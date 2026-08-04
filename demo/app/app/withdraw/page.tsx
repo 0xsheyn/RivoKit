@@ -9,6 +9,8 @@ export const metadata = {
 export default function Page() {
   return (
     <main className="min-h-0 flex-1 overflow-y-auto p-3">
+      {/* See /app/page.tsx — the shared header's brand is not a page heading. */}
+      <h1 className="sr-only">Withdraw</h1>
       <Withdraw />
     </main>
   );
