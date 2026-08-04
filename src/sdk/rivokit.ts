@@ -20,7 +20,11 @@ import type { SettlementFx, FxToken } from "../settlement-fx/swap.ts";
 import type { OrderRecord, OrderStore } from "../orchestrator/order-store.ts";
 import { isCaptured, type OrderState } from "../orchestrator/state-machine.ts";
 import { expiriesFor, timeoutPolicyFor, type ReleaseProof, type Wedge } from "../orchestrator/policy.ts";
-import { release as runRelease, captureForPayout } from "../orchestrator/release.ts";
+import {
+  release as runRelease,
+  captureForPayout,
+  retrySettlement as runRetrySettlement,
+} from "../orchestrator/release.ts";
 import { refund as runRefund } from "../orchestrator/refund.ts";
 import type { Bridge, BridgeParams } from "../funding/bridge.ts";
 import { createEmitter, type Emitter } from "../events/emitter.ts";
@@ -33,7 +37,7 @@ import {
   type PayoutRail,
   type PayoutTarget,
 } from "../payout/rail.ts";
-import { assertFeeBps, grossUpForFee, InvalidFeeError } from "./fee.ts";
+import { assertFeeBps, grossUpForFee, netOfFee, InvalidFeeError } from "./fee.ts";
 
 /** Public order shape — money as strings, per API.md. */
 export type Order = {
@@ -48,6 +52,16 @@ export type Order = {
   payoutTo: PayoutTarget;
   wedge: Wedge;
   state: OrderState;
+  /**
+   * Why the order stopped where it did, when something refused it.
+   *
+   * Set on `settlement_pending` and `failed` — the two states a caller has to
+   * make a decision about. It was stored from the beginning and simply never
+   * surfaced, which left `settlement_pending` as a state the SDK could report
+   * but not explain: "captured, not converted" with no way to learn whether the
+   * floor was missed, the corridor refused the size, or a quote went stale.
+   */
+  failureReason: string | null;
   createdAt: string;
   fundedAt: string | null;
   settledAt: string | null;
@@ -251,6 +265,7 @@ function toOrder(r: OrderRecord): Order {
     payoutTo: r.payout_to ?? "wallet",
     wedge: r.wedge,
     state: r.state,
+    failureReason: r.failure_reason,
     createdAt: r.created_at,
     fundedAt: r.funded_at,
     settledAt: r.settled_at,
@@ -441,8 +456,109 @@ export function createRivoKit(deps: RivoKitDeps) {
       });
     }
 
-    /** Captured, but the fiat leg did not start. Funds are safe; say why. */
+    await payoutAfterCapture({ order, hash, netMinor: cap.netMinor, destinationMinor, rail, limits });
+  }
+
+  /**
+   * The bookkeeping a wallet-path release owes once the swap has landed: the
+   * swap row, the rebate, the transition, the MOCK payout instruction, the
+   * event.
+   *
+   * Shared by `release()` and `retrySettlement()` so the two cannot drift.
+   * A retry reaches `released` by a different road, but what is owed at the end
+   * of it is identical — and a second copy of this is a second place for the
+   * rebate token or the payout-before-event ordering to go wrong.
+   */
+  async function settleWalletRelease(args: {
+    order: OrderRecord;
+    hash: Hex;
+    outcome: { eurcOutMinor: bigint; rebateMinor: bigint; swapTxHash?: string | undefined };
+  }): Promise<void> {
+    const { order, hash, outcome } = args;
+    const orderId = order.id;
+
+    if (outcome.swapTxHash) {
+      await deps.store.recordPaymentIdempotent({
+        orderId, nonce: `${hash}:swap`, kind: "swap",
+        status: "confirmed", txHash: outcome.swapTxHash, chain: "Arc_Testnet", amountMinor: outcome.eurcOutMinor,
+      });
+    }
+
+    // Return the surplus to the payer, when a rebate payer is wired and there
+    // is a surplus. Do this BEFORE the payout so the seller's instruction
+    // reflects what they actually retain — the floor, not floor + rebate.
+    let rebateTxHash: string | undefined;
+    if (deps.payRebate && outcome.rebateMinor > 0n) {
+      const r = await deps.payRebate({
+        orderId, to: order.payer as Address, amountMinor: outcome.rebateMinor, token: tokenOut,
+      });
+      rebateTxHash = r.txHash;
+      await deps.store.recordPaymentIdempotent({
+        orderId, nonce: `${hash}:rebate`, kind: "rebate",
+        status: "confirmed", txHash: r.txHash, chain: "Arc_Testnet", amountMinor: outcome.rebateMinor,
+      });
+    }
+
+    await deps.store.transition(orderId, "released", {
+      eurcOutMinor: outcome.eurcOutMinor, rebateMinor: outcome.rebateMinor, settledAt: new Date(),
+    });
+
+    // What the seller keeps: the full settlement when no rebate was delivered,
+    // or the floor once the surplus went back to the payer.
+    const sellerEurcMinor = rebateTxHash ? outcome.eurcOutMinor - outcome.rebateMinor : outcome.eurcOutMinor;
+    const payout = mockPayout({
+      orderId, beneficiary: order.receiver as Address,
+      eurcMinor: sellerEurcMinor, settlementTxHash: outcome.swapTxHash, now: now(),
+    });
+    // Persisted before the event fires: a handler that reads `payoutFor`
+    // must not race the write that makes the answer exist.
+    await deps.store.savePayout(orderId, payout);
+    emitter.emit("released", {
+      orderId, eurcOutMinor: outcome.eurcOutMinor, rebateMinor: outcome.rebateMinor, rebateTxHash,
+    });
+  }
+
+  /**
+   * Everything on the bank path AFTER the escrow has been emptied: quote, floor
+   * check, broadcast, ledger, rebate.
+   *
+   * Split out of `releaseToBank` because it has to be re-enterable. Every
+   * refusal below leaves the order in `settlement_pending` holding captured
+   * USDC, and that state is explicitly recoverable — but the only way back in
+   * used to be `release()`, which starts by capturing an escrow that is already
+   * empty. `retrySettlement()` enters here instead.
+   *
+   * Takes the rail and its limits from the caller rather than reading them: on
+   * the first pass they were deliberately read BEFORE the capture, as the last
+   * thing that could still fail harmlessly.
+   */
+  async function payoutAfterCapture(args: {
+    order: OrderRecord;
+    hash: Hex;
+    netMinor: bigint;
+    destinationMinor: bigint;
+    rail: PayoutRail;
+    limits: PayoutLimits;
+  }): Promise<void> {
+    const { order, hash, netMinor, destinationMinor, rail, limits } = args;
+    const orderId = order.id;
+    const cap = { netMinor };
+
+    /**
+     * Captured, but the fiat leg did not start. Funds are safe; say why.
+     *
+     * A RETRY that stalls again is already in `settlement_pending`, and the
+     * lifecycle has no self-loops — deliberately, and it is tested. So the
+     * second refusal is recorded as an event rather than a transition: the
+     * state is already correct, only the reason is new. Transitioning would
+     * throw `InvalidStateTransition` and turn a recoverable stall into an
+     * exception the caller has to distinguish from a real failure.
+     */
     const stall = async (reason: string): Promise<void> => {
+      if (order.state === "settlement_pending") {
+        await deps.store.recordEvent({ orderId, type: "payout.stalled", payload: { reason } });
+        return;
+      }
       await deps.store.transition(orderId, "settlement_pending", { failureReason: reason });
     };
 
@@ -847,49 +963,79 @@ export function createRivoKit(deps: RivoKitDeps) {
       }
 
       if (outcome.status === "released") {
-        if (outcome.swapTxHash) {
-          await deps.store.recordPaymentIdempotent({
-            orderId, nonce: `${hash}:swap`, kind: "swap",
-            status: "confirmed", txHash: outcome.swapTxHash, chain: "Arc_Testnet", amountMinor: outcome.eurcOutMinor,
-          });
-        }
-
-        // Return the surplus to the payer, when a rebate payer is wired and there
-        // is a surplus. Do this BEFORE the payout so the seller's instruction
-        // reflects what they actually retain — the floor, not floor + rebate.
-        let rebateTxHash: string | undefined;
-        if (deps.payRebate && outcome.rebateMinor > 0n) {
-          const r = await deps.payRebate({
-            orderId, to: order.payer as Address, amountMinor: outcome.rebateMinor, token: tokenOut,
-          });
-          rebateTxHash = r.txHash;
-          await deps.store.recordPaymentIdempotent({
-            orderId, nonce: `${hash}:rebate`, kind: "rebate",
-            status: "confirmed", txHash: r.txHash, chain: "Arc_Testnet", amountMinor: outcome.rebateMinor,
-          });
-        }
-
-        await deps.store.transition(orderId, "released", {
-          eurcOutMinor: outcome.eurcOutMinor, rebateMinor: outcome.rebateMinor, settledAt: new Date(),
-        });
-
-        // What the seller keeps: the full settlement when no rebate was delivered,
-        // or the floor once the surplus went back to the payer.
-        const sellerEurcMinor = rebateTxHash ? outcome.eurcOutMinor - outcome.rebateMinor : outcome.eurcOutMinor;
-        const payout = mockPayout({
-          orderId, beneficiary: order.receiver as Address,
-          eurcMinor: sellerEurcMinor, settlementTxHash: outcome.swapTxHash, now: now(),
-        });
-        // Persisted before the event fires: a handler that reads `payoutFor`
-        // must not race the write that makes the answer exist.
-        await deps.store.savePayout(orderId, payout);
-        emitter.emit("released", {
-          orderId, eurcOutMinor: outcome.eurcOutMinor, rebateMinor: outcome.rebateMinor, rebateTxHash,
-        });
+        await settleWalletRelease({ order, hash, outcome });
       } else {
-        // Captured but not settled — funds are with the receiver as USDC.
-        await deps.store.transition(orderId, "settlement_pending");
+        // Captured but not settled — funds are with the receiver as USDC. The
+        // reason travels with the transition: `settlement_pending` with no
+        // stated cause is the hardest state in the lifecycle to act on.
+        await deps.store.transition(orderId, "settlement_pending", { failureReason: outcome.reason });
       }
+    },
+
+    /**
+     * Finish a wallet-path settlement that was captured but never converted.
+     *
+     * `settlement_pending` has always been documented as recoverable — the
+     * escrow is empty, the USDC sits with the receiver, and only the swap is
+     * missing. But until now the only public way back in was `release()`, which
+     * begins by capturing an escrow that has nothing left to capture. The
+     * recovery existed (`retrySettlement` in the orchestrator, proven by
+     * `scripts/live-recovery.mjs`) and was simply not reachable without a deep
+     * import into unsupported internals.
+     *
+     * Bank-bound orders come here too, and take the other road: no swap, just
+     * the payout leg again, against a fresh quote. Either way the escrow is
+     * never touched a second time.
+     *
+     * Idempotent in the direction that matters — a retry that fails again
+     * leaves the order exactly where it was, with a new reason recorded.
+     */
+    async retrySettlement(orderId: string): Promise<void> {
+      const order = await get(orderId);
+      if (order.state !== "settlement_pending") {
+        throw new Error(
+          `Order ${orderId} is ${order.state}, not settlement_pending. ` +
+            "retrySettlement only resumes a capture that never reached its currency; " +
+            "use release() to start one.",
+        );
+      }
+
+      const paymentInfo = paymentInfoFromRecord(order);
+      const hash = getPaymentInfoHash(paymentInfo, config.chainId, config.escrowAddress);
+      const priceOutMinor = BigInt(order.price_eur);
+      // What the settlement wallet actually holds: the escrow split the operator
+      // fee off at capture, so the gross was never there to convert.
+      const netMinor = netOfFee(BigInt(order.max_amount), paymentInfo.minFeeBps);
+
+      if ((order.payout_to ?? "wallet") === "bank") {
+        const rail = requireRail(`Order ${orderId} is bank-bound and`);
+        const limits = await rail.limits();
+        await payoutAfterCapture({
+          order,
+          hash,
+          netMinor,
+          destinationMinor: toDestinationMinor(priceOutMinor, limits.destinationScale),
+          rail,
+          limits,
+        });
+        return;
+      }
+
+      const outcome = await runRetrySettlement(
+        { escrow: deps.escrow, fx: deps.fx, settlementAddress: config.settlementAddress, tokenIn, tokenOut },
+        { amountMinor: netMinor, priceOutMinor },
+      );
+
+      if (outcome.status === "released") {
+        await settleWalletRelease({ order, hash, outcome });
+        return;
+      }
+
+      // Still short. No transition — the lifecycle has no self-loops — so the
+      // fresh reason is recorded as an event instead.
+      await deps.store.recordEvent({
+        orderId, type: "settlement.stalled", payload: { reason: outcome.reason },
+      });
     },
 
     /** Return the payer's money and bridge it back to receivingChain (invariant 5). */

@@ -308,6 +308,79 @@ describe("release", () => {
   });
 });
 
+/**
+ * The way OUT of `settlement_pending`.
+ *
+ * The state was always documented as recoverable, and the orchestrator has had
+ * `retrySettlement` since Phase 2 — but nothing on the facade reached it, so the
+ * only public move left was `release()`, which starts by capturing an escrow the
+ * first release already emptied. These tests pin the difference: the escrow must
+ * not be touched again.
+ */
+describe("retrySettlement", () => {
+  it("swaps again without re-capturing, and reaches released", async () => {
+    const deps = makeDeps({ initial: mkOrder({ state: "settlement_pending" }) });
+    const kit = createRivoKit(deps);
+    const released = vi.fn();
+    kit.on("released", released);
+
+    await kit.retrySettlement("ord_x");
+
+    // The whole point: the escrow is already empty.
+    expect(deps.escrow.capture).not.toHaveBeenCalled();
+    expect(deps.fx.swapWithFloor).toHaveBeenCalledOnce();
+    expect((await kit.status("ord_x")).state).toBe("released");
+    expect(released).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: "ord_x", eurcOutMinor: 2_030_000n }),
+    );
+    // The same bookkeeping a first-pass release owes, by the same code path.
+    expect(await kit.payoutFor("ord_x")).toMatchObject({ label: "MOCK" });
+  });
+
+  it("swaps the POST-fee amount, not the gross the payer authorized", async () => {
+    const deps = makeDeps({
+      initial: mkOrder({ state: "settlement_pending", max_amount: "2100000", min_fee_bps: 25, max_fee_bps: 25 }),
+    });
+    const kit = createRivoKit(deps);
+
+    await kit.retrySettlement("ord_x");
+
+    // 2_100_000 − 25bps = 2_094_750. Swapping the gross would try to move tokens
+    // the settlement wallet never received — the fee left at capture.
+    expect(deps.fx.swapWithFloor).toHaveBeenCalledWith(
+      expect.objectContaining({ amountInMinor: 2_094_750n }),
+    );
+  });
+
+  it("stays in settlement_pending when the floor is still missed, and records why", async () => {
+    const deps = makeDeps({
+      initial: mkOrder({ state: "settlement_pending" }),
+      fxSwap: vi.fn(async () => {
+        throw new FloorNotMetError(2_000_000n, new Error("stopLimit"));
+      }),
+    });
+    const kit = createRivoKit(deps);
+
+    // Must not throw: a retry that fails is a recoverable outcome, not an error.
+    await kit.retrySettlement("ord_x");
+
+    expect((await kit.status("ord_x")).state).toBe("settlement_pending");
+    // No self-loop in the lifecycle, so the fresh reason arrives as an event.
+    expect(deps.store.transition).not.toHaveBeenCalled();
+    expect(deps.store.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: "ord_x", type: "settlement.stalled" }),
+    );
+  });
+
+  it("refuses an order that is not stuck", async () => {
+    const deps = makeDeps({ initial: mkOrder({ state: "funded" }) });
+    const kit = createRivoKit(deps);
+
+    await expect(kit.retrySettlement("ord_x")).rejects.toThrow(/not settlement_pending/);
+    expect(deps.fx.swapWithFloor).not.toHaveBeenCalled();
+  });
+});
+
 describe("refund", () => {
   it("voids a funded order and bridges back, reaching refunded", async () => {
     const deps = makeDeps({ initial: mkOrder({ state: "funded" }) });
