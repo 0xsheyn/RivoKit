@@ -56,8 +56,21 @@ function Code({ children }: { children: string }) {
   );
 }
 
+/**
+ * Body copy, filling the column.
+ *
+ * It used to carry `max-w-[70ch]` — a reading measure, and a defensible one in
+ * isolation. It was not in isolation: every other block on this page (the
+ * section rules, the code blocks, both tables) runs the full width of the
+ * column, so the prose stopped around 525px inside a ~964px column and left a
+ * ragged 440px of nothing down the right of the page. A measure that disagrees
+ * with everything around it does not read as typography, it reads as a layout
+ * bug — which is exactly how it was reported.
+ *
+ * The column itself is the measure now: 1280px minus the rail and the gutters.
+ */
 function P({ children }: { children: React.ReactNode }) {
-  return <p className="mb-4 max-w-[70ch] text-[14px] leading-relaxed text-[var(--bone)]/75">{children}</p>;
+  return <p className="mb-4 text-[14px] leading-relaxed text-[var(--bone)]/75">{children}</p>;
 }
 
 function H3({ children }: { children: React.ReactNode }) {
@@ -92,7 +105,7 @@ export default function DocsPage() {
             <h1 className="f-display text-[38px] leading-tight text-[var(--bone)] sm:text-[52px]">
               Everything, on one page.
             </h1>
-            <p className="mt-4 max-w-[70ch] text-[15px] leading-relaxed text-[var(--bone)]/75">
+            <p className="mt-4 text-[15px] leading-relaxed text-[var(--bone)]/75">
               What RivoKit is built out of, how the repository is laid out, the code that actually matters, and a complete
               path from <span className="f-mono text-[var(--bone)]">npm install</span> to euros leaving escrow for a bank
               account. Deeper reference lives in four Markdown documents, linked where each one takes over.
@@ -271,7 +284,7 @@ export default function DocsPage() {
       if (token === "USDC") return sendSellerUsdc(to, amountMinor);
       return sendMerchantEurc(to, amountMinor);
     };`}</Code>
-            <p className="my-5 max-w-[70ch] border-l-2 border-[color:var(--sodium)] pl-4 text-[13px] leading-relaxed text-[var(--bone)]/80">
+            <p className="my-5 border-l-2 border-[color:var(--sodium)] pl-4 text-[13px] leading-relaxed text-[var(--bone)]/80">
               <span className="text-[var(--bone)]">Server-side only.</span>{" "}
               <span className="f-mono">CIRCLE_API_KEY</span>, <span className="f-mono">CIRCLE_ENTITY_SECRET</span>,{" "}
               <span className="f-mono">KIT_KEY</span> and <span className="f-mono">CIRCLE_CPN_KEY</span> must never reach a
@@ -317,7 +330,7 @@ export default function DocsPage() {
             </P>
 
             <H3>3 — The invariants you inherit</H3>
-            <ol className="mb-4 max-w-[70ch] list-decimal space-y-2 pl-5 text-[14px] leading-relaxed text-[var(--bone)]/75 marker:text-[var(--ash)]">
+            <ol className="mb-4 list-decimal space-y-2 pl-5 text-[14px] leading-relaxed text-[var(--bone)]/75 marker:text-[var(--ash)]">
               <li>The recipient receives ≥ <span className="f-mono text-[var(--bone)]">priceEURMinor</span>, or the swap reverts with funds safe.</li>
               <li>Refunds always return to the recorded <span className="f-mono text-[var(--bone)]">receivingChain</span>.</li>
               <li><span className="f-mono text-[var(--bone)]">rebate = max(0, actualOutput − priceEURMinor)</span>.</li>
