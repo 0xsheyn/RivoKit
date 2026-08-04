@@ -263,5 +263,3 @@ financial advice. The embedding host is fully responsible for the fiat leg,
 KYB/AML and compliance in its jurisdiction.
 
 Report vulnerabilities privately, not through public issues.
-
-<div align="center">Built for the <b>Build on Arc</b> hackathon — DeFi track.</div>
