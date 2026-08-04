@@ -12,7 +12,9 @@
 # ── Dokumen internal / perencanaan — LOKAL saja ────────────────────────
 # Hanya README.md yang publik sebagai halaman depan repo (bahasa Inggris).
 # LICENSE juga publik — file legal, bukan dokumentasi.
-docs/
+# Berjangkar ke root: tanpa "/" di depan, pola ini juga menelan direktori
+# bernama docs di kedalaman mana pun — termasuk rute demo/app/docs.
+/docs/
 
 # Konteks kerja untuk Claude Code — menyebut apa yang BELUM terbukti, jadi
 # internal. Hapus baris ini bila suatu saat ingin dibagikan ke kontributor.
