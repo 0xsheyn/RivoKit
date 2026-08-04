@@ -45,7 +45,7 @@ export const metadata: Metadata = {
   // evicted by a hard reload — so an origin that once served no icon keeps
   // showing none. The query string is a URL the cache has no entry for. Bump
   // `v` if the artwork itself ever changes.
-  icons: { icon: [{ url: "/favicon.ico?v=2", type: "image/x-icon" }] },
+  icons: { icon: [{ url: "/favicon.ico?v=3", type: "image/x-icon" }] },
 };
 
 export default function RootLayout({
