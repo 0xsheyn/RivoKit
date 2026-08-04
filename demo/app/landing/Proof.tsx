@@ -5,7 +5,7 @@ import Reproduce from "./Reproduce";
 
 export default function Proof() {
   return (
-    <section className="mx-auto w-full max-w-[1440px] px-5 py-8 md:px-16">
+    <section id="proof" className="mx-auto w-full max-w-[1440px] scroll-mt-16 px-5 py-8 md:px-16">
       <SectionHeader number="05" title="WHAT'S PROVEN, WHAT ISN'T" />
 
       {/* Nothing but evidence lives here now: the ceiling, the table, what this

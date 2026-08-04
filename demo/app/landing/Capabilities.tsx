@@ -46,7 +46,7 @@ const CELLS = [
 
 export default function Capabilities() {
   return (
-    <section className="mx-auto w-full max-w-[1440px] px-5 py-8 md:px-16">
+    <section id="capabilities" className="mx-auto w-full max-w-[1440px] scroll-mt-16 px-5 py-8 md:px-16">
       <SectionHeader number="03" title="WHAT RIVOKIT ACTUALLY DOES" />
       <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-12">
         <h2 className="f-display text-[34px] leading-[0.95] text-[var(--bone)] md:col-span-6 md:text-[44px]">
