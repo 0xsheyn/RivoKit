@@ -231,6 +231,55 @@ describe("fund", () => {
     expect(events).toEqual(["funding_pending", "funded"]);
     expect((await kit.status("ord_x")).state).toBe("funded");
   });
+
+  /**
+   * `funded` used to be emitted OUTSIDE the transition guard — the only one of
+   * the seven emits in the facade that was. Funding executors are idempotent by
+   * design (the reference one returns early once the escrow has collected), so
+   * a repeat call does not throw; it fell through to the emit and announced
+   * `funded` a second time. A host that ships goods on that event shipped twice.
+   */
+  it("does not re-emit funded when the order is already funded", async () => {
+    const deps = makeDeps({ initial: mkOrder({ state: "funded" }) });
+    // An idempotent executor: nothing to send, and no new hash to report.
+    (deps as { fund: unknown }).fund = vi.fn(async () => ({}));
+    const kit = createRivoKit(deps);
+    const funded = vi.fn();
+    kit.on("funded", funded);
+
+    await kit.fund("ord_x");
+
+    expect(funded).not.toHaveBeenCalled();
+    expect((await kit.status("ord_x")).state).toBe("funded");
+  });
+
+  it("writes no ledger row when the executor reports no transaction", async () => {
+    const deps = makeDeps({ initial: mkOrder({ state: "funded" }) });
+    (deps as { fund: unknown }).fund = vi.fn(async () => ({}));
+    const kit = createRivoKit(deps);
+
+    await kit.fund("ord_x");
+
+    // `confirmed_has_tx` only asks that a hash is PRESENT, so a placeholder
+    // would satisfy the constraint while putting a string no explorer can
+    // resolve into a row marked confirmed. Absent beats invented.
+    expect(deps.store.recordPaymentIdempotent).not.toHaveBeenCalled();
+  });
+
+  it("still emits funded exactly once when a refunded order is re-funded", async () => {
+    const deps = makeDeps({ initial: mkOrder({ state: "refunded" }) });
+    (deps as { fund: unknown }).fund = vi.fn(async () => ({}));
+    const kit = createRivoKit(deps);
+    const funded = vi.fn();
+    kit.on("funded", funded);
+
+    await kit.fund("ord_x");
+
+    // The worst version of the old bug: announcing `funded` for money that had
+    // already gone back to the payer.
+    expect(funded).not.toHaveBeenCalled();
+    expect((await kit.status("ord_x")).state).toBe("refunded");
+  });
 });
 
 describe("release", () => {

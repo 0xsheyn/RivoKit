@@ -233,7 +233,13 @@ function build() {
   // way; idempotent so a re-fund is a no-op.
   const fund = async ({ paymentInfo, hash, signature }: { paymentInfo: Record<string, unknown>; hash: Hex; signature?: Hex }) => {
     const ps = await escrow.getPaymentState(hash);
-    if (ps.hasCollectedPayment) return { authorizeTxHash: "0xalready" };
+    // Already collected — nothing to send, and NO hash to report. This used to
+    // return the string "0xalready", which the facade then wrote into a ledger
+    // row marked `confirmed`. The `confirmed_has_tx` constraint only asks that a
+    // hash is present, so the placeholder passed while being impossible to open
+    // on an explorer. An absent hash is now the honest answer and the facade
+    // skips the write.
+    if (ps.hasCollectedPayment) return {};
     const sig = signature ?? (await buyerWallet.signTypedData(authTypedData(paymentInfo) as never));
     const auth = await escrow.authorize(paymentInfo as never, (paymentInfo as { maxAmount: bigint }).maxAmount, TOKEN_COLLECTOR, sig);
     return { authorizeTxHash: auth.txHash };
