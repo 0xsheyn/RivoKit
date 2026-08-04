@@ -63,32 +63,40 @@ question, not a code one.
 Each of these works and has evidence — with a named gap that the evidence does
 not cover.
 
-### The browser wallet prompts have never been clicked
+### Two things are proven by use, and have no artifact to show for it
 
-Both funding rails in `demo/app/wallet-rails.ts` have executed on-chain (Gateway
-spend `0xca092f…4d774517`, CCTP bridge mint `0x35da17…fe945639`) — but driven by
-an **EIP-1193 provider, not MetaMask's UI**. So the switch-chain prompt, the
-add-chain prompt for Arc, and a user declining either remain unobserved.
+Both entries below used to sit here as open gaps. They are closed — by the only
+evidence they could ever have had, which is worth stating plainly rather than
+letting them sit unlabelled beside rows carrying transaction hashes.
 
-Every *answer* to those prompts has a branch and a test: switch accepted, 4902 →
-add chain, an add that does not switch, a declined switch, a declined add, and a
-genuine wallet fault that must not be mistaken for a refusal. What is missing is
-the click — and no server key may stand in for it, because being unable to
-substitute a server key is precisely the property being demonstrated.
+**The browser wallet prompts have been clicked.** Both funding rails in
+`demo/app/wallet-rails.ts` had already executed on-chain (Gateway spend
+`0xca092f…4d774517`, CCTP bridge mint `0x35da17…fe945639`), but driven by an
+EIP-1193 provider rather than a wallet's UI. All six answers have since been
+exercised by hand: already on Arc (no prompt), switch accepted, switch declined
+(4001, which surfaces as a refusal and not as a failure), add-chain (4902)
+accepted and then declined, and a two-chain bridge raising the switch prompt
+**twice** — confirming the `pinnedTo()` regression has not returned.
 
-### The marketplace UI has no bank-payout button
+**The marketplace's bank button has been pressed through to `paid_out`.**
+`Storefront` in `Marketplace.tsx` reads `mpPayoutOptions()`, checks
+`canPayoutToBank(p)`, and renders **BUY → EURO FIAT** on every listing that
+clears the corridor minimum, passing `payoutTo: "bank"` into `mpCheckout`.
+Nothing about the destination is asked of the buyer — the price decides.
 
-`Marketplace.tsx` never passes `payoutTo: "bank"`. The bank path has been driven
-from the marketplace's own **server actions** (order `ord_1785518681_912453`) and
-from the `/sdk` page's UI, which does have the toggle — so "no UI reaches a bank"
-is no longer true. The specific gap is the marketplace button.
-`canPayoutToBank()` already computes which listings clear the corridor minimum.
+Neither has a hash or a replayable run attached, and neither can: the property
+being demonstrated is that **no server key may stand in for the user's
+decision**, so an artifact produced by a server key would disprove rather than
+support it. Read them as testimony. Every other ✅ in this document is
+machine-checkable.
 
-### The demo catalog is mostly below the corridor minimum
+### The demo catalog is split either side of the corridor minimum
 
-Listings at €2.50–€5.00 are all under the ~11 USDC EUR/SEPA requires, so a bank
-order over them is always refused at `createOrder`. There is exactly one €10.00
-listing (`dsk`) for that purpose.
+Six listings, €6.50–€14.50. The three below €10.00 can only settle as EURC in a
+wallet; the three above it clear the ~11 USDC EUR/SEPA requires and go to a bank.
+The threshold sits deliberately above the observed ~€9.4 so nothing lands in the
+gap, and it is only a hint: the authority is `PayoutRail.limits()`, read live at
+`createOrder`, because that USDC minimum drifts with FX.
 
 ### The webhook endpoint does not survive its own process
 
@@ -245,26 +253,28 @@ group — it is a target, and it settled.
 Ordered by what closes a structural hole rather than what adds surface. Nothing
 here is a promise; it is what the ledger above says is still missing.
 
-**Next — finish proving what is already written**
+**Next — the last two gaps, and neither is code**
 
-1. **A human clicking the wallet prompts.** Every answer has a branch and a test.
-   What is left is seeing the prompts in MetaMask, which is the property being
-   demonstrated.
-2. **A bank-payout button in the *marketplace* UI.** `canPayoutToBank()` already
-   says which listings qualify.
-3. **A durable public endpoint**, so a webhook subscription outlives the process
-   that created it.
-4. **A scheduled reconciliation**, closing the stale-row gap for standalone
-   cash-outs whose webhook never arrives.
+This group used to open with two items about a missing click. Both have been
+done and both are recorded above; what is left is hosting, which no amount of
+writing closes.
+
+1. **A durable public endpoint**, so a webhook subscription outlives the process
+   that created it. The route already exports `HEAD` — what Circle actually
+   validates with — so the blockers are a host, Deployment Protection being off
+   for that URL, and a Console step that is manual forever.
+2. **A scheduled reconciliation**, closing the stale-row gap for standalone
+   cash-outs whose webhook never arrives. The sweep can be written today; the
+   scheduler waits on (1).
 
 **Later — widen the reach once the above holds**
 
-5. **CPN BRL/PIX and MXN/SPEI.** Implemented; unexercised on purpose.
-6. **Direct unit coverage for the network-facing modules.** Two real defects have
+3. **CPN BRL/PIX and MXN/SPEI.** Implemented; unexercised on purpose.
+4. **Direct unit coverage for the network-facing modules.** Two real defects have
    already hidden there, so this is remediation, not tidiness.
 
 **Gated on things outside the code**
 
-7. **One real payment into an account you control** — the only thing that turns
+5. **One real payment into an account you control** — the only thing that turns
    the fiat leg from *reported* into *observed*. EUR/SEPA, ~€10–12.
-8. **Mainnet** — audit, key timelock/multisig, legal review, OFI onboarding.
+6. **Mainnet** — audit, key timelock/multisig, legal review, OFI onboarding.
