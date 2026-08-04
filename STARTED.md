@@ -47,7 +47,7 @@ version bump.
 ```bash
 git clone https://github.com/0xsheyn/RivoKit.git && cd RivoKit
 npm install                 # runs `prepare` → builds dist/
-npm test                    # 441 tests / 25 files — needs no credentials at all
+npm test                    # 462 tests / 26 files — needs no credentials at all
 ```
 
 `npm test` passing on a fresh clone with an empty `.env.local` is the intended
@@ -55,7 +55,7 @@ first checkpoint. Nothing below is required to reach it.
 
 | Command | Does |
 |---|---|
-| `npm test` | vitest — 441 green / 25 files, no credentials |
+| `npm test` | vitest — 462 green / 26 files, no credentials |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build:lib` | SDK → `dist/` (ESM + `.d.ts`), entry `src/index.ts` |
 | `npm run setup` | Deploy CPP instances + operator/merchant wallets (idempotent) |
@@ -453,8 +453,10 @@ Not a checklist for a demo. Each of these is load-bearing.
    the gasless ERC-3009 path is designed for exactly this replacement.
 4. **Sellers sign their own cash-outs.** `submitSigned` exists so the wallet that
    *holds* the USDC is the one that authorizes it to leave.
-5. **Run a durable webhook endpoint**, plus a scheduled sweep with
-   `refreshPayout` for the rows a missed webhook would otherwise strand.
+5. **Run a durable webhook endpoint**, plus a scheduled sweep for the rows a
+   missed webhook would otherwise strand: `refreshPayout` for a payout attached
+   to an order, `reconcileCpnPayments` for a standalone cash-out, which belongs
+   to no order and so is reachable by nothing else.
 6. **Re-run `check-operator.mjs` after any collector redeploy.** The operator's
    USDC allowance is bound to the refund collector address — redeploy it and the
    allowance is 0 and `refund` reverts.
@@ -476,6 +478,8 @@ Not a checklist for a demo. Each of these is load-bearing.
 | A Gateway spend whose burn already landed | **Resume, never retry** — retrying burns twice. The error carries `recoverability: 'RESUMABLE'` plus the attestation and signature; call `gatewayMint(...)`. Simulate first: the attestation is single-use. |
 | `.next` manifest corrupted | `next build demo` ran while `npm run dev` was live. Never run both. |
 | A payout row stuck at `pending` | Expected until something reads the rail again. Call `refreshPayout(orderId)`, or run `scripts/live-payout-reconcile.mjs`. |
+| A cash-out stuck at `CRYPTO_FUNDS_PENDING` | Its webhook never landed, and no order owns the row — so `refreshPayout` cannot see it. Run `scripts/live-cashout-reconcile.mjs`. |
+| An order stuck at `settlement_pending` | Captured but not converted; the funds are safe with the receiver as USDC. Read `order.failureReason`, then call `retrySettlement(orderId)` — **not** `release()`, which would capture a second time. |
 
 More context on any of these: [ARCHITECTURE.md](ARCHITECTURE.md) for why the
 design is shaped this way, [LIMITATIONS.md](LIMITATIONS.md) for what is not

@@ -4,7 +4,7 @@
 
 ### An embeddable cross-border settlement SDK on Arc — multi-chain USDC in, local-currency out.
 
-![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![contracts](https://img.shields.io/badge/contracts-verified%20on%20Arc-success) ![tests](https://img.shields.io/badge/tests-441%20passing-brightgreen) ![status](https://img.shields.io/badge/status-mvp%20%C2%B7%20testnet-orange) ![license](https://img.shields.io/badge/license-MIT-green)
+![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![contracts](https://img.shields.io/badge/contracts-verified%20on%20Arc-success) ![tests](https://img.shields.io/badge/tests-462%20passing-brightgreen) ![status](https://img.shields.io/badge/status-mvp%20%C2%B7%20testnet-orange) ![license](https://img.shields.io/badge/license-MIT-green)
 
 **[Getting started](STARTED.md)** · **[Architecture](ARCHITECTURE.md)** · **[Proofs](PROOFS.md)** · **[Limitations](LIMITATIONS.md)**
 
@@ -55,7 +55,7 @@ leaving a wallet on Arc.
   and the server only broadcasts it. Proven from a zero Permit2 allowance.
 - Webhooks that are **verified, not trusted** — signature-checked against the
   live key before any reducer sees a body, with a one-digit edit refused.
-- **441 unit tests** across 25 files, runnable with no credentials at all.
+- **462 unit tests** across 26 files, runnable with no credentials at all.
 
 And the ceiling on all of it: **`COMPLETED` is CPN reporting the fiat leg
 finished, not anyone watching euros arrive.** That distinction is not a
@@ -181,6 +181,7 @@ compliance?, emitter?, payRebate?, payoutRail?, operatorGas?, refundBridgeParams
 | `createOrder(params)` | Screen → size → store. Rejects here — not at release — if the rail would refuse the order. |
 | `fund(orderId, opts?)` | Moves USDC to Arc and authorizes into escrow. `opts.signature` relays a browser-wallet ERC-3009. |
 | `release(orderId, proof)` | Capture → settle. Reaches a bank when `payoutTo: "bank"`. |
+| `retrySettlement(orderId)` | The way out of `settlement_pending`: swap again, or re-quote and broadcast. Never captures twice. |
 | `refund(orderId)` | `void`/`refund` + bridge-back to `receivingChain`. |
 | `status(orderId)` · `payoutFor(orderId)` | Read the order and its payout row. Both persisted, so both survive a restart. |
 | `refreshPayout(orderId)` | Second read of the rail — the fallback for hosts with no webhook endpoint. |
@@ -195,6 +196,12 @@ asynchronous. `paid_out` is terminal and has no edge back to `refund_pending`:
 money in a beneficiary's bank is beyond anything an operator-funded refund can
 reach.
 
+`settlement_pending` means **captured, but not yet in the promised currency** —
+the escrow is empty and the USDC sits with the receiver. It is recoverable, and
+`retrySettlement()` is what recovers it; calling `release()` again would try to
+capture an escrow that has nothing left in it. `order.failureReason` says which
+refusal put it there.
+
 Standalone off-ramp, decoupled from any order:
 `createCpnRamp({apiKey, corridor})` → `quote` · `prepare` (safe) · `submit`
 (irreversible) · `submitSigned` · `status`.
@@ -205,7 +212,7 @@ Wiring all of this into a real app, step by step: **[STARTED.md](STARTED.md)**.
 
 | | |
 |---|---|
-| Tests | **441 passing / 25 files**, runnable with no credentials at all |
+| Tests | **462 passing / 26 files**, runnable with no credentials at all |
 | Typecheck | clean (`tsc --noEmit`) |
 | Chain | Arc Testnet (`5042002`) — RivoKit's own CPP instances, all source-verified full match |
 | Corridors proven | **EUR/SEPA** and **USD/WIRE**, both `COMPLETED` |
