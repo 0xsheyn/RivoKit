@@ -261,7 +261,9 @@ export default function DocsPage() {
             </P>
             <Code>{`const fund = async ({ paymentInfo, hash, signature }) => {
       const state = await escrow.getPaymentState(hash);
-      if (state.hasCollectedPayment) return { authorizeTxHash: "0xalready" };  // idempotent
+      // Idempotent. No new transaction, so no hash — never invent one: the
+      // facade would write it into a ledger row marked \`confirmed\`.
+      if (state.hasCollectedPayment) return {};
 
       // Either relay a browser-wallet signature, or sign server-side (demo only).
       const sig = signature ?? await buyerWallet.signTypedData(

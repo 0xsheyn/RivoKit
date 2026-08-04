@@ -107,7 +107,19 @@ export type FundExecutor = (args: {
    * with a host-held key. Absent for the default server-signed path.
    */
   signature?: Hex;
-}) => Promise<{ fundingTxHash?: string; authorizeTxHash: string }>;
+}) => Promise<{
+  fundingTxHash?: string;
+  /**
+   * The authorize transaction, when this call produced one.
+   *
+   * OPTIONAL, and that is the honest shape. Executors are expected to be
+   * idempotent — the reference one returns early when the escrow has already
+   * collected — and in that case there is no new transaction to name. Returning
+   * a placeholder instead would put a string that cannot be opened on a block
+   * explorer into a ledger row marked `confirmed`.
+   */
+  authorizeTxHash?: string;
+}>;
 
 /**
  * Deliver the settlement surplus (rebate) back to the payer.
@@ -906,16 +918,41 @@ export function createRivoKit(deps: RivoKitDeps) {
       }
 
       const res = await deps.fund({ order, paymentInfo, hash, ...(opts?.signature ? { signature: opts.signature } : {}) });
-      await deps.store.recordPaymentIdempotent({
-        orderId, nonce: `${hash}:authorize`, kind: "authorize",
-        status: "confirmed", txHash: res.authorizeTxHash, chain: "Arc_Testnet", amountMinor: paymentInfo.maxAmount,
-      });
+
+      // An executor that found the escrow already collected has no NEW hash to
+      // report, and must not invent one: `confirmed_has_tx` only asks that a
+      // hash is present, so a placeholder would satisfy the constraint while
+      // putting an unopenable string in a ledger whose whole discipline is that
+      // a confirmed row can be checked against the chain. No hash, no row —
+      // and the row from the original authorize is already there anyway.
+      if (res.authorizeTxHash) {
+        await deps.store.recordPaymentIdempotent({
+          orderId, nonce: `${hash}:authorize`, kind: "authorize",
+          status: "confirmed", txHash: res.authorizeTxHash, chain: "Arc_Testnet", amountMinor: paymentInfo.maxAmount,
+        });
+      }
 
       order = await get(orderId);
+      // The emit belongs INSIDE the transition, and used to sit outside it —
+      // the only one of the seven emits in this file that did.
+      //
+      // Funding executors are idempotent by design (the reference one returns
+      // early when the escrow has already collected), so a repeated `fund()`
+      // does not throw. It simply fell through to the emit, and `funded` fired
+      // again on an order that was already funded — or, worse, on one that had
+      // since been refunded. A host that ships goods or grants access on
+      // `funded` would have done it twice.
+      //
+      // A state other than `funding_pending` here means the order did not
+      // become funded on THIS call, so nothing is announced. Note that leaves
+      // `failed → funded` unhandled: it is a legal transition the state machine
+      // allows for floor-miss recovery, but nothing drives it from here, and
+      // wiring it in silently would change recovery semantics rather than fix
+      // the defect this comment is about.
       if (order.state === "funding_pending") {
         await deps.store.transition(orderId, "funded", { fundedAt: new Date() });
+        emitter.emit("funded", { orderId });
       }
-      emitter.emit("funded", { orderId });
     },
 
     /**

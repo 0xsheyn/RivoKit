@@ -6,6 +6,7 @@ import { payoutRailFor } from "../lib/cpn.server.ts";
 import type { SourceChainId } from "../lib/source-chain.ts";
 import { fundsMayBeInFlight } from "./wallet-errors.ts";
 import { toDestinationMinor } from "../../src/payout/rail.ts";
+import { assertUnlocked } from "../lib/guard.server.ts";
 
 // Marketplace status derived from the on-chain OrderState PLUS off-chain signals
 // (shipping, buyer confirmation, dispute) recorded in the events table. The chain
@@ -198,6 +199,9 @@ export async function mpCheckout(
   payoutTo: "wallet" | "bank" = "wallet",
 ): Promise<MpResult> {
   return wrap(async () => {
+    // No amount cap here on purpose: the price comes from the fixed catalog,
+    // not from the caller, so a listing is already its own ceiling.
+    await assertUnlocked("Checking out");
     const { kit, store, addresses, payout } = getRivoKit();
     const product = productById(productId);
     if (!product) throw new Error(`no such product: ${productId}`);
@@ -541,6 +545,7 @@ export async function mpPay(
   from?: SourceChainId,
 ): Promise<MpResult> {
   return wrap(async () => {
+    await assertUnlocked("Paying for an order");
     const { kit, store, funding } = getRivoKit();
     const order = await store.get(orderId);
     if (!order) throw new Error("no such order");
@@ -646,6 +651,9 @@ export async function mpShip(orderId: string, resi: string): Promise<MpResult> {
  */
 export async function mpRelease(orderId: string): Promise<MpResult> {
   return wrap(async () => {
+    // Captures the escrow, and on a bank order carries straight through to an
+    // irreversible CPN broadcast.
+    await assertUnlocked("Releasing an order");
     const { kit, store, sendEurc } = getRivoKit();
     await kit.release(orderId, RELEASE_PROOF);
 
@@ -692,7 +700,13 @@ export async function mpRefreshPayout(orderId: string): Promise<MpResult> {
 
 /** Host approves refund: void/refund back to the buyer. */
 export async function mpRefund(orderId: string): Promise<MpResult> {
-  return wrap(async () => { await getRivoKit().kit.refund(orderId); return orderId; });
+  return wrap(async () => {
+    // Post-capture, this pulls from the OPERATOR's own balance — 154x the cost
+    // of a pre-capture void, and paid by the host either way.
+    await assertUnlocked("Refunding an order");
+    await getRivoKit().kit.refund(orderId);
+    return orderId;
+  });
 }
 
 // ── Reads ──────────────────────────────────────────────────────────────

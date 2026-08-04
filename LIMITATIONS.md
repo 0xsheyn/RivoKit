@@ -135,6 +135,25 @@ nothing fires them on a timer, and nothing will until there is a durable endpoin
 to hang one off. Running them by hand is a real answer for a testnet demo and not
 one for production.
 
+### The demo's gate is one shared secret, not access control
+
+Every Server Action that moves money — a CPN broadcast, a Mint redeem, a
+capture, a refund, an order — is gated server-side by `DEMO_WRITE_KEY` and capped
+per action. Before that, none of them were: a Server Action is a POST endpoint
+whose id ships in the bundle handed to every visitor, so the panel's confirmation
+dialog stood between nobody and an irreversible broadcast signed with a
+server-held key.
+
+What it is now: one secret, one operator, one testnet demo. There are no
+accounts, no roles, no audit trail of who unlocked, and a leaked key is a full
+compromise of the demo's funds up to the per-action cap. **The cap, not the lock,
+is what bounds the worst case** — it applies whether or not the caller is
+unlocked, because a lock can be defeated by a borrowed browser and a ceiling
+cannot be defeated from outside the server at all.
+
+A production deployment holding real value needs real authentication. This is
+sized for what it protects: testnet balances that make a demo work.
+
 ### `release()` does not trigger a Circle Mint redeem
 
 That rail is proven independently (EUR→SEPA twice, USD→wire once, plus the

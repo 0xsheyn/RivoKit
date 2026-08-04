@@ -85,6 +85,8 @@ cp .env.example .env.local
 | `RELAYER_PRIVATE_KEY` | Meta-transaction relay; doubles as the demo seller wallet | In production the seller signs in their own wallet |
 | `BUYER_PRIVATE_KEY` | Demo/live scripts signing ERC-3009 | A demo shortcut — in production the buyer signs in their browser |
 | `NEXT_PUBLIC_SUPABASE_URL` · `SUPABASE_SECRET_KEY` | The order store | Service key — server-side only |
+| `DEMO_WRITE_KEY` | The gate on every action that moves money | **Required to deploy anywhere public.** A production build with this unset refuses those actions outright rather than running open. Unset locally, the gate is open so `npm run dev` needs no ceremony |
+| `DEMO_CAP_TOKEN_MINOR` · `DEMO_CAP_FIAT_MINOR` | Per-action ceilings | Optional. Default 25 USDC and 25.00 fiat. Applied whether or not the caller is unlocked — the cap is what bounds a leaked key |
 
 Written automatically by `npm run setup`, never by hand:
 `NEXT_PUBLIC_RIVO_ESCROW_ADDRESS`, `NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS`,
@@ -228,7 +230,9 @@ funding rail, both of which live in your environment:
 ```ts
 const fund = async ({ paymentInfo, hash, signature }) => {
   const state = await escrow.getPaymentState(hash);
-  if (state.hasCollectedPayment) return { authorizeTxHash: "0xalready" };  // idempotent
+  // Idempotent. No new transaction, so no hash — never invent one, or the
+  // facade writes it into a ledger row marked `confirmed`.
+  if (state.hasCollectedPayment) return {};
 
   // Either relay a browser-wallet signature, or sign server-side (demo only).
   const sig = signature ?? await buyerWallet.signTypedData(
@@ -479,6 +483,8 @@ Not a checklist for a demo. Each of these is load-bearing.
 | `.next` manifest corrupted | `next build demo` ran while `npm run dev` was live. Never run both. |
 | A payout row stuck at `pending` | Expected until something reads the rail again. Call `refreshPayout(orderId)`, or run `scripts/live-payout-reconcile.mjs`. |
 | A cash-out stuck at `CRYPTO_FUNDS_PENDING` | Its webhook never landed, and no order owns the row — so `refreshPayout` cannot see it. Run `scripts/live-cashout-reconcile.mjs`. |
+| An action refuses with "requires the demo to be unlocked" | The server-side gate. Enter `DEMO_WRITE_KEY` in the header's Unlock control. If it says *no demo key set* instead, this is a production build with the variable missing — money-moving actions stay refused until it is there. |
+| An amount refuses as "above this demo's per-action ceiling" | The cap, which applies whether or not you are unlocked. Raise `DEMO_CAP_TOKEN_MINOR` / `DEMO_CAP_FIAT_MINOR` only if that size is genuinely intended. |
 | An order stuck at `settlement_pending` | Captured but not converted; the funds are safe with the receiver as USDC. Read `order.failureReason`, then call `retrySettlement(orderId)` — **not** `release()`, which would capture a second time. |
 
 More context on any of these: [ARCHITECTURE.md](ARCHITECTURE.md) for why the

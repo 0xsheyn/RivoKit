@@ -210,7 +210,10 @@ const fundExecutor = async ({ paymentInfo, hash }) => {
   const ps = await escrow.getPaymentState(hash);
   if (ps.hasCollectedPayment) {
     info("escrow already holds the payment — skipping authorize (idempotent)");
-    return { authorizeTxHash: state.authorizeTxHash ?? "0xalready" };
+    // A real hash when this run produced one; otherwise none at all. The
+    // facade skips the ledger write rather than recording a placeholder that
+    // no explorer can resolve.
+    return state.authorizeTxHash ? { authorizeTxHash: state.authorizeTxHash } : {};
   }
   if (!state.signature) {
     state.signature = await buyerWallet.signTypedData(
