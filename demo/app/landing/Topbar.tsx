@@ -39,7 +39,7 @@ export default function Topbar() {
       >
         <a href="/#top" className="flex shrink-0 items-center gap-2">
           <RivoMark className="size-7 md:size-8" size={64} priority />
-          <span className="f-display text-[19px] leading-none text-[var(--bone)] md:text-[21px]">rivokit</span>
+          <span className="f-ui text-[22px] font-semibold leading-none text-[var(--bone)] md:text-[25px]">rivokit</span>
         </a>
 
         {/* Centred where it fits; below md it simply scrolls from the left, since
@@ -49,7 +49,10 @@ export default function Topbar() {
             <a
               key={item.href}
               href={item.href}
-              className="nav-dotted link-step whitespace-nowrap text-[13px] font-medium tracking-[-0.01em] text-[var(--bone)]/70 md:text-[14px]"
+              // py-2 is not spacing — it is the room the dotted rule is drawn
+              // in. Without it the rule falls outside the link and the scroll
+              // container clips it.
+              className="nav-dotted link-step f-ui whitespace-nowrap py-2 text-[13px] font-medium text-[var(--bone)]/70 md:text-[14px]"
             >
               {item.label}
             </a>
