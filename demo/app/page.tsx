@@ -13,6 +13,7 @@ import Faq from "./landing/Faq";
 import { RailDivider } from "./landing/Rail";
 import CtaInstall from "./landing/CtaInstall";
 import Footer from "./landing/Footer";
+import Topbar from "./landing/Topbar";
 
 export const metadata = {
   title: "RivoKit — cross-border settlement on Arc",
@@ -41,6 +42,7 @@ export default function LandingPage() {
       {/* The rails stand BETWEEN sections rather than inside them — see
           Rail.tsx. Two plain sections in a row get one; a section followed by a
           full-bleed band does not, because the band draws its own edge. */}
+      <Topbar />
       <Hero />
       <Problem />
       <RailDivider />

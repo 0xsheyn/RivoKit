@@ -34,7 +34,7 @@ const FRICTIONS = [
 
 export default function Problem() {
   return (
-    <section className="mx-auto w-full max-w-[1440px] px-5 py-8 md:px-16">
+    <section id="problem" className="mx-auto w-full max-w-[1440px] scroll-mt-16 px-5 py-8 md:px-16">
       <SectionHeader number="01" title="THE PROBLEM IT SOLVES" />
 
       <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-12">
