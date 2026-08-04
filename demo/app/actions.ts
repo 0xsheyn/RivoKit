@@ -4,6 +4,7 @@ import { getRivoKit } from "../lib/rivokit.server.ts";
 import { payoutRailFor } from "../lib/cpn.server.ts";
 import { policyFor, type Wedge } from "../../src/orchestrator/policy.ts";
 import { toDestinationMinor, type PayoutTarget } from "../../src/payout/rail.ts";
+import { assertUnlocked, assertWithinCap, CAP_TOKEN_MINOR } from "../lib/guard.server.ts";
 
 export type PaymentRow = { kind: string; status: string; txHash: string | null; chain: string | null; amount: string | null };
 
@@ -267,6 +268,13 @@ export async function createOrderAction(
   payer?: string,
 ): Promise<ActionResult> {
   return wrap(async () => {
+    // Everything downstream of an order spends something — the buyer's USDC at
+    // fund, the operator's gas at every relay, the seller's USDC at a bank
+    // payout. Gate and cap it at the point it is created, where refusing is
+    // still free.
+    await assertUnlocked("Creating an order");
+    assertWithinCap(BigInt(priceEurMinorStr), CAP_TOKEN_MINOR, "Order price");
+
     const { kit, store, addresses, payout } = getRivoKit();
 
     if (payoutTo === "bank") {
@@ -348,6 +356,7 @@ export async function listOrdersAction(limit = 8): Promise<OrderSummary[]> {
 /** Buyer: fund the escrow (gasless authorize). Minutes — operator relay. */
 export async function fundAction(orderId: string): Promise<ActionResult> {
   return wrap(async () => {
+    await assertUnlocked("Funding an order");
     await getRivoKit().kit.fund(orderId);
     return orderId;
   });
@@ -367,6 +376,9 @@ export async function fundAction(orderId: string): Promise<ActionResult> {
  */
 export async function releaseAction(orderId: string): Promise<ActionResult> {
   return wrap(async () => {
+    // Capture is irreversible for the escrow, and on a bank order this call
+    // reaches all the way to a broadcast.
+    await assertUnlocked("Releasing an order");
     const { kit } = getRivoKit();
     const order = await kit.status(orderId);
     const kind = policyFor(order.wedge as Wedge).expectedProof[0]!;
@@ -384,6 +396,7 @@ export async function releaseAction(orderId: string): Promise<ActionResult> {
  */
 export async function retrySettlementAction(orderId: string): Promise<ActionResult> {
   return wrap(async () => {
+    await assertUnlocked("Retrying settlement");
     await getRivoKit().kit.retrySettlement(orderId);
     return orderId;
   });
@@ -392,6 +405,8 @@ export async function retrySettlementAction(orderId: string): Promise<ActionResu
 /** Buyer: refund — void/refund back to the payer (receivingChain = Arc here). */
 export async function refundAction(orderId: string): Promise<ActionResult> {
   return wrap(async () => {
+    // A post-capture refund pulls from the OPERATOR's own balance.
+    await assertUnlocked("Refunding an order");
     await getRivoKit().kit.refund(orderId);
     return orderId;
   });

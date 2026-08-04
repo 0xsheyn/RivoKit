@@ -1,6 +1,7 @@
 "use server";
 
 import { mintBalance, mintDepositInfo, mintPayouts, mintRedeem } from "../lib/mint.server.ts";
+import { assertDecimalWithinCap, assertUnlocked, CAP_FIAT_MINOR } from "../lib/guard.server.ts";
 
 export type MintBalanceView = { amount: string; currency: string };
 export type MintPayoutView = {
@@ -42,6 +43,11 @@ export async function mintHistoryAction(limit = 8): Promise<MintHistoryResult> {
 /** Redeem `amount` of `currency` from the Mint balance to a linked bank. */
 export async function mintRedeemAction(amount: string, currency = "EUR"): Promise<MintRedeemResult> {
   try {
+    // `amount` used to travel from the caller straight into Circle's payouts
+    // API with nothing between them — no gate, no ceiling, no validation. Both
+    // controls apply here: fiat leaves the business account on this call.
+    await assertUnlocked("Redeeming from Circle Mint");
+    assertDecimalWithinCap(amount, CAP_FIAT_MINOR, "Mint redeem", 2);
     return { ok: true, payout: await mintRedeem(amount, currency) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

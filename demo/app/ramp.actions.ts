@@ -12,6 +12,11 @@ import {
   sellerInfo,
   type CorridorInfo,
 } from "../lib/cpn.server.ts";
+import {
+  assertDecimalWithinCap,
+  assertUnlocked,
+  CAP_TOKEN_MINOR,
+} from "../lib/guard.server.ts";
 
 /** The payout corridors the seller can cash out to (EUR/BRL/MXN/USD). */
 export async function cpnCorridorsAction(): Promise<CorridorInfo[]> {
@@ -141,6 +146,13 @@ export async function cpnPrepareAction(
   sellerAddress?: string,
 ): Promise<PrepareResult> {
   try {
+    // Gated even though prepare moves nothing: it creates a real CPN payment
+    // against the seller's address and starts a 30–60s quote clock, and it is
+    // the step `cpnBroadcastAction` later spends. The cap is on the amount a
+    // caller supplies, which until now went straight to the quote.
+    await assertUnlocked("Preparing a cash-out");
+    assertDecimalWithinCap(sourceAmountUsdc, CAP_TOKEN_MINOR, "Cash-out");
+
     const { quote, fees, spreadBps, payment, transaction } =
       await preparePayment(sourceAmountUsdc, corridorKey, sellerAddress);
     const m = transaction.messageToBeSigned;
@@ -176,6 +188,11 @@ export type BroadcastResult = { ok: true; result: BroadcastView } | { ok: false;
  */
 export async function cpnBroadcastAction(paymentId: string): Promise<BroadcastResult> {
   try {
+    // THE one that mattered. This signs with a server-held key, so anyone able
+    // to POST to this endpoint could spend the seller's USDC irreversibly — and
+    // a Server Action's id ships in the bundle handed to every visitor, so the
+    // panel's confirmation dialog never stood between them and it.
+    await assertUnlocked("Broadcasting a cash-out");
     const r = await broadcastPayment(paymentId);
     return { ok: true, result: { transactionId: r.transactionId, lifecycle: r.lifecycle, finalStatus: r.finalStatus } };
   } catch (e) {
@@ -212,6 +229,11 @@ export async function cpnIntentAction(paymentId: string): Promise<IntentResult> 
  */
 export async function cpnBroadcastSignedAction(paymentId: string, signature: Hex): Promise<BroadcastResult> {
   try {
+    // Defence in depth rather than the load-bearing control: this path cannot be
+    // driven by a stranger anyway, because the signature has to come from the
+    // wallet that holds the USDC. Gated for consistency, so "which broadcast is
+    // protected?" has one answer instead of two.
+    await assertUnlocked("Broadcasting a wallet-signed cash-out");
     const r = await broadcastSignedPayment(paymentId, signature);
     return { ok: true, result: { transactionId: r.transactionId, lifecycle: r.lifecycle, finalStatus: r.finalStatus } };
   } catch (e) {

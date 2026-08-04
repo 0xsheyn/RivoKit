@@ -1,5 +1,6 @@
 import { RiArrowRightUpLine } from "@remixicon/react";
 import AppNav from "./AppNav";
+import DemoLock from "./DemoLock";
 import RivoMark from "./RivoMark";
 import WalletButton from "./WalletButton";
 import { ToneBadge } from "./_ui";
@@ -68,6 +69,8 @@ export function DemoHeader() {
       {/* `ml-auto` does on the wrapped row what the nav's flex-1 does on the
           single row: pushes this to the right edge. */}
       <div className="ml-auto flex shrink-0 items-center gap-2 sm:ml-0">
+        {/* Renders nothing in local development — see DemoLock. */}
+        <DemoLock />
         <WalletButton />
       </div>
     </header>
