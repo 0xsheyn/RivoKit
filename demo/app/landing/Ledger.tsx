@@ -134,19 +134,25 @@ const ROWS: Array<{ short: string; path: string; status: Status; detail: string;
     detail: "Gateway spend 0xca092f…4d774517 · CCTP mint 0x35da17…fe945639",
     url: TX("0xca092f363b2dab2d891d7e29e274422f2362227c7af2283d6d6a33c49d774517"),
   },
-  // What is left of that row once the rails themselves are proven: a narrower
-  // claim, and still a genuine ❌ — no server key may stand in for a click.
+  // The last two ❌ that were not about the sandbox, and both are closed — by
+  // the only kind of evidence they could ever have had. See the note under the
+  // grid: these two rows are testimony, not artifacts, and the page says so
+  // rather than letting them borrow the credibility of the hashed rows above.
   {
-    short: "Human clicking wallet prompts",
-    path: "A human clicking the wallet's switch-chain and add-chain prompts",
-    status: "never",
-    detail: "driven by an EIP-1193 provider · every answer has a branch and a test",
+    short: "A human clicking wallet prompts",
+    path: "A human clicking the wallet's switch-chain and add-chain prompts, and declining them",
+    status: "proven",
+    detail: "user-tested · all six answers, including both refusals and the double switch on a bridge",
   },
+  // Was ❌ "a bank-payout button in the marketplace UI", which had gone stale
+  // twice over: Storefront reads mpPayoutOptions(), checks canPayoutToBank(),
+  // renders BUY → EURO FIAT with payoutTo: "bank" — and the button has since
+  // been pressed through to paid_out.
   {
-    short: "Bank button in marketplace",
-    path: "A bank-payout button in the marketplace UI",
-    status: "never",
-    detail: "the /sdk page has the toggle",
+    short: "Marketplace bank button, pressed",
+    path: "The marketplace's own bank button driving a run, rather than its server actions being called directly",
+    status: "proven",
+    detail: "user-tested · pressed through to paid_out",
   },
   {
     short: "Euros seen arriving",
@@ -237,6 +243,18 @@ export default function Ledger() {
           <Card key={r.path} row={r} />
         ))}
       </div>
+
+      {/* Two ✅ here have no hash and never can. Saying so is not a hedge — it
+          is the same discipline as the fiat ceiling above: a reader should be
+          able to tell, per row, what grade of evidence they are being offered.
+          Letting these two sit silently among the hashed ones would have been
+          the quiet version of overclaiming. */}
+      <p className="mt-6 max-w-3xl border-l-2 border-[color:var(--ash)]/40 pl-4 text-[13px] leading-relaxed text-[var(--bone)]/75">
+        <span className="text-[var(--bone)]">Two of these ✅ are testimony, not artifacts.</span> The wallet prompts and
+        the marketplace&apos;s bank button were verified by a person using them, so there is no hash to attach and no
+        run to replay. That is the only evidence either could ever have: what is being demonstrated is precisely that no
+        server key may stand in for the user&apos;s decision. Every other ✅ on this grid is a machine-checkable artifact.
+      </p>
     </div>
   );
 }

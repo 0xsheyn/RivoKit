@@ -53,8 +53,15 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // `data-scroll-behavior="smooth"`: the landing pages set `scroll-behavior:
+  // smooth` on this element (scoped with :has — see landing/landing.css). Next
+  // suppresses smooth scrolling while it restores scroll position on a route
+  // change, and from 15.2 it only does so for documents that declare the
+  // behaviour here; without the attribute it warns in dev and the suppression
+  // goes away in a future major. The attribute is a declaration, not a switch —
+  // pages that never set the property still jump instantly.
   return (
-    <html lang="en">
+    <html lang="en" data-scroll-behavior="smooth">
       {/*
        * `suppressHydrationWarning` covers THIS element's own attributes only —
        * not its descendants — so a real mismatch anywhere in the app still

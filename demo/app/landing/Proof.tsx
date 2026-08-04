@@ -5,7 +5,7 @@ import Reproduce from "./Reproduce";
 
 export default function Proof() {
   return (
-    <section id="proof" className="mx-auto w-full max-w-[1440px] scroll-mt-16 px-5 py-8 md:px-16">
+    <section id="proof" className="mx-auto w-full max-w-[1440px] scroll-mt-[92px] px-5 py-8 md:scroll-mt-[100px] md:px-16">
       <SectionHeader number="05" title="WHAT'S PROVEN, WHAT ISN'T" />
 
       {/* Nothing but evidence lives here now: the ceiling, the table, what this
@@ -15,8 +15,9 @@ export default function Proof() {
       <div className="mb-10">
         <h2 className="f-display text-[34px] text-[var(--bone)] sm:text-[44px]">Proof, not claims.</h2>
         <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-[var(--bone)]/75">
-          Every row below is a transaction hash you can open or a payment id Circle will confirm — next to what it does
-          not establish. Copied from PROOFS.md and LIMITATIONS.md, including where they say no.
+          Almost every row below is a transaction hash you can open or a payment id Circle will confirm — next to what
+          it does not establish. The two that are neither say so under the grid. Copied from PROOFS.md and
+          LIMITATIONS.md, including where they say no.
         </p>
       </div>
 

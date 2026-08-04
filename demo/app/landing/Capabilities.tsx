@@ -42,11 +42,27 @@ const CELLS = [
     snippet: "on(\"paid_out\", handler)",
     body: "funding_pending · funded · released · payout_pending · paid_out · refund_pending · refunded.",
   },
+  // Seven cells in a three-column grid left two dead slots on the last row —
+  // and a grid that stops mid-row reads as a list someone abandoned. These two
+  // fill it, and they are not filler: the timeout rule and the second read are
+  // the two things integrators get wrong first. Both come from the same
+  // verified surface as the rest — `WEDGES` in orchestrator/policy.ts, and
+  // `refreshPayout` in the SDK's own API list.
+  {
+    title: "Timeouts you don't set",
+    snippet: 'wedge: "contractor_payout" | "physical_demo"',
+    body: "Timeout is not a parameter. Strong proof auto-captures for the recipient; weak proof reclaims for the payer.",
+  },
+  {
+    title: "A second read closes the row",
+    snippet: "refreshPayout(orderId)",
+    body: "A broadcast returns before the tx is mined, so a payout row is born pending. A webhook or this call confirms it.",
+  },
 ];
 
 export default function Capabilities() {
   return (
-    <section id="capabilities" className="mx-auto w-full max-w-[1440px] scroll-mt-16 px-5 py-8 md:px-16">
+    <section id="capabilities" className="mx-auto w-full max-w-[1440px] scroll-mt-[92px] px-5 py-8 md:scroll-mt-[100px] md:px-16">
       <SectionHeader number="03" title="WHAT RIVOKIT ACTUALLY DOES" />
       <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-12">
         <h2 className="f-display text-[34px] leading-[0.95] text-[var(--bone)] md:col-span-6 md:text-[44px]">

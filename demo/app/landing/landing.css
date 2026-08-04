@@ -11,6 +11,31 @@
  */
 :root:has(.rivo-landing) {
   color-scheme: dark;
+
+  /*
+   * Nav links jump between sections of one long document, and a jump cut gives
+   * the reader nothing to hold on to — you arrive somewhere without knowing
+   * which way you travelled. Scrolled, the page keeps its own continuity.
+   *
+   * On the root element rather than on a handler, because the scrolling box IS
+   * the document: this covers every same-page fragment on the page — topbar,
+   * footer, the docs sidebar, the hero CTA — without a single one of them
+   * having to opt in, and it keeps working with JavaScript off.
+   *
+   * Scoped with :has for the same reason the background colour above is: /app
+   * and /sdk share this layout and should not inherit the landing page's
+   * manners. `data-scroll-behavior="smooth"` on <html> (layout.tsx) is the
+   * matching half — it tells Next how to treat this during a route change.
+   */
+  scroll-behavior: smooth;
+}
+
+/* Not a preference to weigh against the design — vestibular disorders are the
+   reason this media query exists. The jump still lands in the same place. */
+@media (prefers-reduced-motion: reduce) {
+  :root:has(.rivo-landing) {
+    scroll-behavior: auto;
+  }
 }
 :root:has(.rivo-landing) body {
   background-color: #0b0d0c;
@@ -30,10 +55,53 @@
   --font-ui: var(--landing-ui), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--landing-mono), ui-monospace, SFMono-Regular, monospace;
 
-  background: var(--ink);
   color: var(--bone);
   font-family: var(--font-body);
   font-feature-settings: "cv02", "cv03", "cv04";
+
+  /*
+   * The page was one flat fill of --ink, which read as unfinished rather than
+   * as restraint. What is here instead is deliberately not decoration: a dot
+   * field on a 26px pitch, in the same vocabulary as the hero rail, the section
+   * rules and the node boxes — this page argues in diagrams, so the paper it is
+   * drawn on should look like drafting paper.
+   *
+   * Dots, not the ruled grid this started as. A grid draws continuous lines,
+   * and continuous lines compete with the ones that mean something here — the
+   * rails, the section rules, the hairlines in the thesis band. Dots read as
+   * pitch without ever reading as a line, so nothing on the page has to argue
+   * with the paper. They also need a tighter pitch than rules to register at
+   * all: 26px, against the grid's 72px.
+   *
+   * Three rules it obeys, all of them the page's existing ones (RIVO_LP.md §7):
+   *
+   *   1. It does not move. No parallax, no attachment: fixed, no animation. A
+   *      page that stays still while you read it does not get to start moving
+   *      because someone scrolled.
+   *   2. It never competes with type. The grid is bone at 3.5% — around 1.06:1
+   *      against the ink. You see structure; you do not see lines.
+   *   3. The glows belong to the hero and scroll away with it. They are sized
+   *      in rem from the top edge and set `no-repeat`, so nothing tints the
+   *      proof ledger or the FAQ.
+   *
+   * The full-bleed bands (ThesisBand, Ticker) paint --ink-raised over all of
+   * it, which is what gives the page its rhythm: dots, then a solid band, then
+   * dots again.
+   */
+  background-color: var(--ink);
+  background-image:
+    radial-gradient(78rem 32rem at 50% -8rem, color-mix(in oklab, var(--verdigris) 12%, transparent), transparent 70%),
+    radial-gradient(46rem 24rem at 86% 2rem, color-mix(in oklab, var(--sodium) 7%, transparent), transparent 72%),
+    /* 11% read as a visible field of dots rather than as paper. 5% is the point
+       where you stop seeing them individually and start seeing texture — which
+       is the job. Anything that has to be noticed on this page is type. */
+    radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--bone) 5%, transparent) 1px, transparent 0);
+  background-size:
+    100% 56rem,
+    100% 34rem,
+    26px 26px;
+  background-repeat: no-repeat, no-repeat, repeat;
+  background-position: center top, right top, center top;
 }
 
 .rivo-landing .f-display {
@@ -42,8 +110,8 @@
   letter-spacing: -0.02em;
 }
 
-/* Chrome only — the topbar wordmark and its links. Upright, tightened just
-   enough that the wordmark reads as a mark rather than as a word. */
+/* The topbar logotype, and nothing else now. Upright, tightened just enough
+   that the wordmark reads as a mark rather than as a word. */
 .rivo-landing .f-ui {
   font-family: var(--font-ui);
   letter-spacing: -0.02em;
@@ -99,19 +167,10 @@
   animation: rivo-coin-travel 1.8s cubic-bezier(0.65, 0, 0.35, 1) forwards;
 }
 
-/* Wordmark settle — translate only, never opacity: if this animation is
-   throttled or skipped the word still reads. */
-@keyframes rivo-wordmark-in {
-  from {
-    transform: translateY(12px);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
-.rivo-landing .wordmark-in {
-  animation: rivo-wordmark-in 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
+/* The wordmark settle lived here — a 12px translate under the hero's 200px
+   "rivokit". The wordmark is gone from the hero (the sticky bar carries the
+   name now), so the keyframe went with it rather than staying as a rule nothing
+   applies. */
 
 @keyframes rivo-fade-up {
   from {
@@ -276,7 +335,6 @@
 @media (prefers-reduced-motion: reduce) {
   .rivo-landing .coin-travel,
   .rivo-landing .fade-up,
-  .rivo-landing .wordmark-in,
   .rivo-landing .stamp-in {
     animation: none !important;
   }

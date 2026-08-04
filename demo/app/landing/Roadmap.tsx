@@ -12,14 +12,18 @@ import SectionHeader from "./SectionHeader";
  * frame. USD/WIRE is not in this group: it was a target and it settled.
  */
 const GROUPS: Array<{ title: string; note: string; items: string[] }> = [
+  // This group had four items and now has two. The two that left — a human
+  // clicking the wallet prompts, and a human pressing the marketplace's bank
+  // button — were both done and both verified by use; they moved up into the
+  // proof grid. What is left is not code at all: neither of these can be closed
+  // by writing something, which is why the note now says "hosting" rather than
+  // "finish proving".
   {
     title: "Next",
-    note: "finish proving what is already written",
+    note: "the last two gaps, and neither is code",
     items: [
-      "A human clicking the wallet prompts. Every answer already has a branch and a test — what is missing is the click, and no server key may stand in for it.",
-      "A bank-payout button in the marketplace UI. canPayoutToBank() already says which listings clear the corridor minimum.",
-      "A durable public endpoint, so a webhook subscription outlives the process that created it.",
-      "A scheduled reconciliation, closing the stale-row gap for standalone cash-outs whose webhook never arrives.",
+      "A durable public endpoint, so a webhook subscription outlives the process that created it. The route already exports HEAD — which is what Circle validates with — so what is missing is a host, plus a Console step that can only ever be manual.",
+      "A scheduled reconciliation, closing the stale-row gap for standalone cash-outs whose webhook never arrives. The sweep itself can be written today; the scheduler waits on the endpoint above.",
     ],
   },
   {
@@ -42,7 +46,7 @@ const GROUPS: Array<{ title: string; note: string; items: string[] }> = [
 
 export default function Roadmap() {
   return (
-    <section id="roadmap" className="mx-auto w-full max-w-[1440px] scroll-mt-16 px-5 py-8 md:px-16">
+    <section id="roadmap" className="mx-auto w-full max-w-[1440px] scroll-mt-[92px] px-5 py-8 md:scroll-mt-[100px] md:px-16">
       <SectionHeader number="06" title="WHAT'S NEXT" />
 
       <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-12">
