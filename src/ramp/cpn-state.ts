@@ -90,6 +90,63 @@ export function applyPaymentEvent(current: CpnPaymentState, event: CpnEvent): Ap
   return { state: target, changed: true };
 }
 
+/**
+ * Fold a POLLED status into the current payment state.
+ *
+ * The webhook reducer above and this one answer different questions. A webhook
+ * says "this happened"; a poll says "this is where it is now". That difference
+ * decides how a skipped step is treated: `applyPaymentEvent` refuses
+ * `CREATED → COMPLETED` because a single event cannot legally cross two edges,
+ * while a poll returning `COMPLETED` on a payment we last saw as `CREATED` is
+ * not a violation at all — the intermediate notifications simply never arrived.
+ * That is exactly the case a reconciliation sweep exists to repair, so refusing
+ * it would refuse the whole point.
+ *
+ * What stays refused is everything that would LOSE information: going backwards
+ * along the graph, and leaving a terminal state. A payment CPN has already
+ * reported `COMPLETED` does not become `CRYPTO_FUNDS_PENDING` because a stale
+ * read said so.
+ *
+ * The write it authorises is a single hop to the polled state. The intermediate
+ * states are not written, because they were never observed — inventing an
+ * audit trail is worse than a gap in one.
+ */
+export function reconcilePaymentStatus(
+  current: CpnPaymentState,
+  polled: string,
+): ApplyOutcome {
+  if (!isPaymentState(polled)) return { state: current, changed: false, reason: "not-payment" };
+  if (polled === current) return { state: current, changed: false, reason: "duplicate" };
+  if (isPaymentTerminal(current)) return { state: current, changed: false, reason: "illegal" };
+  if (!isReachable(current, polled)) return { state: current, changed: false, reason: "illegal" };
+  return { state: polled, changed: true };
+}
+
+const PAYMENT_STATES: CpnPaymentState[] = [
+  "CREATED", "CRYPTO_FUNDS_PENDING", "FIAT_PAYMENT_INITIATED", "COMPLETED", "FAILED",
+];
+
+/** CPN's status field is loosely typed (`string & {}`); a poll can return anything. */
+function isPaymentState(s: string): s is CpnPaymentState {
+  return (PAYMENT_STATES as string[]).includes(s);
+}
+
+/** Is `to` downstream of `from` along the payment graph, at any distance? */
+function isReachable(from: CpnPaymentState, to: CpnPaymentState): boolean {
+  const seen = new Set<CpnPaymentState>([from]);
+  const queue: CpnPaymentState[] = [from];
+  while (queue.length > 0) {
+    for (const next of PAYMENT_NEXT[queue.shift()!]) {
+      if (next === to) return true;
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return false;
+}
+
 // ── Transaction & RFI helpers ──────────────────────────────────────────
 
 const TRANSACTION_ORDER: CpnTransactionState[] = ["CREATED", "PENDING", "BROADCASTED", "COMPLETED"];
