@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { RiArrowRightUpLine, RiExternalLinkLine } from "@remixicon/react";
+import { RiArrowRightUpLine } from "@remixicon/react";
 import HeroRail, { type Route } from "./HeroRail";
 
 /**
@@ -33,7 +33,6 @@ const SETTLE_HOLD = 2200;
 
 export default function Hero() {
   const [phase, setPhase] = useState(0);
-  const [runId, setRunId] = useState(0);
   const [route, setRoute] = useState<Route>("bank");
   const rafRef = useRef<number | null>(null);
 
@@ -81,13 +80,12 @@ export default function Hero() {
       setPhase(elapsed);
       rafRef.current = requestAnimationFrame(tick);
     };
+    // The mount run keeps the server-rendered bank route, so hydration has
+    // nothing to disagree with; every later cycle re-rolls inside `tick`.
     const startRun = () => {
       setPhase(0);
       start = null;
       from = 0;
-      // `runId > 0` means someone pressed the button; the mount run keeps the
-      // server-rendered bank route so hydration has nothing to disagree with.
-      if (runId > 0) setRoute(Math.random() < WALLET_CHANCE ? "wallet" : "bank");
       rafRef.current = requestAnimationFrame(tick);
     };
     const onVisible = () => {
@@ -104,7 +102,7 @@ export default function Hero() {
       if (timer != null) clearTimeout(timer);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [runId]);
+  }, []);
 
   const railDrawn = phase > 0;
   const coinPct = phase >= COIN_START ? Math.min(1, (phase - COIN_START) / (COIN_END - COIN_START)) : null;
@@ -117,34 +115,14 @@ export default function Hero() {
         : "";
 
   return (
-    <section className="relative flex min-h-screen flex-col overflow-hidden">
-      <div className="eyebrow flex items-center gap-2 border-b border-[color:var(--ash)]/20 bg-[var(--ink-raised)] px-5 py-2">
-        <span className="size-1.5 rounded-full bg-[var(--sodium)]" />
-        TESTNET ONLY · UNAUDITED · DO NOT USE REAL FUNDS
-      </div>
-
-      <nav className="mx-auto flex w-full max-w-[1440px] items-center justify-between px-5 py-5 md:px-16">
-        <div className="eyebrow">RIVOKIT</div>
-        <div className="flex items-center gap-3">
-          <a
-            href="https://github.com/0xsheyn/RivoKit"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="eyebrow btn-outline flex items-center gap-1.5 rounded-full border border-[color:var(--ash)]/30 px-3 py-1.5"
-          >
-            GITHUB
-            <RiExternalLinkLine className="size-3.5" />
-          </a>
-          <a
-            href="#install"
-            className="btn-solid rounded-sm bg-[var(--sodium)] px-4 py-1.5 text-[13px] font-medium text-[var(--ink)]"
-          >
-            Get the SDK
-          </a>
-        </div>
-      </nav>
-
-      <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col justify-center px-5 md:px-16">
+    // The sticky bar is in normal flow, so it eats from the first screen. Height
+    // is known and fixed: 28px strip + 56px nav, 64px from md. `svh` rather than
+    // `vh` so a mobile browser's collapsing URL bar does not crop the section.
+    <section className="relative flex min-h-[calc(100svh-84px)] flex-col overflow-hidden md:min-h-[calc(100svh-92px)]">
+      {/* The warning strip and the nav that used to open this section now live
+          in Topbar.tsx, where they stay put as the page scrolls. Two wordmarks
+          and two routes to #install were stacked at the top of the page. */}
+      <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col justify-center px-5 py-10 md:px-16">
         {/* Never gated on the animation clock: the page's own name must be
             legible on the first paint, whatever the rAF loop is doing. */}
         <h1
@@ -212,19 +190,9 @@ export default function Hero() {
             href="/app"
             className="btn-outline group flex items-center gap-1.5 rounded-sm border border-[color:var(--ash)]/40 px-5 py-2.5 text-sm text-[var(--bone)]"
           >
-            Watch a payment clear
+            Payment Demo
             <RiArrowRightUpLine className="size-4 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
           </a>
-          {/* Restarts the loop from the top rather than waiting out the current
-              cycle — the route now runs on its own, so this is impatience, not
-              the only way in. */}
-          <button
-            type="button"
-            onClick={() => setRunId((n) => n + 1)}
-            className="eyebrow rounded-sm border border-transparent px-3 py-2.5 hover-step"
-          >
-            Run it again
-          </button>
         </div>
       </div>
 
