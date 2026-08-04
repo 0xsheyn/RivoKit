@@ -1,5 +1,5 @@
 import "./landing/landing.css";
-import { displaySerif, bodySans, utilityMono } from "./landing/fonts";
+import { displaySerif, bodySans, uiSans, utilityMono } from "./landing/fonts";
 import Hero from "./landing/Hero";
 import Problem from "./landing/Problem";
 import BuiltOn from "./landing/BuiltOn";
@@ -25,7 +25,7 @@ export default function LandingPage() {
   return (
     <div
       id="top"
-      className={`rivo-landing ${displaySerif.variable} ${bodySans.variable} ${utilityMono.variable}`}
+      className={`rivo-landing ${displaySerif.variable} ${bodySans.variable} ${uiSans.variable} ${utilityMono.variable}`}
     >
       {/* Why → what it's built on → what it does → where the money ends up →
           the thesis → the proof and its limits → what's next → the operational

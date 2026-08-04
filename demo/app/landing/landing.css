@@ -27,6 +27,7 @@
 
   --font-display: var(--landing-serif), ui-serif, Georgia, serif;
   --font-body: var(--landing-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-ui: var(--landing-ui), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--landing-mono), ui-monospace, SFMono-Regular, monospace;
 
   background: var(--ink);
@@ -38,6 +39,13 @@
 .rivo-landing .f-display {
   font-family: var(--font-display);
   font-style: italic;
+  letter-spacing: -0.02em;
+}
+
+/* Chrome only — the topbar wordmark and its links. Upright, tightened just
+   enough that the wordmark reads as a mark rather than as a word. */
+.rivo-landing .f-ui {
+  font-family: var(--font-ui);
   letter-spacing: -0.02em;
 }
 
@@ -213,11 +221,16 @@
 .rivo-landing .nav-dotted {
   position: relative;
 }
+/* `bottom` is INSIDE the link's own padding box, not below it. The nav sits in
+   an `overflow-x-auto` row, and once one axis is auto the other stops being
+   visible — a rule drawn below the link was clipped by the scroll container and
+   never appeared at all. The links carry the vertical padding that makes room
+   for it. */
 .rivo-landing .nav-dotted::after {
   content: "";
   position: absolute;
   inset-inline: 0;
-  bottom: -5px;
+  bottom: 3px;
   border-bottom: 1.5px dotted currentColor;
   transform: scaleX(0);
   transform-origin: left;

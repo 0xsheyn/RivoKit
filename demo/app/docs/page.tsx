@@ -1,5 +1,5 @@
 import "../landing/landing.css";
-import { displaySerif, bodySans, utilityMono } from "../landing/fonts";
+import { displaySerif, bodySans, uiSans, utilityMono } from "../landing/fonts";
 import Topbar from "../landing/Topbar";
 import Footer from "../landing/Footer";
 
@@ -89,7 +89,7 @@ export default function DocsPage() {
   return (
     <div
       id="top"
-      className={`rivo-landing ${displaySerif.variable} ${bodySans.variable} ${utilityMono.variable}`}
+      className={`rivo-landing ${displaySerif.variable} ${bodySans.variable} ${uiSans.variable} ${utilityMono.variable}`}
     >
       <Topbar />
 
