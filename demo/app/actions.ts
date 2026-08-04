@@ -35,6 +35,8 @@ export type Snapshot = {
   receivingChain: string;
   wedge: string;
   payoutTo: PayoutTarget;
+  /** Why a stalled order stalled. Present on settlement_pending and failed. */
+  failureReason: string | null;
   payments: PaymentRow[];
   payout: PayoutView;
 };
@@ -86,6 +88,7 @@ async function snapshot(orderId: string): Promise<Snapshot> {
   return {
     orderId: order.id, state: order.state, priceEUR: order.priceEUR, usdcAmount: order.usdcAmount,
     receivingChain: order.receivingChain, wedge: order.wedge, payoutTo: order.payoutTo,
+    failureReason: order.failureReason,
     payments, payout,
   };
 }
@@ -368,6 +371,20 @@ export async function releaseAction(orderId: string): Promise<ActionResult> {
     const order = await kit.status(orderId);
     const kind = policyFor(order.wedge as Wedge).expectedProof[0]!;
     await kit.release(orderId, { kind, ref: `demo-${kind}` });
+    return orderId;
+  });
+}
+
+/**
+ * Resume an order that was captured but never reached its currency.
+ *
+ * The escrow is already empty here, so this must NOT go through `release()` —
+ * that would capture a second time. `retrySettlement` swaps again on the wallet
+ * path and re-quotes on the bank path, and touches the escrow on neither.
+ */
+export async function retrySettlementAction(orderId: string): Promise<ActionResult> {
+  return wrap(async () => {
+    await getRivoKit().kit.retrySettlement(orderId);
     return orderId;
   });
 }

@@ -363,6 +363,68 @@ describe("release — the bank path", () => {
   });
 });
 
+/**
+ * The bank path's own way out of `settlement_pending`.
+ *
+ * Every refusal in the block below leaves captured USDC sitting with the seller
+ * and the order stalled — and the code that stalls it says the payout "can be
+ * retried without touching the escrow again". That sentence had no
+ * implementation behind it: `release()` would have captured a second time.
+ */
+describe("retrySettlement — the bank path", () => {
+  it("re-quotes and broadcasts without re-capturing", async () => {
+    const deps = makeDeps({ initial: mkOrder({ state: "settlement_pending" }) });
+    const rail = deps.payoutRail!;
+    const kit = createRivoKit(deps);
+
+    await kit.retrySettlement("ord_bank");
+
+    expect(deps.escrow.capture).not.toHaveBeenCalled();
+    expect(rail.quote).toHaveBeenCalledOnce();
+    expect(rail.submit).toHaveBeenCalledOnce();
+    expect((await kit.status("ord_bank")).state).toBe("payout_pending");
+  });
+
+  it("sizes the retry from what was captured, net of the operator fee", async () => {
+    const deps = makeDeps({
+      initial: mkOrder({ state: "settlement_pending", min_fee_bps: 25, max_fee_bps: 25 }),
+    });
+    const kit = createRivoKit(deps);
+
+    await kit.retrySettlement("ord_bank");
+
+    // 12_600_000 − 25bps = 12_568_500. The fee left the settlement wallet at
+    // capture, so quoting against the gross would promise USDC that is not there.
+    expect(deps.payoutRail!.quote).toHaveBeenCalledWith(
+      expect.objectContaining({ availableSourceMinor: 12_568_500n }),
+    );
+  });
+
+  it("stalls again without throwing, and without an illegal self-transition", async () => {
+    const deps = makeDeps({
+      initial: mkOrder({ state: "settlement_pending" }),
+      rail: mkRail({ destinationMinor: 1199n }),
+    });
+    const kit = createRivoKit(deps);
+
+    await kit.retrySettlement("ord_bank");
+
+    expect(deps.payoutRail!.submit).not.toHaveBeenCalled();
+    expect((await kit.status("ord_bank")).state).toBe("settlement_pending");
+    expect(deps.store.transition).not.toHaveBeenCalled();
+    expect(deps.store.recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ orderId: "ord_bank", type: "payout.stalled" }),
+    );
+  });
+
+  it("refuses when the rail is gone, before anything is quoted", async () => {
+    const deps = makeDeps({ initial: mkOrder({ state: "settlement_pending" }), hasRail: false });
+    const kit = createRivoKit(deps);
+
+    await expect(kit.retrySettlement("ord_bank")).rejects.toMatchObject({ code: "PAYOUT_UNAVAILABLE" });
+  });
+});
+
 describe("release — every refusal happens before the irreversible step", () => {
   /** Assert the order stalled safely and nothing was broadcast. */
   async function expectStalled(deps: ReturnType<typeof makeDeps>, reason: RegExp) {

@@ -120,16 +120,20 @@ stops along it.
 
 ### There is no scheduled reconciliation
 
-Two sweeps exist and both are run by hand. A payout row is born `pending` — a
-broadcast returns before the transfer is mined, so the Arc hash does not exist at
-write time, and `confirmed_has_tx` rightly refuses a confirmation without one.
-`refreshPayout` settles it on a later read and
+Three sweeps exist and all three are run by hand. A payout row is born `pending`
+— a broadcast returns before the transfer is mined, so the Arc hash does not
+exist at write time, and `confirmed_has_tx` rightly refuses a confirmation
+without one. `refreshPayout` settles it on a later read and
 `scripts/live-payout-reconcile.mjs` sweeps what a crashed run left behind.
+`reconcileCpnPayments` does the same for standalone cash-outs — the rows
+`refreshPayout` cannot reach, because they belong to no order —
+`scripts/live-cashout-reconcile.mjs`.
 
-**A host with no webhook and no sweep will accumulate stale `pending` rows.** The
-gap with nothing behind it is the `cpn_payments` row of a standalone cash-out: if
-its webhook never arrives, nothing repairs it. The sweep can be written today;
-only its scheduler waits on a durable endpoint.
+**What remains is the scheduler, not the code.** A host that runs neither a
+webhook endpoint nor one of these sweeps will still accumulate stale rows;
+nothing fires them on a timer, and nothing will until there is a durable endpoint
+to hang one off. Running them by hand is a real answer for a testnet demo and not
+one for production.
 
 ### `release()` does not trigger a Circle Mint redeem
 
@@ -145,7 +149,7 @@ transfer, and it says so.
 
 ## What the tests do not guard
 
-The 441 unit tests are weighted toward pure logic — state machines, money
+The 462 unit tests are weighted toward pure logic — state machines, money
 conversion, fee arithmetic, reducers, signature verification against a keypair
 the test itself creates. **The modules that talk to a network or a chain have no
 direct tests, and the facade tests mock them.**
@@ -263,9 +267,10 @@ writing closes.
    that created it. The route already exports `HEAD` — what Circle actually
    validates with — so the blockers are a host, Deployment Protection being off
    for that URL, and a Console step that is manual forever.
-2. **A scheduled reconciliation**, closing the stale-row gap for standalone
-   cash-outs whose webhook never arrives. The sweep can be written today; the
-   scheduler waits on (1).
+2. **A scheduled reconciliation.** The sweep itself now exists —
+   `reconcileCpnPayments` closes the stale-row gap for standalone cash-outs
+   whose webhook never arrives, and `scripts/live-cashout-reconcile.mjs` runs
+   it. Only the scheduler is left, and it waits on (1).
 
 **Later — widen the reach once the above holds**
 

@@ -4,12 +4,12 @@ import { useEffect, useState, useTransition } from "react";
 import { useAccount, useSignTypedData, useSwitchChain } from "wagmi";
 import {
   createOrderAction, fundAction, releaseAction, refundAction, refreshPayoutAction,
+  retrySettlementAction,
   snapshotAction, payoutOptionsAction, fxProbeAction, bankEstimateAction,
   demoBuyerAction, arcUsdcAction, authTypedDataAction, paySignedAction,
   listOrdersAction,
   type ActionResult, type FxProbe, type OrderSummary, type PayoutOptions, type Snapshot,
 } from "./actions";
-import WalletButton from "./WalletButton";
 import { walletErrorMessage } from "./wallet-errors";
 import { ARC_TESTNET_CHAIN_ID } from "../../src/constants/arc";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -148,7 +148,11 @@ export default function DemoPanels() {
   // Poll while an order exists and something is in flight, so intermediate
   // states (funding_pending, payout_pending) surface before the action resolves.
   useEffect(() => {
-    const inFlight = snap && (pending || snap.state.endsWith("_pending"));
+    // `settlement_pending` ends in `_pending` and is NOT in flight — it is a
+    // resting state waiting on a human to retry. Polling it every four seconds
+    // forever asks a rate-limited RPC a question whose answer cannot change.
+    const inFlight =
+      snap && (pending || (snap.state.endsWith("_pending") && snap.state !== "settlement_pending"));
     if (!snap || !inFlight) return;
     const id = setInterval(() => { snapshotAction(snap.orderId).then(apply); }, 4000);
     return () => clearInterval(id);
@@ -160,6 +164,9 @@ export default function DemoPanels() {
   const canCreate = !snap || TERMINAL.has(snap.state);
   const canFund = state === "created";
   const canRelease = state === "funded";
+  // Captured but never converted. A separate call from `release`, because the
+  // escrow has already been emptied — see retrySettlementAction.
+  const canRetry = state === "settlement_pending";
   const canRefund = state === "funded" || state === "released";
   // Only a bank order has a rail to re-read; a mock instruction has no status.
   const canRefresh = snap?.payoutTo === "bank" && (state === "payout_pending" || state === "paid_out");
@@ -266,13 +273,15 @@ export default function DemoPanels() {
           server-signed with a demo key (in production the buyer signs in their own wallet).
           On-chain steps take 1–2 minutes.
         </CardDescription>
+        {/* The connect control used to sit here too. `/sdk` has the shared demo
+            header now, which carries one — and two wallet buttons on one screen
+            is two places to wonder which one is connected. */}
         <CardAction className="flex items-center gap-2">
           {state && (
             <ToneBadge tone={pending ? "progress" : stateTone(state)} className="font-mono">
               {pending ? "working…" : statusLabel(state)}
             </ToneBadge>
           )}
-          <WalletButton />
         </CardAction>
       </CardHeader>
 
@@ -402,6 +411,29 @@ export default function DemoPanels() {
               <Button size="sm" disabled={pending} onClick={() => run(() => releaseAction(snap!.orderId))}>
                 {bank ? "release (capture → off-ramp)" : "release (capture → swap floor)"}
               </Button>
+            )}
+
+            {/* The escrow is empty here and the order is holding USDC that never
+                reached its currency. `release` would capture a second time, so
+                this is a DIFFERENT call — and until it existed on the facade the
+                demo simply left the order stranded with no button at all. */}
+            {canRetry && (
+              <Alert>
+                <AlertTitle className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span>Captured, but not yet converted</span>
+                  <ToneBadge tone="progress">retryable</ToneBadge>
+                </AlertTitle>
+                <AlertDescription className="space-y-2">
+                  <span>
+                    {snap?.failureReason ??
+                      "The capture succeeded and the settlement did not. The funds are with the receiver as USDC — safe, and one call from finished."}
+                  </span>
+                  <Button size="sm" disabled={pending}
+                    onClick={() => run(() => retrySettlementAction(snap!.orderId))}>
+                    {bank ? "retrySettlement (re-quote → broadcast)" : "retrySettlement (swap again)"}
+                  </Button>
+                </AlertDescription>
+              </Alert>
             )}
           </Step>
 

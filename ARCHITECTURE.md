@@ -183,6 +183,18 @@ asynchronous. `paid_out` is terminal and deliberately has **no edge back to
 operator-funded refund can reach, so the type system should not pretend
 otherwise.
 
+`settlement_pending` means **captured, but not yet in the promised currency**.
+The escrow is already empty and the USDC sits with the receiver, which is why
+there is no edge back to `funded` — that state would claim the funds are still
+in escrow. The way forward is `retrySettlement()`, which re-runs only the part
+that failed: the swap on the wallet path, the quote-and-broadcast on the bank
+path. It never re-enters `release()`, because `release()` starts by capturing.
+
+The lifecycle has **no self-loops**, and that is load-bearing here: a retry that
+fails again cannot re-enter `settlement_pending`, so its reason is recorded as an
+event rather than a transition. `order.failureReason` carries the reason from the
+attempt that put it there.
+
 **Timeout is not a parameter.** It is derived from `wedge`, because the strength
 of the available proof is what should decide who an expiry favours: strong proof
 (B2B, digital) → `auto_capture`; weak proof (physical goods) → `reclaim`.
@@ -334,7 +346,7 @@ Redeploy the collector → allowance is 0 → `refund` reverts. Re-run
 
 Three layers, deliberately unequal.
 
-- **Unit** (`npm test`) — 441 green / 25 files, no credentials. State machines,
+- **Unit** (`npm test`) — 462 green / 26 files, no credentials. State machines,
   unit conversion, quote/rebate math, the fee gross-up round-trip, facade
   composition, compliance gating, webhook ECDSA verification, ERC-3009
   sign+recover, the whole CPN layer.

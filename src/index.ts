@@ -179,6 +179,7 @@ export {
   verifyAndInterpretCpn,
   interpretCpnEvent,
   applyPaymentEvent,
+  reconcilePaymentStatus,
   canTransitionPayment,
   isPaymentTerminal,
   isPointOfNoReturn,
@@ -192,6 +193,16 @@ export {
 /** Fold a verified CPN webhook into the stored cash-out — writes only when the
  *  reducer says the state moved, never on a duplicate or a late arrival. */
 export { applyCpnEventToStore, type CpnSyncResult, type CpnSyncStore } from "./ramp/cpn-sync.ts";
+/** The fallback for hosts with no public webhook endpoint: poll the rail for
+ *  every non-terminal cash-out and repair the rows a webhook never reached. */
+export {
+  reconcileCpnPayment,
+  reconcileCpnPayments,
+  type CpnReconcileAction,
+  type CpnReconcileResult,
+  type CpnReconcileStore,
+  type CpnStatusReader,
+} from "./ramp/cpn-reconcile.ts";
 
 /* ── Arc constants & chain helpers ────────────────────────────────────────── */
 export {

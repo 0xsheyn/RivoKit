@@ -16,6 +16,11 @@ export const metadata = {
 export default function Page() {
   return (
     <main className="min-h-0 flex-1 p-3">
+      {/* The shared header carries the site name, not a page heading, so the
+          page owns its own <h1>. Off-screen because the board announces itself
+          — the storefront is right there — but a document with no h1 leaves a
+          screen reader with nothing to land on. */}
+      <h1 className="sr-only">Market demo</h1>
       <Marketplace />
     </main>
   );
