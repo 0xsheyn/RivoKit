@@ -228,7 +228,7 @@ export default function Ledger() {
       {/* The ceiling on every ✅ that touches fiat. PROOFS.md opens with it and
           LIMITATIONS.md caps everything with it; a page titled "Proof, not
           claims" that omitted it was the most expensive thing wrong here. */}
-      <p className="mb-6 max-w-3xl border-l-2 border-[color:var(--sodium)] pl-4 text-[13px] leading-relaxed text-[var(--bone)]/75">
+      <p className="mb-6 border-l-2 border-[color:var(--sodium)] pl-4 text-[13px] leading-relaxed text-[var(--bone)]/75">
         <span className="text-[var(--bone)]">Read every ✅ on the fiat side with this ceiling.</span>{" "}
         <span className="f-mono text-[var(--sodium)]">COMPLETED</span> means CPN reported the fiat leg finished — not
         that anyone watched euros arrive. The sandbox is a simulator, every payout destination here is a fabricated
@@ -249,7 +249,7 @@ export default function Ledger() {
           able to tell, per row, what grade of evidence they are being offered.
           Letting these two sit silently among the hashed ones would have been
           the quiet version of overclaiming. */}
-      <p className="mt-6 max-w-3xl border-l-2 border-[color:var(--ash)]/40 pl-4 text-[13px] leading-relaxed text-[var(--bone)]/75">
+      <p className="mt-6 border-l-2 border-[color:var(--ash)]/40 pl-4 text-[13px] leading-relaxed text-[var(--bone)]/75">
         <span className="text-[var(--bone)]">Two of these ✅ are testimony, not artifacts.</span> The wallet prompts and
         the marketplace&apos;s bank button were verified by a person using them, so there is no hash to attach and no
         run to replay. That is the only evidence either could ever have: what is being demonstrated is precisely that no

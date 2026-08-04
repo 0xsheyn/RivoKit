@@ -78,7 +78,7 @@ export default function TwoEndings() {
           paths sit side by side rather than left for the reader to notice. */}
       <div className="mt-6 border-l-2 border-[color:var(--sodium)] pl-4">
         <p className="f-display text-[19px] text-[var(--bone)]">The bank path runs no swap — and that is not a shortcut.</p>
-        <p className="mt-2 max-w-3xl text-[13px] leading-relaxed text-[var(--bone)]/75">
+        <p className="mt-2 text-[13px] leading-relaxed text-[var(--bone)]/75">
           CPN sources <span className="f-mono text-[var(--sodium)]">only</span> USDC — verified against the live API,
           not read from a doc. EURC cannot be off-ramped through it at all, so converting first would pay a spread to
           reach a currency that is immediately spent to reach another one. The CPN quote pins the euro the recipient

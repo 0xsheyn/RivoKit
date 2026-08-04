@@ -57,7 +57,9 @@ export default function Problem() {
         ))}
       </div>
 
-      <p className="mt-8 max-w-3xl text-[15px] leading-relaxed text-[var(--bone)]/85">
+      {/* Full width, like the three-column grid it closes — see Proof.tsx for
+          why left-aligned prose on this page carries no measure of its own. */}
+      <p className="mt-8 text-[15px] leading-relaxed text-[var(--bone)]/85">
         RivoKit closes all three: the payer pays from any chain, the recipient is guaranteed their number and can be
         paid into a bank without a second manual step, and the platform{" "}
         <span className="text-[var(--bone)]">calls a handful of functions instead of becoming a payment company.</span>
