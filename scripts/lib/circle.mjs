@@ -124,6 +124,31 @@ export function createCircleClient({ apiKey, entitySecret }) {
         feeLevel,
       }),
 
+    getWallet: (walletId) => request("GET", `/v1/w3s/wallets/${walletId}`),
+
+    /**
+     * Sign EIP-712 typed data with a Developer-Controlled wallet.
+     *
+     * `data` is the typed-data object JSON-STRINGIFIED — Circle takes a string
+     * here, not an object, and bigints have to be strings inside it or
+     * JSON.stringify throws before the request is ever made.
+     *
+     * WHAT THE ACCOUNT TYPE DOES TO THE RESULT. An `EOA` wallet returns an
+     * ordinary 65-byte ECDSA signature that `ecrecover` resolves back to the
+     * wallet's own address. An `SCA` wallet returns an ERC-1271 signature,
+     * which is validated by CALLING the account contract and does not recover
+     * to anything. Both are "valid signatures"; only the first one works where
+     * a counterparty recovers the signer — which is what USDC does for
+     * ERC-3009 and what CPN's settlement contract does for a payment intent.
+     * `probe-circle-eoa-sign.mjs` is what proves which one you actually have.
+     */
+    signTypedData: ({ walletId, data, memo }) =>
+      signedPost("/v1/w3s/developer/sign/typedData", {
+        walletId,
+        data: typeof data === "string" ? data : JSON.stringify(data),
+        ...(memo ? { memo } : {}),
+      }),
+
     getTransaction: (id) => request("GET", `/v1/w3s/transactions/${id}`),
   };
 }
