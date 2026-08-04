@@ -55,7 +55,9 @@ export default function Topbar() {
         className="mx-auto grid h-14 max-w-[1440px] grid-cols-[auto_1fr_auto] items-center gap-3 px-5 md:h-16 md:gap-6 md:px-16"
       >
         <a href="/#top" className="flex shrink-0 items-center gap-2">
-          <RivoMark className="size-7 md:size-8" size={64} priority />
+          {/* `light`: this bar sits on --ink, where the blue mark measures
+              2.0:1 and its indigo half 1.44:1. Same mark, lightness only. */}
+          <RivoMark className="size-7 md:size-8" size={64} priority tone="light" />
           <span className="f-ui text-[22px] font-semibold leading-none text-[var(--bone)] md:text-[25px]">rivokit</span>
         </a>
 
