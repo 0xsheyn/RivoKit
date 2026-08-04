@@ -25,10 +25,14 @@ import markLight from "../assets/mark_rivo_light.png";
  * The hue was never the problem: the mark is 264° and `--sodium` is 74°, which
  * is 190° apart — within 10° of a true complement. Nor should the mark BE
  * sodium: that is the action colour, and a logo wearing it would compete with
- * every CTA on the page. What was wrong was lightness, so lightness is what the
- * `light` tone changes — the two blues map to `--bone` and a dimmed bone that
- * holds the original's tonal ratio (1.252 → 1.255), reaching 15.8:1 and 8.4:1.
- * Same silhouette, same fold, same brand.
+ * every CTA on the page. Lightness was the whole fault, and lightness is the
+ * only thing the `light` tone changes.
+ *
+ * That tone is authored artwork, not a recolour: `#f4f4f4` over `#eaeaea`, which
+ * measures 17.7:1 and 16.2:1 on `--ink`. Note the fold survives on a much
+ * narrower tonal gap than the blue original's — the two halves are a step apart
+ * rather than a jump — so if this ever needs to sit on a lighter dark surface
+ * than `--ink`, check the fold is still legible before assuming it scales.
  */
 // `priority` is defaulted rather than left optional: this repo compiles with
 // `exactOptionalPropertyTypes`, and next/image declares the prop as a plain
@@ -47,7 +51,7 @@ export default function RivoMark({
   alt?: string;
   /**
    * `brand` — the blue mark, for light surfaces (the demo).
-   * `light` — bone, for dark surfaces (the landing and /docs).
+   * `light` — the near-white mark, for dark surfaces (the landing and /docs).
    *
    * Defaulted rather than left optional, like `priority` above: this repo
    * compiles with `exactOptionalPropertyTypes`.
