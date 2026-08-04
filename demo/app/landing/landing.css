@@ -205,6 +205,29 @@
   color: var(--bone);
 }
 
+/* Nav links: a dotted rule draws itself in from the left. Dotted rather than
+   solid because the same dotted underline already means "there is something to
+   open at the other end" on the proof cards — the nav is making that same
+   offer. Drawn with a pseudo-element, not text-decoration, because a decoration
+   cannot be animated across its own length. */
+.rivo-landing .nav-dotted {
+  position: relative;
+}
+.rivo-landing .nav-dotted::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: -5px;
+  border-bottom: 1.5px dotted currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.rivo-landing .nav-dotted:hover::after,
+.rivo-landing .nav-dotted:focus-visible::after {
+  transform: scaleX(1);
+}
+
 /* Buttons. These had no hover state at all — the two most important controls on
    the page did not answer the cursor, which is the single loudest way an
    interface reads as dead. */
@@ -226,7 +249,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   /* The hairline still appears — it just stops sweeping. */
-  .rivo-landing .hover-accent::after {
+  .rivo-landing .hover-accent::after,
+  .rivo-landing .nav-dotted::after {
     transition: none;
   }
 }
