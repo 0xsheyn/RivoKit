@@ -10,7 +10,13 @@
  * The script records progress so an interruption can be continued rather than
  * restarted: re-burning would move a second amount, not recover the first.
  *
- *   node scripts/live-bridge.mjs [--reset]
+ * Guarded on the burn only. A run that has already burned continues without
+ * ceremony — gating recovery is how you push someone into `--reset`, which
+ * burns again rather than recovering.
+ *
+ *   CONFIRM=BRIDGE node scripts/live-bridge.mjs   # first run: burns USDC
+ *   node scripts/live-bridge.mjs                  # continue one already burned
+ *   node scripts/live-bridge.mjs --reset          # forget it and start over
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { AppKit, BridgeChain } from "@circle-fin/app-kit";
@@ -119,7 +125,18 @@ step("Step 3 — eksekusi bridge (CCTP: burn → atestasi → mint)");
 info("this takes several minutes; CCTP attestation is off-chain");
 
 if (!state.bridgeDone) {
-  state.startedAt = new Date().toISOString();
+  // Gate the BURN, not the resume. `state.startedAt` means a burn was already
+  // attempted, so this run is continuing one — and continuing must stay cheap,
+  // because the alternative a frustrated operator reaches for is `--reset`,
+  // which burns a second amount instead of recovering the first.
+  if (!state.startedAt && process.env.CONFIRM !== "BRIDGE") {
+    console.error(
+      "\nThis burns USDC on Arc and mints it on Sepolia. To go ahead:\n" +
+        "  CONFIRM=BRIDGE node scripts/live-bridge.mjs\n",
+    );
+    process.exit(1);
+  }
+  state.startedAt ??= new Date().toISOString();
   save();
   const t0 = Date.now();
   try {

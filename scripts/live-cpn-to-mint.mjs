@@ -1,9 +1,28 @@
 /**
- * LIVE — broadcast a CPN EUR/SEPA payment addressed to my own Circle Mint
- * account's EUR wire-in instructions (Bank Frick LI + trackingRef).
+ * ANSWERED — kept as the record of how, not as an experiment to repeat.
  *
- * IRREVERSIBLE once BROADCASTED. Spends 12 USDC of the demo seller's testnet
- * balance. The question: does the Mint EUR balance move?
+ * It broadcast a CPN EUR/SEPA payment addressed to my own Circle Mint account's
+ * EUR wire-in instructions (Bank Frick LI + trackingRef), to ask: **does the
+ * Mint EUR balance move?**
+ *
+ * IT DOES NOT. Payment `1a1cb321…` walked `CRYPTO_FUNDS_PENDING → COMPLETED`
+ * and 12 USDC genuinely left the seller's wallet (32.463489 → 20.462647, tx
+ * `0xdfcf0e51…91d54f23`), with `customerRefId` carrying the trackingRef intact.
+ * The Mint EUR balance sat at 254.49 when it broadcast and was still 254.49 at
+ * T+60 minutes, and `/v1/businessAccount/deposits` recorded no new deposit at
+ * all — so it was not a slow SEPA credit either. The CPN and Mint sandboxes are
+ * simply not connected: CPN's fiat leg is a simulation that stops at CPN's own
+ * boundary. That answer cost 12 USDC on 2026-08-01.
+ *
+ * SO IT REFUSES TO RUN. Not `CONFIRM=` like the scripts whose act is merely
+ * irreversible — a prompt is the wrong shape when the finding is already in
+ * hand. Re-running buys nothing and spends real testnet balance, and the file
+ * survives because deleting it would lose the method behind a claim that
+ * `LIMITATIONS.md` and `CLAUDE.md` both lean on.
+ *
+ * If Circle ever connects the two sandboxes, this becomes worth asking again:
+ *
+ *   CONFIRM=REPEAT-KNOWN-DEAD-END node scripts/live-cpn-to-mint.mjs [amount]
  */
 import { createPublicClient, createWalletClient, erc20Abi, fallback, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -14,6 +33,21 @@ import {
   ARC_TESTNET_RPC_FALLBACKS, PERMIT2_ADDRESS, USDC_ADDRESS, arcTestnet,
 } from "../src/constants/arc.ts";
 import { readEnv } from "./lib/env.mjs";
+
+// Before anything: no API call, no balance read, no quote. A guard that runs
+// after the first network call has already taught you to read past it.
+if (process.env.CONFIRM !== "REPEAT-KNOWN-DEAD-END") {
+  console.error(
+    "\nRefusing to run — this question is already answered.\n\n" +
+      "  CPN reported COMPLETED, 12 USDC left the seller's wallet, and the Mint EUR\n" +
+      "  balance did not move: 254.49 at broadcast, 254.49 at T+60min, no deposit\n" +
+      "  recorded. The CPN and Mint sandboxes are not connected.\n\n" +
+      "  Re-running spends real testnet balance and learns nothing. If Circle has\n" +
+      "  since connected them and you mean to ask again:\n\n" +
+      "    CONFIRM=REPEAT-KNOWN-DEAD-END node scripts/live-cpn-to-mint.mjs [amount]\n",
+  );
+  process.exit(1);
+}
 
 installCircleDnsPinning();
 const env = readEnv();

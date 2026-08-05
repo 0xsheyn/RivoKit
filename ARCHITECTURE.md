@@ -392,18 +392,29 @@ rivokit/
 | **API probes** | `probe-cpn-source` (source currencies + corridor catalog) · `probe-cpn-lifecycle` (every state reachable without a broadcast) · `probe-cpn-status` · `probe-circle-eoa-sign` (can a Circle wallet sign so a counterparty can recover?) · `probe-circle-multichain` (does one wallet carry one address across chains?) · `probe-swap` · `probe-mint*` · `probe-wallet-rails` |
 | **Demo utils** | `demo-topup` · `reset-demo` |
 
-**Most** things that move money sit behind an explicit `CONFIRM=` environment
-variable — 20 of the 29 `live-*` scripts. `probe-*` scripts fund nothing and cost
-nothing.
+Everything that spends sits behind an explicit `CONFIRM=` environment variable —
+22 of the 29 `live-*` scripts — except two allowance writes, named below.
+`probe-*` scripts fund nothing and cost nothing.
 
-That is deliberately not written as "anything", because it is not true and the
-exceptions are the ones worth knowing. Ungated and harmless: `live-ramp` stops
-before submit by design, `live-ramp-preflight` only reads, and
-`live-payout-reconcile` / `live-cashout-reconcile` / `live-compliance` touch
-status rows rather than funds. **Ungated and not harmless:**
-`live-cpn-to-mint` (approves, then submits an irreversible CPN payment — this is
-the run that cost 12 USDC), `live-bridge` and `live-bridge-amoy` (`bridge.execute`
-moves USDC across chains), `live-phase2` (a real floored swap), and
-`live-ramp-approve` / `live-ramp-revoke` (on-chain allowance writes, reversible
-but real). Read the header of any `live-*` script before running it; the header
-says what it spends.
+The seven ungated scripts, and why:
+
+| Script | Why it is ungated |
+|---|---|
+| `live-ramp` | Stops before submit by design — quote and prepare only |
+| `live-ramp-preflight` | Reads |
+| `live-payout-reconcile` · `live-cashout-reconcile` · `live-compliance` | Touch status rows, not funds |
+| `live-ramp-approve` · `live-ramp-revoke` | On-chain allowance writes — real, but bounded and fully reversible, and `revoke` is `approve`'s undo. A prompt here would be ceremony |
+
+Two gates are placed on the **first** run rather than on the script.
+`live-bridge` and `live-bridge-amoy` skip the check once a burn has been
+attempted, because a resumed run must stay cheap — make recovery annoying and
+the operator reaches for `--reset`, which burns a second amount instead of
+recovering the first.
+
+`live-cpn-to-mint` is not gated but **refuses outright**, needing
+`CONFIRM=REPEAT-KNOWN-DEAD-END`. Its question — does a CPN payment credit a
+Circle Mint EUR balance? — is answered, and the answer is no; the sandboxes are
+not connected. It cost 12 USDC to learn. A confirmation prompt is the wrong
+shape when the finding is already in hand, and the file is kept because deleting
+it would lose the method behind a claim [LIMITATIONS.md](LIMITATIONS.md) leans
+on.
