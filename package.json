@@ -1,9 +1,9 @@
 {
   "name": "rivokit",
   "version": "0.1.0",
-  "_comment_private": "Still private: nothing here is audited and the payout leg is MOCK, so it must not land on the public npm registry by accident. `npm pack` and git/file installs work regardless — see README > Installation.",
+  "_comment_private": "Still private: nothing here is audited and the payout leg is MOCK, so it must not land on the public npm registry by accident. `npm pack` and git/file installs work regardless \u2014 see README > Installation.",
   "private": true,
-  "description": "An embeddable cross-border settlement SDK on Arc — multi-chain USDC in, local-currency out.",
+  "description": "An embeddable cross-border settlement SDK on Arc \u2014 multi-chain USDC in, local-currency out.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -59,6 +59,11 @@
     "tailwind-merge": "^3.6.0",
     "viem": "^2.38.0",
     "wagmi": "^2.17.5"
+  },
+  "overrides": {
+    "rpc-websockets": {
+      "uuid": "^9.0.1"
+    }
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.13",
