@@ -15,7 +15,7 @@
  * that moves funds and then fails, would break the guarantee RivoKit makes to
  * the recipient.
  *
- *   node scripts/live-phase2.mjs [--reset]
+ *   CONFIRM=SWAP node scripts/live-phase2.mjs [--reset]
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createPublicClient, createWalletClient, erc20Abi, formatUnits, getAddress, parseUnits } from "viem";
@@ -45,6 +45,19 @@ const record = (pass, label, detail) => {
   checks.push(pass);
   console.log(`${pass ? "  OK  " : " FAIL "}  ${label}${detail ? ` — ${detail}` : ""}`);
 };
+
+// Gated at the top rather than at each write, because every path here spends:
+// a top-up transfer to the swap wallet, then real swaps. Unlike the bridge this
+// needs no resume exemption — a swap either fills or reverts, which is the
+// property the script exists to prove, so there is no half-landed state to
+// rescue.
+if (process.env.CONFIRM !== "SWAP") {
+  console.error(
+    "\nThis moves USDC on Arc: a top-up transfer, then live swaps. To go ahead:\n" +
+      "  CONFIRM=SWAP node scripts/live-phase2.mjs\n",
+  );
+  process.exit(1);
+}
 
 if (process.argv.includes("--reset") && existsSync(STATE_FILE)) writeFileSync(STATE_FILE, "{}");
 const state = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};

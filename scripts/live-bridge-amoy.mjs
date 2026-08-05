@@ -167,7 +167,19 @@ step("Step 3 — execute bridge (CCTP: burn → attestation → mint)");
 info("fast path is ~13 Amoy blocks; a spent Fast Transfer Allowance makes it 33");
 
 if (!state.bridgeDone) {
-  state.startedAt = new Date().toISOString();
+  // Gated like `live-bridge`, on the first attempt only. The burn here reverts
+  // every time — that failure IS the finding — but the approve ahead of it does
+  // land, and "it was going to fail anyway" is a poor reason to be the one
+  // bridge script that spends without asking.
+  if (!state.startedAt && process.env.CONFIRM !== "BRIDGE") {
+    console.error(
+      "\nThis approves USDC on Amoy and attempts a CCTP burn (which reverts — that\n" +
+        "is what this script documents). To go ahead:\n" +
+        "  CONFIRM=BRIDGE node scripts/live-bridge-amoy.mjs\n",
+    );
+    process.exit(1);
+  }
+  state.startedAt ??= new Date().toISOString();
   save();
   const t0 = Date.now();
   try {
