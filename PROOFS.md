@@ -384,9 +384,12 @@ touches the premise of the gasless path at its edge.
 
 ## Reproducing any of this
 
-Everything under `scripts/` hits real services and needs `.env.local`. Anything
-that moves money is gated behind an explicit `CONFIRM=` variable; `probe-*`
-scripts fund nothing.
+Everything under `scripts/` hits real services and needs `.env.local`. **Most**
+things that move money sit behind an explicit `CONFIRM=` variable — 20 of the 29
+`live-*` scripts — and `probe-*` scripts fund nothing. The exceptions are listed
+in [ARCHITECTURE.md](ARCHITECTURE.md#scripts); `live-cpn-to-mint` is the one to
+know, because it submits an irreversible CPN payment with no prompt. Read a
+`live-*` header before running it.
 
 ```bash
 node scripts/probe-cpn-status.mjs      # what CPN says right now

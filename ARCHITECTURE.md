@@ -346,7 +346,7 @@ Redeploy the collector → allowance is 0 → `refund` reverts. Re-run
 
 Three layers, deliberately unequal.
 
-- **Unit** (`npm test`) — 462 green / 26 files, no credentials. State machines,
+- **Unit** (`npm test`) — 465 green / 26 files, no credentials. State machines,
   unit conversion, quote/rebate math, the fee gross-up round-trip, facade
   composition, compliance gating, webhook ECDSA verification, ERC-3009
   sign+recover, the whole CPN layer.
@@ -387,10 +387,23 @@ rivokit/
 
 | Group | Scripts |
 |---|---|
-| **Setup / health** | `preflight` (read-only) · `setup` (idempotent deploy) · `check-cpp` (8 wiring assertions) · `check-hash` (off-chain vs on-chain payment hash) · `check-operator` (refund allowance) · `sync-env` |
-| **Live proofs** | `live-sdk` (full flow through the facade) · `live-sdk-bank` · `live-demo-bank` · `live-payout-reconcile` · `live-wallet-rails` · `live-gateway-recover` · `live-cpn-to-mint` · `live-webhook-attribution` · `live-refund` · `live-recovery` · `live-charge` · `live-compliance` · `live-scenario` · `live-ramp*` · `live-mint-arc-deposit` · `live-cpn-subscribe` |
-| **API probes** | `probe-cpn-source` (source currencies + corridor catalog) · `probe-cpn-lifecycle` (every state reachable without a broadcast) · `probe-cpn-status` · `probe-swap` · `probe-mint*` · `probe-wallet-rails` |
+| **Setup / health** | `preflight` (read-only, Arc) · `check-source-chains` (read-only, the four chains a buyer funds FROM — USDC *and* native gas, which is not USDC there) · `setup` (idempotent deploy) · `check-cpp` (8 wiring assertions) · `check-hash` (off-chain vs on-chain payment hash) · `check-operator` (refund allowance) · `sync-env` |
+| **Live proofs** | `live-sdk` (full flow through the facade) · `live-sdk-bank` · `live-demo-bank` · `live-payout-reconcile` · `live-cashout-reconcile` (standalone cash-out rows no order owns) · `live-wallet-rails` · `live-gateway-recover` · `live-cpn-to-mint` · `live-webhook-attribution` · `live-bridge` · `live-refund` · `live-recovery` · `live-charge` · `live-compliance` · `live-scenario` · `live-ramp*` · `live-mint-arc-deposit` · `live-cpn-subscribe` |
+| **API probes** | `probe-cpn-source` (source currencies + corridor catalog) · `probe-cpn-lifecycle` (every state reachable without a broadcast) · `probe-cpn-status` · `probe-circle-eoa-sign` (can a Circle wallet sign so a counterparty can recover?) · `probe-circle-multichain` (does one wallet carry one address across chains?) · `probe-swap` · `probe-mint*` · `probe-wallet-rails` |
 | **Demo utils** | `demo-topup` · `reset-demo` |
 
-Anything that moves money is gated behind an explicit `CONFIRM=` environment
-variable. `probe-*` scripts fund nothing and cost nothing.
+**Most** things that move money sit behind an explicit `CONFIRM=` environment
+variable — 20 of the 29 `live-*` scripts. `probe-*` scripts fund nothing and cost
+nothing.
+
+That is deliberately not written as "anything", because it is not true and the
+exceptions are the ones worth knowing. Ungated and harmless: `live-ramp` stops
+before submit by design, `live-ramp-preflight` only reads, and
+`live-payout-reconcile` / `live-cashout-reconcile` / `live-compliance` touch
+status rows rather than funds. **Ungated and not harmless:**
+`live-cpn-to-mint` (approves, then submits an irreversible CPN payment — this is
+the run that cost 12 USDC), `live-bridge` and `live-bridge-amoy` (`bridge.execute`
+moves USDC across chains), `live-phase2` (a real floored swap), and
+`live-ramp-approve` / `live-ramp-revoke` (on-chain allowance writes, reversible
+but real). Read the header of any `live-*` script before running it; the header
+says what it spends.

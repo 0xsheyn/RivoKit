@@ -47,7 +47,7 @@ version bump.
 ```bash
 git clone https://github.com/0xsheyn/RivoKit.git && cd RivoKit
 npm install                 # runs `prepare` → builds dist/
-npm test                    # 462 tests / 26 files — needs no credentials at all
+npm test                    # 465 tests / 26 files — needs no credentials at all
 ```
 
 `npm test` passing on a fresh clone with an empty `.env.local` is the intended
@@ -55,7 +55,7 @@ first checkpoint. Nothing below is required to reach it.
 
 | Command | Does |
 |---|---|
-| `npm test` | vitest — 462 green / 26 files, no credentials |
+| `npm test` | vitest — 465 green / 26 files, no credentials |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build:lib` | SDK → `dist/` (ESM + `.d.ts`), entry `src/index.ts` |
 | `npm run setup` | Deploy CPP instances + operator/merchant wallets (idempotent) |
@@ -102,8 +102,10 @@ MIN_OPERATOR_GAS_USDC=0.5  # createOrder is refused below this operator gas floa
 RIVO_PAYOUT_CORRIDOR=EUR-SEPA
 ```
 
-> **The deployer and the operator must be different keys.** The operator is hot —
-> it signs every payment — and must not also hold deploy authority.
+> **The three keys above are three different wallets, one role each.** Nothing
+> doubles up, and `node scripts/preflight.mjs` fails if any two resolve to the
+> same address. The operator and merchant are not in this list at all — they are
+> Circle wallets written by `setup`, and their keys never touch this file.
 
 ### Database
 
@@ -148,9 +150,15 @@ All of these are exported: `ARC_TESTNET_CHAIN_ID`, `USDC_ADDRESS`,
 ## 4. Run the demo
 
 ```bash
-node scripts/demo-topup.mjs   # fund the buyer on a source chain + Gateway
-npm run dev                   # → http://localhost:3000
+node scripts/demo-topup.mjs           # fund the buyer on a source chain + Gateway
+node scripts/check-source-chains.mjs  # is the buyer funded where they pay FROM?
+npm run dev                           # → http://localhost:3000
 ```
+
+`check-source-chains` is the one `preflight` cannot cover: preflight reads Arc,
+and the demo's opening move is funding from somewhere else. It checks **two**
+balances per chain, because gas there is ETH/AVAX/POL rather than USDC — a wallet
+holding USDC with no native balance cannot even approve.
 
 The demo is a Next.js marketplace laid out as **four role columns**, each holding
 only the authority that role really has:
@@ -451,20 +459,28 @@ Not a checklist for a demo. Each of these is load-bearing.
 
 1. **The host must be an onboarded OFI** with CPN, plus KYB/AML on recipients.
    RivoKit is not a licensed operator and cannot be one for you.
-2. **Separate the keys.** Deployer, operator and merchant are three distinct
-   wallets. The hot operator key holds no deploy authority.
-3. **Buyers sign in their own wallets.** `BUYER_PRIVATE_KEY` is a demo shortcut;
+2. **Separate the keys, and keep them separate.** Five wallets, one role each:
+   deployer, seller and buyer as raw keys in `.env.local`; operator and merchant
+   as Circle wallets whose keys never reach this repo. Deploy authority sits on
+   none of the hot ones. `preflight` fails if any two raw keys resolve to the
+   same address, so the separation is checked rather than trusted.
+3. **Put the demo lock back on, or replace it.** This deployment runs open by
+   default — `DEMO_WRITE_KEY` unset means any visitor can trigger any action
+   that moves money, bounded only by the per-action cap. That is sized for
+   throwaway testnet keys. Anything holding value needs the key set at minimum,
+   and real authentication in practice.
+4. **Buyers sign in their own wallets.** `BUYER_PRIVATE_KEY` is a demo shortcut;
    the gasless ERC-3009 path is designed for exactly this replacement.
-4. **Sellers sign their own cash-outs.** `submitSigned` exists so the wallet that
+5. **Sellers sign their own cash-outs.** `submitSigned` exists so the wallet that
    *holds* the USDC is the one that authorizes it to leave.
-5. **Run a durable webhook endpoint**, plus a scheduled sweep for the rows a
+6. **Run a durable webhook endpoint**, plus a scheduled sweep for the rows a
    missed webhook would otherwise strand: `refreshPayout` for a payout attached
    to an order, `reconcileCpnPayments` for a standalone cash-out, which belongs
    to no order and so is reachable by nothing else.
-6. **Re-run `check-operator.mjs` after any collector redeploy.** The operator's
+7. **Re-run `check-operator.mjs` after any collector redeploy.** The operator's
    USDC allowance is bound to the refund collector address — redeploy it and the
    allowance is 0 and `refund` reverts.
-7. **Mainnet is out of scope** here: gated on audit, key timelock/multisig, legal
+8. **Mainnet is out of scope** here: gated on audit, key timelock/multisig, legal
    review and OFI onboarding.
 
 ## Troubleshooting

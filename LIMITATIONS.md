@@ -177,7 +177,7 @@ transfer, and it says so.
 
 ## What the tests do not guard
 
-The 462 unit tests are weighted toward pure logic — state machines, money
+The 465 unit tests are weighted toward pure logic — state machines, money
 conversion, fee arithmetic, reducers, signature verification against a keypair
 the test itself creates. **The modules that talk to a network or a chain have no
 direct tests, and the facade tests mock them.**
