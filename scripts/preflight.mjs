@@ -70,6 +70,38 @@ const roles = [
 ];
 const addresses = {};
 
+/**
+ * Why a key was rejected, WITHOUT echoing it.
+ *
+ * "not a 32-byte hex private key" is true and useless — it does not say whether
+ * the key is short, unprefixed, or carrying a stray character, and a private key
+ * is the one value you cannot print to go and look. This describes the shape
+ * instead: lengths, prefix, and the POSITION of anything that is not a hex
+ * digit, named by class (space, quote, `=`) rather than by value. A real typo
+ * shows up as one offending position; a truncated paste shows up as a length.
+ *
+ * Positions and character classes are not key material. `=` at position 0 is a
+ * doubled equals sign in the env file, which is exactly the bug this was written
+ * for and would otherwise cost a round trip to find.
+ */
+function keyShape(key) {
+  const body = key.startsWith("0x") ? key.slice(2) : key;
+  const bits = [`length ${key.length} (want 66)`, key.startsWith("0x") ? "has 0x" : "NO 0x prefix"];
+  const offenders = [];
+  for (let i = 0; i < body.length; i++) {
+    if (/[0-9a-fA-F]/.test(body[i])) continue;
+    const c = body.charCodeAt(i);
+    const name =
+      c === 32 ? "space" : c === 9 ? "tab" : c === 13 ? "CR" : c === 10 ? "LF"
+        : body[i] === '"' || body[i] === "'" ? "quote" : body[i] === "=" ? "'='"
+          : `char code ${c}`;
+    offenders.push(`${name} at position ${i}`);
+  }
+  if (offenders.length) bits.push(`non-hex: ${offenders.slice(0, 4).join(", ")}`);
+  else if (body.length !== 64) bits.push(`${body.length} hex digits, want 64`);
+  return bits.join("; ");
+}
+
 for (const [role, key] of roles) {
   if (!key) {
     record(false, `${role} key present`, "not set in .env.local");
@@ -79,7 +111,7 @@ for (const [role, key] of roles) {
   try {
     account = privateKeyToAccount(key);
   } catch {
-    record(false, `${role} key valid`, "not a 32-byte hex private key");
+    record(false, `${role} key valid`, `not a 32-byte hex private key — ${keyShape(key)}`);
     continue;
   }
   addresses[role] = account.address;
