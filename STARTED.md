@@ -455,6 +455,32 @@ from a script means nothing. The prerequisite you *can* check is `HEAD <url>` �
 
 ## 10. Going to production
 
+### Deploying the demo
+
+The Next.js app lives in `demo/`, but there is no `demo/package.json` — the
+manifest, `src/` and `scripts/` are all at the repo root, and the demo imports
+`../../src`. So the **Root Directory must stay the repo root**; pointing a host
+at `demo/` leaves it with no manifest at all.
+
+That has one consequence worth knowing before it costs you a build. `npm run
+build` is `next build demo`, so Next writes to **`demo/.next`**, while a host
+that assumes the app is at the root looks for `.next` there and fails with
+`routes-manifest.json couldn't be found`. The build succeeded; only the lookup
+was in the wrong place. `vercel.json` at the root pins `outputDirectory` to
+`demo/.next` so the setting travels with the code instead of living only in a
+dashboard, where recreating the project would silently reintroduce the trap.
+
+Two more, both host settings rather than code:
+
+- **`prepare` runs `npm run build:lib`** on install. That is wanted — it is how
+  the SDK builds for consumers — but it means a `tsc` failure breaks the deploy
+  before Next ever starts.
+- **Deployment Protection must be off for the webhook URL.** Circle validates a
+  subscription with `HEAD`, and an auth wall makes that fail before hosting is
+  even the question. See [§9](#9-webhooks).
+
+### The rest
+
 Not a checklist for a demo. Each of these is load-bearing.
 
 1. **The host must be an onboarded OFI** with CPN, plus KYB/AML on recipients.
