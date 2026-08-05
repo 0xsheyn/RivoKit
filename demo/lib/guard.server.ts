@@ -134,10 +134,31 @@ function capFromEnv(name: string, fallback: bigint): bigint {
   }
 }
 
-/** USDC/EURC, 6 dp. 25 USDC clears the EUR/SEPA minimum with room and caps the bleed. */
-export const CAP_TOKEN_MINOR = capFromEnv("DEMO_CAP_TOKEN_MINOR", 25_000_000n);
-/** Fiat at 2 dp — Circle Mint redeems and any destination amount. */
-export const CAP_FIAT_MINOR = capFromEnv("DEMO_CAP_FIAT_MINOR", 2_500n);
+/**
+ * USDC/EURC, 6 dp — sized to the storefront's most expensive listing and no
+ * higher, because with the demo running open this is the only thing bounding a
+ * single call.
+ *
+ * The arithmetic, from a live EUR/SEPA quote on 2026-08-05: the top listing is
+ * €14.50 (`demo/lib/catalog.ts`), which CPN prices at 16.998225 USDC. A
+ * bank-bound order authorizes that PLUS a 400 bps buffer for CPN's spread and
+ * its four fees, so the amount that actually moves is 17.678154 USDC. 18 is that
+ * rounded up, which leaves ~1.8% of headroom for FX drift.
+ *
+ * Raise it if EUR strengthens enough that the top listing stops fitting — the
+ * symptom is a cash-out refusing at the ceiling with proceeds that came from a
+ * single legitimate sale. Do not raise it "to be safe": the ceiling is the whole
+ * defence, and every unused USDC of it is bleed a stranger can cause per call.
+ */
+export const CAP_TOKEN_MINOR = capFromEnv("DEMO_CAP_TOKEN_MINOR", 18_000_000n);
+/**
+ * Fiat at 2 dp — Circle Mint redeems and any destination amount.
+ *
+ * Brought down alongside the token cap and for the same reason. €15.00 is the
+ * top listing rounded up on the fiat side; it clears Mint's redeem minimum with
+ * room, and nothing in this demo legitimately redeems more in one call.
+ */
+export const CAP_FIAT_MINOR = capFromEnv("DEMO_CAP_FIAT_MINOR", 1_500n);
 
 /**
  * The ceiling, applied to every gated amount whether or not the caller is

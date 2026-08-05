@@ -86,7 +86,7 @@ cp .env.example .env.local
 | `BUYER_PRIVATE_KEY` | Demo/live scripts signing ERC-3009 | A demo shortcut — in production the buyer signs in their browser |
 | `NEXT_PUBLIC_SUPABASE_URL` · `SUPABASE_SECRET_KEY` | The order store | Service key — server-side only |
 | `DEMO_WRITE_KEY` | Optional lock on every action that moves money | **Opt-in.** Set it and those actions need the header's Unlock control first; leave it unset and the demo runs open to anyone, which is how the public testnet deployment runs. Same behaviour locally and in production — no environment-dependent surprise. The per-action caps below apply either way |
-| `DEMO_CAP_TOKEN_MINOR` · `DEMO_CAP_FIAT_MINOR` | Per-action ceilings | Optional. Default 25 USDC and 25.00 fiat. Applied whether or not the caller is unlocked — the cap is what bounds a leaked key |
+| `DEMO_CAP_TOKEN_MINOR` · `DEMO_CAP_FIAT_MINOR` | Per-action ceilings | Optional. Default 18 USDC and 15.00 fiat — sized to the storefront's top listing (€14.50 = 16.998225 USDC plus its 400 bps buffer). Applied always, locked or not. With the demo running open this is the only control there is |
 
 Written automatically by `npm run setup`, never by hand:
 `NEXT_PUBLIC_RIVO_ESCROW_ADDRESS`, `NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS`,

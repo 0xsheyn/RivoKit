@@ -147,7 +147,8 @@ broadcast signed with the seller's server-held key. Nothing asks who they are,
 nothing records who did it, and nothing can undo it once broadcast.
 
 **The cap is the only control, and it is a ceiling per call, not a budget.**
-`DEMO_CAP_TOKEN_MINOR` / `DEMO_CAP_FIAT_MINOR` (default 25 USDC / 25.00 fiat)
+`DEMO_CAP_TOKEN_MINOR` / `DEMO_CAP_FIAT_MINOR` (default 18 USDC / 15.00 fiat,
+sized to the storefront's most expensive listing plus its buffer)
 bound any single action; they do not bound how many actions someone makes. The
 realistic worst case is therefore not theft of anything valuable — it is the
 demo wallets running dry and needing a refill.
