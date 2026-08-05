@@ -135,24 +135,32 @@ nothing fires them on a timer, and nothing will until there is a durable endpoin
 to hang one off. Running them by hand is a real answer for a testnet demo and not
 one for production.
 
-### The demo's gate is one shared secret, not access control
+### The public demo has no access control at all — only a per-action ceiling
 
 Every Server Action that moves money — a CPN broadcast, a Mint redeem, a
-capture, a refund, an order — is gated server-side by `DEMO_WRITE_KEY` and capped
-per action. Before that, none of them were: a Server Action is a POST endpoint
-whose id ships in the bundle handed to every visitor, so the panel's confirmation
-dialog stood between nobody and an irreversible broadcast signed with a
-server-held key.
+capture, a refund, an order — runs for **anyone who loads the page**. That is
+deliberate: the point of a public testnet demo is that a stranger can walk up and
+run the whole settlement themselves, and a shared password would defeat it.
 
-What it is now: one secret, one operator, one testnet demo. There are no
-accounts, no roles, no audit trail of who unlocked, and a leaked key is a full
-compromise of the demo's funds up to the per-action cap. **The cap, not the lock,
-is what bounds the worst case** — it applies whether or not the caller is
-unlocked, because a lock can be defeated by a borrowed browser and a ceiling
-cannot be defeated from outside the server at all.
+So state the consequence plainly. A visitor can trigger an **irreversible** CPN
+broadcast signed with the seller's server-held key. Nothing asks who they are,
+nothing records who did it, and nothing can undo it once broadcast.
 
-A production deployment holding real value needs real authentication. This is
-sized for what it protects: testnet balances that make a demo work.
+**The cap is the only control, and it is a ceiling per call, not a budget.**
+`DEMO_CAP_TOKEN_MINOR` / `DEMO_CAP_FIAT_MINOR` (default 25 USDC / 25.00 fiat)
+bound any single action; they do not bound how many actions someone makes. The
+realistic worst case is therefore not theft of anything valuable — it is the
+demo wallets running dry and needing a refill.
+
+That is only acceptable because of what sits behind it: disposable testnet keys
+holding testnet USDC on Arc Testnet, and a CPN sandbox whose fiat leg is a
+simulator. Nothing here touches a real balance.
+
+There is an opt-in lock (`DEMO_WRITE_KEY`) for a deployment that wants one: set
+it and every action above needs an unlock cookie first. It is still one shared
+secret with no accounts, no roles and no audit trail — enough to keep an endpoint
+from being an open faucet, not enough to be called authentication. Anything
+holding real value needs a different mechanism entirely.
 
 ### `release()` does not trigger a Circle Mint redeem
 
