@@ -12,7 +12,12 @@
  * Circle notification subscription. The verify→correlate→record path itself is
  * covered by src/events/webhook-handler.test.ts against a real P-256 keypair.
  */
-import { getRivoKit } from "@/lib/rivokit.server";
+// NOT `getRivoKit()`. That builds App Kit and the Circle Wallets adapter, whose
+// Solana dependency chain ends in a CommonJS module that `require()`s an ESM
+// one — the module then fails to load and every request here answers 500,
+// including the `HEAD` Circle validates a subscription with. See
+// `demo/lib/webhook.server.ts` for the full account.
+import { getWebhookDeps } from "@/lib/webhook.server";
 import { handleCircleWebhook } from "../../../../../src/events/webhook-handler.ts";
 import { verifyAndInterpretCpn } from "../../../../../src/ramp/cpn-state.ts";
 import { applyCpnEventToStore } from "../../../../../src/ramp/cpn-sync.ts";
@@ -40,7 +45,7 @@ export async function HEAD(): Promise<Response> {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const { store, resolveWebhookPublicKey } = getRivoKit();
+  const { store, resolveWebhookPublicKey } = getWebhookDeps();
 
   // RAW bytes — never req.json(). Re-serializing reorders keys and drops
   // whitespace, so the signature would no longer match what Circle signed.
