@@ -26,8 +26,9 @@ import { USDC_ADDRESS, EURC_ADDRESS } from "../src/constants/arc.ts";
 import { toDecimalString } from "../src/settlement-fx/units.ts";
 import { createSettlementFx, FloorNotMetError, NoRouteError } from "../src/settlement-fx/swap.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
-const STATE_FILE = ".live-phase2.json";
+const STATE_FILE = stateFile("live-phase2");
 const SWAP_SIZE = parseUnits("5", 6); // 5 tokens — above StableFX's 10 USDC min? see note
 
 const env = readEnv();

@@ -19,10 +19,11 @@ import { createBridge } from "../src/funding/bridge.ts";
 import { createUnifiedBalance } from "../src/funding/unified-balance.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 import { SOURCE_CHAIN } from "../demo/lib/source-chain.ts";
 
 installCircleDnsPinning();
-const STATE = ".demo-topup.json";
+const STATE = stateFile("demo-topup");
 const BRIDGE_TO_SOURCE = parseUnits("10", 6);
 const DEPOSIT_TO_GATEWAY = parseUnits("6", 6);
 

@@ -35,10 +35,11 @@ import { expiriesFor, timeoutPolicyFor } from "../src/orchestrator/policy.ts";
 import { createUnifiedBalance } from "../src/funding/unified-balance.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
 installCircleDnsPinning();
 
-const STATE_FILE = ".live-unified.json";
+const STATE_FILE = stateFile("live-unified");
 const AMOUNT = parseUnits("2", 6);
 const DEPOSIT = parseUnits("2", 6);
 // Gateway charges a flat ~1.0 USDC fee ON TOP of a testnet spend, so from a

@@ -380,8 +380,17 @@ rivokit/
 ├── infra/supabase/     # order-store migrations (shipped with the package)
 ├── scripts/            # setup · health checks · live proofs · API probes
 ├── demo/               # Next.js marketplace + /sdk state-machine page
+├── .live-state/        # resume state for live scripts (gitignored, see below)
 └── README_v0.md        # the previous long-form README
 ```
+
+`.live-state/` is what lets an interrupted live run **continue** rather than
+start again — the sharp case being a CCTP bridge whose burn has landed but whose
+mint has not, where starting over burns a second amount instead of recovering
+the first. Written through `scripts/lib/state.mjs`, which anchors the path to the
+checkout rather than the CWD: a bare relative path meant the same script run from
+a subdirectory kept a second, always-empty state file, and an empty state file
+does not fail — it silently redoes work that costs money.
 
 ### Scripts
 

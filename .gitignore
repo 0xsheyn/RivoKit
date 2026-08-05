@@ -28,9 +28,11 @@ out/
 coverage/
 *.tsbuildinfo
 
-# State run uji live — supaya run yang terputus bisa dilanjutkan, bukan diulang
-.live-*.json
-.demo-topup.json
+# State run uji live — supaya run yang terputus bisa dilanjutkan, bukan diulang.
+# Satu direktori, bukan glob per nama file: glob-nya harus disinkronkan tiap kali
+# ada skrip baru, dan satu yang terlewat berarti state ber-alamat wallet ikut
+# ter-commit ke repo publik. Ditulis skrip lewat scripts/lib/state.mjs.
+.live-state/
 
 *.log
 .DS_Store

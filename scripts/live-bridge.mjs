@@ -29,12 +29,13 @@ import { USDC_ADDRESS } from "../src/constants/arc.ts";
 import { createBridge, BridgeStuckError } from "../src/funding/bridge.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
 // This network hijacks Circle's DNS (observed live, not hypothetical); pin the real
 // IPs before any SDK call. Must run before AppKit is used.
 installCircleDnsPinning();
 
-const STATE_FILE = ".live-bridge.json";
+const STATE_FILE = stateFile("live-bridge");
 const AMOUNT = parseUnits("3", 6);
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
 

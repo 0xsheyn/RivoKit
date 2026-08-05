@@ -26,12 +26,13 @@ import { createEscrow } from "../src/escrow/operations.ts";
 import { createOrderStore } from "../src/orchestrator/order-store.ts";
 import { expiriesFor, timeoutPolicyFor } from "../src/orchestrator/policy.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
 // This network hijacks Circle's DNS → a misleading CERT_HAS_EXPIRED on api.circle.com.
 // Pin before any Circle SDK call. Never disable TLS verification (CLAUDE.md, pitfalls).
 installCircleDnsPinning();
 
-const STATE_FILE = ".live-charge.json";
+const STATE_FILE = stateFile("live-charge");
 const AMOUNT = parseUnits("2", 6);
 const WEDGE = "contractor_payout";
 
