@@ -28,12 +28,13 @@ const MAPPING = {
   SUPABASE_URL: "NEXT_PUBLIC_SUPABASE_URL",
   SUPABASE_PUBLISHABLE_KEY: "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   SUPABASE_SERVICE_ROLE_KEY: "SUPABASE_SECRET_KEY",
-  RELAYER_PRIVATE_KEY: "RELAYER_PRIVATE_KEY",
+  SELLER_PRIVATE_KEY: "SELLER_PRIVATE_KEY",
   DEPLOYER_PRIVATE_KEY: "DEPLOYER_PRIVATE_KEY",
   BUYER_PRIVATE_KEY: "BUYER_PRIVATE_KEY",
 };
-// No SELLER_ADDRESS here on purpose: nothing reads it. The demo's seller is the
-// relayer EOA (demo/lib/cpn.server.ts getSellerSigner) and the escrow receiver is
+// No SELLER_ADDRESS here on purpose: nothing reads it — the seller's address is
+// derived from SELLER_PRIVATE_KEY above (demo/lib/cpn.server.ts
+// getSellerSigner), and the escrow receiver for wallet-bound orders is
 // MERCHANT_ADDRESS, which setup writes. Mapping it only produced a permanent
 // "empty:" entry in this script's report.
 

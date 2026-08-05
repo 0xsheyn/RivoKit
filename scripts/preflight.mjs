@@ -58,11 +58,49 @@ try {
 }
 
 // 2. Key separation + balances.
+//
+// All three, not two: the demo runs on three raw keys with one job each, and
+// the whole point of splitting them is that no single leak is total. `buyer`
+// used to be left out of this check, which meant nothing would have noticed if
+// it had been set to the same key as another role.
 const roles = [
   ["deployer", env.DEPLOYER_PRIVATE_KEY],
-  ["relayer/operator", env.RELAYER_PRIVATE_KEY],
+  ["seller", env.SELLER_PRIVATE_KEY],
+  ["buyer", env.BUYER_PRIVATE_KEY],
 ];
 const addresses = {};
+
+/**
+ * Why a key was rejected, WITHOUT echoing it.
+ *
+ * "not a 32-byte hex private key" is true and useless — it does not say whether
+ * the key is short, unprefixed, or carrying a stray character, and a private key
+ * is the one value you cannot print to go and look. This describes the shape
+ * instead: lengths, prefix, and the POSITION of anything that is not a hex
+ * digit, named by class (space, quote, `=`) rather than by value. A real typo
+ * shows up as one offending position; a truncated paste shows up as a length.
+ *
+ * Positions and character classes are not key material. `=` at position 0 is a
+ * doubled equals sign in the env file, which is exactly the bug this was written
+ * for and would otherwise cost a round trip to find.
+ */
+function keyShape(key) {
+  const body = key.startsWith("0x") ? key.slice(2) : key;
+  const bits = [`length ${key.length} (want 66)`, key.startsWith("0x") ? "has 0x" : "NO 0x prefix"];
+  const offenders = [];
+  for (let i = 0; i < body.length; i++) {
+    if (/[0-9a-fA-F]/.test(body[i])) continue;
+    const c = body.charCodeAt(i);
+    const name =
+      c === 32 ? "space" : c === 9 ? "tab" : c === 13 ? "CR" : c === 10 ? "LF"
+        : body[i] === '"' || body[i] === "'" ? "quote" : body[i] === "=" ? "'='"
+          : `char code ${c}`;
+    offenders.push(`${name} at position ${i}`);
+  }
+  if (offenders.length) bits.push(`non-hex: ${offenders.slice(0, 4).join(", ")}`);
+  else if (body.length !== 64) bits.push(`${body.length} hex digits, want 64`);
+  return bits.join("; ");
+}
 
 for (const [role, key] of roles) {
   if (!key) {
@@ -73,7 +111,7 @@ for (const [role, key] of roles) {
   try {
     account = privateKeyToAccount(key);
   } catch {
-    record(false, `${role} key valid`, "not a 32-byte hex private key");
+    record(false, `${role} key valid`, `not a 32-byte hex private key — ${keyShape(key)}`);
     continue;
   }
   addresses[role] = account.address;
@@ -108,14 +146,26 @@ for (const [role, key] of roles) {
   }
 }
 
+// Every pair, not just one pair. Checked by ADDRESS rather than by key text so
+// the same wallet written two different ways (0x-prefixed or not, different
+// case) still counts as the collision it is.
+const named = roles.map(([role]) => role).filter((role) => addresses[role]);
+const collisions = [];
+for (let i = 0; i < named.length; i++) {
+  for (let j = i + 1; j < named.length; j++) {
+    if (addresses[named[i]].toLowerCase() === addresses[named[j]].toLowerCase()) {
+      collisions.push(`${named[i]} = ${named[j]}`);
+    }
+  }
+}
 record(
-  Boolean(addresses.deployer) &&
-    Boolean(addresses["relayer/operator"]) &&
-    addresses.deployer !== addresses["relayer/operator"],
-  "deployer != relayer (DEPLOYMENT.md §2)",
-  addresses.deployer === addresses["relayer/operator"]
-    ? "keys are IDENTICAL — one leak means full control"
-    : "separate",
+  named.length === roles.length && collisions.length === 0,
+  "deployer, seller and buyer are three different wallets (DEPLOYMENT.md §2)",
+  named.length !== roles.length
+    ? `only ${named.length} of ${roles.length} keys are usable`
+    : collisions.length
+      ? `SHARED WALLET — ${collisions.join(", ")}; one leak reaches both roles`
+      : "separate",
 );
 
 // 3. Circle API credentials.

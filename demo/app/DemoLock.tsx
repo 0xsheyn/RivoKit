@@ -5,7 +5,6 @@ import { RiLockLine, RiLockUnlockLine } from "@remixicon/react";
 import { guardStateAction, lockAction, unlockAction, type GuardState } from "./guard.actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ToneBadge } from "./_ui";
 
 /**
  * The header's lock control.
@@ -30,20 +29,10 @@ export default function DemoLock() {
     guardStateAction().then(setState);
   }, []);
 
-  if (!state || state.mode === "open-dev") return null;
-
-  // No key configured on a production build: nothing to enter, and the actions
-  // are refused server-side regardless. Say so rather than offering a field
-  // that cannot work.
-  if (state.mode === "locked") {
-    return (
-      <ToneBadge tone="danger" className="gap-1">
-        <RiLockLine className="size-3.5" />
-        <span className="hidden sm:inline">No demo key set — writes disabled</span>
-        <span className="sm:hidden">Writes off</span>
-      </ToneBadge>
-    );
-  }
+  // No key configured: the demo runs open and there is nothing to unlock, so
+  // the control renders nothing rather than a field that would do nothing. Per-
+  // action caps still apply, and those are surfaced where an amount is entered.
+  if (!state || state.mode === "open") return null;
 
   if (state.unlocked) {
     return (

@@ -8,12 +8,11 @@
  * separately bounded by the signed permit.
  *
  * Which wallet needs it depends on who sends: the scripted broadcast test signs
- * as BUYER, while the demo's own cash-out signs as the seller (RELAYER). Pick
- * with SIGNER; the allowance is per-wallet, so approving one proves nothing
- * about the other.
+ * as BUYER, while the demo's own cash-out signs as the SELLER. Pick with SIGNER;
+ * the allowance is per-wallet, so approving one proves nothing about the other.
  *
- *   node scripts/live-ramp-approve.mjs                  # BUYER (default)
- *   SIGNER=RELAYER node scripts/live-ramp-approve.mjs   # the demo's seller
+ *   node scripts/live-ramp-approve.mjs                 # BUYER (default)
+ *   SIGNER=SELLER node scripts/live-ramp-approve.mjs   # the demo's seller
  */
 import { createPublicClient, createWalletClient, erc20Abi, formatUnits, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";

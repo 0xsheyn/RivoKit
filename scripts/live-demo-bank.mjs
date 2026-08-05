@@ -55,7 +55,7 @@ const must = (res, what) => {
 
 const arc = createPublicClient({ chain: arcTestnet, transport: arcTransport() });
 const buyer = privateKeyToAccount(env.BUYER_PRIVATE_KEY);
-const seller = privateKeyToAccount(env.RELAYER_PRIVATE_KEY);
+const seller = privateKeyToAccount(env.SELLER_PRIVATE_KEY);
 const usdcOf = (a) =>
   arc.readContract({ address: USDC_ADDRESS, abi: erc20Abi, functionName: "balanceOf", args: [a] });
 

@@ -21,7 +21,7 @@ const fmt = (v) => formatUnits(v, 6);
 const candidates = [
   ["BUYER", env.BUYER_PRIVATE_KEY],
   ["DEPLOYER", env.DEPLOYER_PRIVATE_KEY],
-  ["RELAYER", env.RELAYER_PRIVATE_KEY],
+  ["SELLER", env.SELLER_PRIVATE_KEY],
 ].filter(([, k]) => k);
 
 // The CPN quote minimum is 11 USDC; leave headroom for the fee.

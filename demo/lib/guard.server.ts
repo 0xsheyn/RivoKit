@@ -13,19 +13,28 @@
  * Two independent controls, because they fail in different directions:
  *
  *   the LOCK  — proves the caller is the operator. Answers "may you?"
- *   the CAP   — a ceiling on any single amount, applied whether or not the
- *               caller is unlocked. Answers "how much?" It is what stops an
- *               unlocked session, a typo, or a compromised cookie from emptying
- *               a wallet in one call.
+ *               OPT-IN: set `DEMO_WRITE_KEY` and every gated action needs the
+ *               unlock cookie. Leave it unset and the demo runs open, which is
+ *               how it ran throughout the build phase.
+ *   the CAP   — a ceiling on any single amount, applied ALWAYS: unlocked,
+ *               locked, or with no key at all. Answers "how much?"
  *
- * FAIL CLOSED IN PRODUCTION. With no `DEMO_WRITE_KEY` set, a production build
- * refuses every gated action outright rather than running open — an unset
- * variable is exactly how this hole would come back. Local development with no
- * key set stays open, so `npm run dev` needs no ceremony.
+ * OPEN BY DEFAULT, AND THAT IS A CHOICE. An earlier version failed closed in
+ * production — no key meant every gated action was refused. That is the right
+ * default for a deployment holding value; it is the wrong default here, where
+ * the point is that anyone can walk up to a public URL and watch the whole
+ * settlement run end to end. The wallets behind it are disposable testnet keys
+ * holding testnet USDC.
  *
- * This is NOT authentication for a real product. It is one shared secret for one
- * operator's testnet demo. It is enough to stop the endpoint being an open
- * faucet, and it is not enough to be called an access-control system.
+ * So the honest description of what protects this deployment is: the CAP, and
+ * nothing else. A stranger can trigger any gated action, including an
+ * irreversible CPN broadcast signed with the seller's server-held key. What they
+ * cannot do is move more than the cap in one call — which bounds the damage to
+ * "the demo wallets run dry and someone has to refill them", not to anything
+ * that matters off testnet.
+ *
+ * This was never authentication for a real product, and now it is not even a
+ * gate. Anything holding real value needs a different mechanism entirely.
  */
 import { cookies } from "next/headers";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -39,14 +48,17 @@ const MAX_AGE_S = 8 * 60 * 60;
 export type GuardMode =
   /** A key is set: gated actions require the unlock cookie. */
   | "enforced"
-  /** No key, not production: open, for local development only. */
-  | "open-dev"
-  /** No key, production: gated actions are refused outright. */
-  | "locked";
+  /** No key: gated actions run for anyone. Caps still apply. */
+  | "open";
 
+/**
+ * No environment check here on purpose. A rule that behaves one way locally and
+ * another way in production means the thing you tested is not the thing you
+ * shipped — and it was that asymmetry, not the openness, that made the old
+ * `locked` mode surprising.
+ */
 export function guardMode(): GuardMode {
-  if (KEY) return "enforced";
-  return process.env.NODE_ENV === "production" ? "locked" : "open-dev";
+  return KEY ? "enforced" : "open";
 }
 
 /**
@@ -85,9 +97,7 @@ export async function lock(): Promise<void> {
 }
 
 export async function isUnlocked(): Promise<boolean> {
-  const mode = guardMode();
-  if (mode === "open-dev") return true;
-  if (mode === "locked") return false;
+  if (guardMode() === "open") return true;
   const got = (await cookies()).get(COOKIE)?.value;
   return got != null && sameSecret(got, derive(KEY!));
 }
@@ -106,12 +116,6 @@ export class DemoLockedError extends Error {
  * because "forbidden" tells an operator nothing about which control tripped.
  */
 export async function assertUnlocked(what: string): Promise<void> {
-  if (guardMode() === "locked") {
-    throw new DemoLockedError(
-      `${what} is disabled: this deployment has no DEMO_WRITE_KEY set. ` +
-        "Set it in the environment and reload — actions that move money stay refused until it is there.",
-    );
-  }
   if (!(await isUnlocked())) {
     throw new DemoLockedError(`${what} requires the demo to be unlocked. Enter the demo key first.`);
   }
@@ -130,10 +134,31 @@ function capFromEnv(name: string, fallback: bigint): bigint {
   }
 }
 
-/** USDC/EURC, 6 dp. 25 USDC clears the EUR/SEPA minimum with room and caps the bleed. */
-export const CAP_TOKEN_MINOR = capFromEnv("DEMO_CAP_TOKEN_MINOR", 25_000_000n);
-/** Fiat at 2 dp — Circle Mint redeems and any destination amount. */
-export const CAP_FIAT_MINOR = capFromEnv("DEMO_CAP_FIAT_MINOR", 2_500n);
+/**
+ * USDC/EURC, 6 dp — sized to the storefront's most expensive listing and no
+ * higher, because with the demo running open this is the only thing bounding a
+ * single call.
+ *
+ * The arithmetic, from a live EUR/SEPA quote on 2026-08-05: the top listing is
+ * €14.50 (`demo/lib/catalog.ts`), which CPN prices at 16.998225 USDC. A
+ * bank-bound order authorizes that PLUS a 400 bps buffer for CPN's spread and
+ * its four fees, so the amount that actually moves is 17.678154 USDC. 18 is that
+ * rounded up, which leaves ~1.8% of headroom for FX drift.
+ *
+ * Raise it if EUR strengthens enough that the top listing stops fitting — the
+ * symptom is a cash-out refusing at the ceiling with proceeds that came from a
+ * single legitimate sale. Do not raise it "to be safe": the ceiling is the whole
+ * defence, and every unused USDC of it is bleed a stranger can cause per call.
+ */
+export const CAP_TOKEN_MINOR = capFromEnv("DEMO_CAP_TOKEN_MINOR", 18_000_000n);
+/**
+ * Fiat at 2 dp — Circle Mint redeems and any destination amount.
+ *
+ * Brought down alongside the token cap and for the same reason. €15.00 is the
+ * top listing rounded up on the fiat side; it clears Mint's redeem minimum with
+ * room, and nothing in this demo legitimately redeems more in one call.
+ */
+export const CAP_FIAT_MINOR = capFromEnv("DEMO_CAP_FIAT_MINOR", 1_500n);
 
 /**
  * The ceiling, applied to every gated amount whether or not the caller is

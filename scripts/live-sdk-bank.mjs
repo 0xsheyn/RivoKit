@@ -12,7 +12,7 @@
  *
  * The settlement wallet has to do three things on this path: receive the
  * capture, approve Permit2, and sign the payment intent. The demo's seller key
- * (RELAYER_PRIVATE_KEY) can do all three, so it stands in as receiver AND
+ * (SELLER_PRIVATE_KEY) can do all three, so it stands in as receiver AND
  * settlement address. In production the seller signs in their own wallet —
  * `signIntent` is injected precisely so no key has to live near the CPN key.
  *
@@ -72,7 +72,7 @@ const OPERATOR = getAddress(env.OPERATOR_ADDRESS);
 
 const buyer = privateKeyToAccount(env.BUYER_PRIVATE_KEY);
 /** The seller: receives the capture, approves Permit2, signs the CPN intent. */
-const seller = privateKeyToAccount(env.RELAYER_PRIVATE_KEY);
+const seller = privateKeyToAccount(env.SELLER_PRIVATE_KEY);
 
 const arcClient = createPublicClient({ chain: arcTestnet, transport: arcTransport() });
 const buyerWallet = createWalletClient({ account: buyer, chain: arcTestnet, transport: arcTransport() });

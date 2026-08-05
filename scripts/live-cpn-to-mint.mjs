@@ -19,7 +19,7 @@ installCircleDnsPinning();
 const env = readEnv();
 const AMOUNT = process.argv[2] ?? "12";
 
-const signer = privateKeyToAccount(env.RELAYER_PRIVATE_KEY);
+const signer = privateKeyToAccount(env.SELLER_PRIVATE_KEY);
 const transport = () => fallback(ARC_TESTNET_RPC_FALLBACKS.map((u) => http(u)));
 const pub = createPublicClient({ chain: arcTestnet, transport: transport() });
 

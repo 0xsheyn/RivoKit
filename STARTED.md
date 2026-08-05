@@ -47,7 +47,7 @@ version bump.
 ```bash
 git clone https://github.com/0xsheyn/RivoKit.git && cd RivoKit
 npm install                 # runs `prepare` → builds dist/
-npm test                    # 462 tests / 26 files — needs no credentials at all
+npm test                    # 465 tests / 26 files — needs no credentials at all
 ```
 
 `npm test` passing on a fresh clone with an empty `.env.local` is the intended
@@ -55,7 +55,7 @@ first checkpoint. Nothing below is required to reach it.
 
 | Command | Does |
 |---|---|
-| `npm test` | vitest — 462 green / 26 files, no credentials |
+| `npm test` | vitest — 465 green / 26 files, no credentials |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build:lib` | SDK → `dist/` (ESM + `.d.ts`), entry `src/index.ts` |
 | `npm run setup` | Deploy CPP instances + operator/merchant wallets (idempotent) |
@@ -81,12 +81,12 @@ cp .env.example .env.local
 | `CIRCLE_CPN_KEY` | The fiat off-ramp | **Server-only.** Never import into a client component |
 | `CIRCLE_RAMP_KEY` | Circle Mint redeem | Optional — a second, independent fiat exit |
 | `NEXT_PUBLIC_ARC_RPC_URL` | Chain reads | `https://rpc.testnet.arc.network` |
-| `DEPLOYER_PRIVATE_KEY` | `npm run setup` | Must **not** be the operator key |
-| `RELAYER_PRIVATE_KEY` | Meta-transaction relay; doubles as the demo seller wallet | In production the seller signs in their own wallet |
+| `DEPLOYER_PRIVATE_KEY` | `npm run setup` — deploys once, then tops up the Circle wallets' gas | Its own wallet. Deploy authority must not sit on a hot key |
+| `SELLER_PRIVATE_KEY` | The demo seller: receives a bank-bound order's capture, signs the Permit2/CPN intent, owns the cash-out balance | Its own wallet. In production the seller signs in their own. Formerly `RELAYER_PRIVATE_KEY`, which never relayed anything — the Circle operator wallet does that |
 | `BUYER_PRIVATE_KEY` | Demo/live scripts signing ERC-3009 | A demo shortcut — in production the buyer signs in their browser |
 | `NEXT_PUBLIC_SUPABASE_URL` · `SUPABASE_SECRET_KEY` | The order store | Service key — server-side only |
-| `DEMO_WRITE_KEY` | The gate on every action that moves money | **Required to deploy anywhere public.** A production build with this unset refuses those actions outright rather than running open. Unset locally, the gate is open so `npm run dev` needs no ceremony |
-| `DEMO_CAP_TOKEN_MINOR` · `DEMO_CAP_FIAT_MINOR` | Per-action ceilings | Optional. Default 25 USDC and 25.00 fiat. Applied whether or not the caller is unlocked — the cap is what bounds a leaked key |
+| `DEMO_WRITE_KEY` | Optional lock on every action that moves money | **Opt-in.** Set it and those actions need the header's Unlock control first; leave it unset and the demo runs open to anyone, which is how the public testnet deployment runs. Same behaviour locally and in production — no environment-dependent surprise. The per-action caps below apply either way |
+| `DEMO_CAP_TOKEN_MINOR` · `DEMO_CAP_FIAT_MINOR` | Per-action ceilings | Optional. Default 18 USDC and 15.00 fiat — sized to the storefront's top listing (€14.50 = 16.998225 USDC plus its 400 bps buffer). Applied always, locked or not. With the demo running open this is the only control there is |
 
 Written automatically by `npm run setup`, never by hand:
 `NEXT_PUBLIC_RIVO_ESCROW_ADDRESS`, `NEXT_PUBLIC_RIVO_TOKEN_COLLECTOR_ADDRESS`,
@@ -102,8 +102,10 @@ MIN_OPERATOR_GAS_USDC=0.5  # createOrder is refused below this operator gas floa
 RIVO_PAYOUT_CORRIDOR=EUR-SEPA
 ```
 
-> **The deployer and the operator must be different keys.** The operator is hot —
-> it signs every payment — and must not also hold deploy authority.
+> **The three keys above are three different wallets, one role each.** Nothing
+> doubles up, and `node scripts/preflight.mjs` fails if any two resolve to the
+> same address. The operator and merchant are not in this list at all — they are
+> Circle wallets written by `setup`, and their keys never touch this file.
 
 ### Database
 
@@ -148,9 +150,15 @@ All of these are exported: `ARC_TESTNET_CHAIN_ID`, `USDC_ADDRESS`,
 ## 4. Run the demo
 
 ```bash
-node scripts/demo-topup.mjs   # fund the buyer on a source chain + Gateway
-npm run dev                   # → http://localhost:3000
+node scripts/demo-topup.mjs           # fund the buyer on a source chain + Gateway
+node scripts/check-source-chains.mjs  # is the buyer funded where they pay FROM?
+npm run dev                           # → http://localhost:3000
 ```
+
+`check-source-chains` is the one `preflight` cannot cover: preflight reads Arc,
+and the demo's opening move is funding from somewhere else. It checks **two**
+balances per chain, because gas there is ETH/AVAX/POL rather than USDC — a wallet
+holding USDC with no native balance cannot even approve.
 
 The demo is a Next.js marketplace laid out as **four role columns**, each holding
 only the authority that role really has:
@@ -451,20 +459,28 @@ Not a checklist for a demo. Each of these is load-bearing.
 
 1. **The host must be an onboarded OFI** with CPN, plus KYB/AML on recipients.
    RivoKit is not a licensed operator and cannot be one for you.
-2. **Separate the keys.** Deployer, operator and merchant are three distinct
-   wallets. The hot operator key holds no deploy authority.
-3. **Buyers sign in their own wallets.** `BUYER_PRIVATE_KEY` is a demo shortcut;
+2. **Separate the keys, and keep them separate.** Five wallets, one role each:
+   deployer, seller and buyer as raw keys in `.env.local`; operator and merchant
+   as Circle wallets whose keys never reach this repo. Deploy authority sits on
+   none of the hot ones. `preflight` fails if any two raw keys resolve to the
+   same address, so the separation is checked rather than trusted.
+3. **Put the demo lock back on, or replace it.** This deployment runs open by
+   default — `DEMO_WRITE_KEY` unset means any visitor can trigger any action
+   that moves money, bounded only by the per-action cap. That is sized for
+   throwaway testnet keys. Anything holding value needs the key set at minimum,
+   and real authentication in practice.
+4. **Buyers sign in their own wallets.** `BUYER_PRIVATE_KEY` is a demo shortcut;
    the gasless ERC-3009 path is designed for exactly this replacement.
-4. **Sellers sign their own cash-outs.** `submitSigned` exists so the wallet that
+5. **Sellers sign their own cash-outs.** `submitSigned` exists so the wallet that
    *holds* the USDC is the one that authorizes it to leave.
-5. **Run a durable webhook endpoint**, plus a scheduled sweep for the rows a
+6. **Run a durable webhook endpoint**, plus a scheduled sweep for the rows a
    missed webhook would otherwise strand: `refreshPayout` for a payout attached
    to an order, `reconcileCpnPayments` for a standalone cash-out, which belongs
    to no order and so is reachable by nothing else.
-6. **Re-run `check-operator.mjs` after any collector redeploy.** The operator's
+7. **Re-run `check-operator.mjs` after any collector redeploy.** The operator's
    USDC allowance is bound to the refund collector address — redeploy it and the
    allowance is 0 and `refund` reverts.
-7. **Mainnet is out of scope** here: gated on audit, key timelock/multisig, legal
+8. **Mainnet is out of scope** here: gated on audit, key timelock/multisig, legal
    review and OFI onboarding.
 
 ## Troubleshooting
@@ -483,7 +499,9 @@ Not a checklist for a demo. Each of these is load-bearing.
 | `.next` manifest corrupted | `next build demo` ran while `npm run dev` was live. Never run both. |
 | A payout row stuck at `pending` | Expected until something reads the rail again. Call `refreshPayout(orderId)`, or run `scripts/live-payout-reconcile.mjs`. |
 | A cash-out stuck at `CRYPTO_FUNDS_PENDING` | Its webhook never landed, and no order owns the row — so `refreshPayout` cannot see it. Run `scripts/live-cashout-reconcile.mjs`. |
-| An action refuses with "requires the demo to be unlocked" | The server-side gate. Enter `DEMO_WRITE_KEY` in the header's Unlock control. If it says *no demo key set* instead, this is a production build with the variable missing — money-moving actions stay refused until it is there. |
+| `156026: there is extra data provided in the message (0 < 4)` from Circle's typed-data signer | Circle wants the **canonical** EIP-712 JSON, with `EIP712Domain` declared in `types`. viem, wagmi and MetaMask all derive that entry and let you omit it, so a payload copied from this repo is rejected. The numbers name the cause: 4 fields in `domain`, 0 declared for them. Derive `EIP712Domain` from the domain rather than hardcoding it — Permit2 carries no `version`, and declaring a field with no value fails the same validator from the other side. `scripts/probe-circle-eoa-sign.mjs`. |
+| A Circle wallet's signature is rejected by USDC, CPN or Gateway | It is almost certainly `accountType: "SCA"`, which signs for ERC-1271 — validated by calling the account contract, while all three of those recover an ECDSA signer instead. It does not fail loudly: the reply is still 65 bytes and still recovers, just to an unrelated address and a different one per message, because the owner key signed a wrapped replay-safe hash. Check *who* recovered, never the length. The type is fixed at creation; make a new wallet with `accountType: "EOA"`. Roles that only execute contracts (operator, merchant) are unaffected. `scripts/probe-circle-eoa-sign.mjs`. |
+| An action refuses with "requires the demo to be unlocked" | This deployment has `DEMO_WRITE_KEY` set, so the lock is on. Enter it in the header's Unlock control. Unset the variable and the demo runs open instead — the per-action caps apply either way. |
 | An amount refuses as "above this demo's per-action ceiling" | The cap, which applies whether or not you are unlocked. Raise `DEMO_CAP_TOKEN_MINOR` / `DEMO_CAP_FIAT_MINOR` only if that size is genuinely intended. |
 | An order stuck at `settlement_pending` | Captured but not converted; the funds are safe with the receiver as USDC. Read `order.failureReason`, then call `retrySettlement(orderId)` — **not** `release()`, which would capture a second time. |
 

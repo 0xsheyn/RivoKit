@@ -52,14 +52,14 @@ const stamp = () => new Date().toISOString().slice(11, 23);
 
 async function main() {
   const env = readEnv();
-  const missing = ["CIRCLE_CPN_KEY", "RELAYER_PRIVATE_KEY", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SECRET_KEY"]
+  const missing = ["CIRCLE_CPN_KEY", "SELLER_PRIVATE_KEY", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SECRET_KEY"]
     .filter((k) => !env[k]);
   if (missing.length) {
     console.error(`FAILED: missing from .env.local — ${missing.join(", ")}`);
     return 1;
   }
 
-  const signer = privateKeyToAccount(env.RELAYER_PRIVATE_KEY);
+  const signer = privateKeyToAccount(env.SELLER_PRIVATE_KEY);
   const sender = signer.address;
   const store = createOrderStore(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SECRET_KEY);
   const db = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SECRET_KEY);

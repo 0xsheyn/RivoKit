@@ -30,9 +30,9 @@ installCircleDnsPinning();
 
 const env = readEnv();
 const rampKey = env.CIRCLE_RAMP_KEY;
-const sellerPk = env.RELAYER_PRIVATE_KEY;
+const sellerPk = env.SELLER_PRIVATE_KEY;
 if (!rampKey || !sellerPk) {
-  console.error("FAILED: CIRCLE_RAMP_KEY and RELAYER_PRIVATE_KEY are both required");
+  console.error("FAILED: CIRCLE_RAMP_KEY and SELLER_PRIVATE_KEY are both required");
   process.exit(1);
 }
 
