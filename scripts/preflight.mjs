@@ -58,9 +58,15 @@ try {
 }
 
 // 2. Key separation + balances.
+//
+// All three, not two: the demo runs on three raw keys with one job each, and
+// the whole point of splitting them is that no single leak is total. `buyer`
+// used to be left out of this check, which meant nothing would have noticed if
+// it had been set to the same key as another role.
 const roles = [
   ["deployer", env.DEPLOYER_PRIVATE_KEY],
-  ["relayer/operator", env.RELAYER_PRIVATE_KEY],
+  ["seller", env.SELLER_PRIVATE_KEY],
+  ["buyer", env.BUYER_PRIVATE_KEY],
 ];
 const addresses = {};
 
@@ -108,14 +114,26 @@ for (const [role, key] of roles) {
   }
 }
 
+// Every pair, not just one pair. Checked by ADDRESS rather than by key text so
+// the same wallet written two different ways (0x-prefixed or not, different
+// case) still counts as the collision it is.
+const named = roles.map(([role]) => role).filter((role) => addresses[role]);
+const collisions = [];
+for (let i = 0; i < named.length; i++) {
+  for (let j = i + 1; j < named.length; j++) {
+    if (addresses[named[i]].toLowerCase() === addresses[named[j]].toLowerCase()) {
+      collisions.push(`${named[i]} = ${named[j]}`);
+    }
+  }
+}
 record(
-  Boolean(addresses.deployer) &&
-    Boolean(addresses["relayer/operator"]) &&
-    addresses.deployer !== addresses["relayer/operator"],
-  "deployer != relayer (DEPLOYMENT.md §2)",
-  addresses.deployer === addresses["relayer/operator"]
-    ? "keys are IDENTICAL — one leak means full control"
-    : "separate",
+  named.length === roles.length && collisions.length === 0,
+  "deployer, seller and buyer are three different wallets (DEPLOYMENT.md §2)",
+  named.length !== roles.length
+    ? `only ${named.length} of ${roles.length} keys are usable`
+    : collisions.length
+      ? `SHARED WALLET — ${collisions.join(", ")}; one leak reaches both roles`
+      : "separate",
 );
 
 // 3. Circle API credentials.

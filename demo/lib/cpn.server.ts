@@ -188,12 +188,19 @@ const arcTransport = () => fallback(ARC_TESTNET_RPC_FALLBACKS.map((u) => http(u)
 
 /**
  * The SELLER's wallet — the funds owner who off-ramps. In the demo a dedicated
- * testnet EOA (relayer key) stands in for the seller; in production the seller
- * signs in their own wallet and `ramp.submit` takes any Account.
+ * testnet EOA stands in for the seller; in production the seller signs in their
+ * own wallet and `ramp.submit` takes any Account.
+ *
+ * This used to read `RELAYER_PRIVATE_KEY`, which was misleading: that key never
+ * relayed anything. Every escrow call is relayed by the Circle operator wallet
+ * (`OPERATOR_WALLET_ID`), and the key's only job — here and in every script that
+ * touched it — was to BE the seller. It is `SELLER_PRIVATE_KEY` now, and the two
+ * roles are separate wallets. Deliberately no fallback to the old name: a
+ * fallback would quietly keep signing with the wallet you meant to retire.
  */
 function getSellerSigner() {
-  const pk = process.env.RELAYER_PRIVATE_KEY as Hex | undefined;
-  if (!pk) throw new Error("RELAYER_PRIVATE_KEY (the demo seller wallet) is empty — check .env.local");
+  const pk = process.env.SELLER_PRIVATE_KEY as Hex | undefined;
+  if (!pk) throw new Error("SELLER_PRIVATE_KEY (the demo seller wallet) is empty — check .env.local");
   return privateKeyToAccount(pk);
 }
 
@@ -498,7 +505,7 @@ function recordingRail(rail: PayoutRail, corridor: Corridor, senderAddress: stri
           orderId: orderIdOf.get(q) ?? null,
           corridor: corridor.key,
           senderAddress,
-          // The settlement wallet's key is held by this server (RELAYER_PRIVATE_KEY),
+          // The settlement wallet's key is held by this server (SELLER_PRIVATE_KEY),
           // unlike the browser cash-out where the seller signs. Say so honestly.
           signedBy: "server",
           sourceMinor: submission.requiredSourceMinor,
@@ -569,7 +576,7 @@ export function payoutSellerAddress(): string {
 
 /** Whether the demo can off-ramp at all — the CPN key is server-only and optional. */
 export function payoutAvailable(): boolean {
-  return Boolean(process.env.CIRCLE_CPN_KEY && process.env.RELAYER_PRIVATE_KEY);
+  return Boolean(process.env.CIRCLE_CPN_KEY && process.env.SELLER_PRIVATE_KEY);
 }
 
 /** The raw intent the browser must sign, plus what Permit2 needs approved. */

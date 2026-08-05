@@ -208,7 +208,7 @@ export async function mpCheckout(
 
     if (payoutTo === "bank" && !payout.enabled) {
       throw new Error(
-        "Bank payout is not wired — CIRCLE_CPN_KEY and RELAYER_PRIVATE_KEY are needed. Settle to a wallet instead.",
+        "Bank payout is not wired — CIRCLE_CPN_KEY and SELLER_PRIVATE_KEY are needed. Settle to a wallet instead.",
       );
     }
 

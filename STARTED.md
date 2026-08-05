@@ -81,8 +81,8 @@ cp .env.example .env.local
 | `CIRCLE_CPN_KEY` | The fiat off-ramp | **Server-only.** Never import into a client component |
 | `CIRCLE_RAMP_KEY` | Circle Mint redeem | Optional — a second, independent fiat exit |
 | `NEXT_PUBLIC_ARC_RPC_URL` | Chain reads | `https://rpc.testnet.arc.network` |
-| `DEPLOYER_PRIVATE_KEY` | `npm run setup` | Must **not** be the operator key |
-| `RELAYER_PRIVATE_KEY` | Meta-transaction relay; doubles as the demo seller wallet | In production the seller signs in their own wallet |
+| `DEPLOYER_PRIVATE_KEY` | `npm run setup` — deploys once, then tops up the Circle wallets' gas | Its own wallet. Deploy authority must not sit on a hot key |
+| `SELLER_PRIVATE_KEY` | The demo seller: receives a bank-bound order's capture, signs the Permit2/CPN intent, owns the cash-out balance | Its own wallet. In production the seller signs in their own. Formerly `RELAYER_PRIVATE_KEY`, which never relayed anything — the Circle operator wallet does that |
 | `BUYER_PRIVATE_KEY` | Demo/live scripts signing ERC-3009 | A demo shortcut — in production the buyer signs in their browser |
 | `NEXT_PUBLIC_SUPABASE_URL` · `SUPABASE_SECRET_KEY` | The order store | Service key — server-side only |
 | `DEMO_WRITE_KEY` | The gate on every action that moves money | **Required to deploy anywhere public.** A production build with this unset refuses those actions outright rather than running open. Unset locally, the gate is open so `npm run dev` needs no ceremony |

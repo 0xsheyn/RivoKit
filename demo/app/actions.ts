@@ -280,7 +280,7 @@ export async function createOrderAction(
     if (payoutTo === "bank") {
       if (!payout.enabled) {
         throw new Error(
-          "Bank payout is not wired — CIRCLE_CPN_KEY and RELAYER_PRIVATE_KEY are needed. Settle to a wallet instead.",
+          "Bank payout is not wired — CIRCLE_CPN_KEY and SELLER_PRIVATE_KEY are needed. Settle to a wallet instead.",
         );
       }
       if (BigInt(priceEurMinorStr) < BANK_MIN_EUR_MINOR) {

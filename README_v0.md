@@ -251,10 +251,10 @@ CIRCLE_RAMP_KEY=                 # Circle Mint ("On/off ramp") — optional, see
 # Arc
 NEXT_PUBLIC_ARC_RPC_URL=https://rpc.testnet.arc.network
 
-# Signing keys. Deployer and relayer MUST differ — the operator is a hot key that
-# signs every payment and must not also hold deploy authority.
+# Signing keys — three wallets, one role each, none doubling up. `npm run
+# preflight` fails if any two turn out to be the same wallet.
 DEPLOYER_PRIVATE_KEY=
-RELAYER_PRIVATE_KEY=
+SELLER_PRIVATE_KEY=
 BUYER_PRIVATE_KEY=
 
 # Written automatically by `npm run setup` — do not fill these by hand.
