@@ -253,7 +253,6 @@ scope: **[LIMITATIONS.md](LIMITATIONS.md)**.
 | `scripts/probe-*.mjs` | API behaviour mapping — what the services actually do, not what we assumed. |
 | `contracts/` | Pinned CPP artifacts, provenance, re-verification recipe. No Solidity of our own. |
 | `infra/supabase/migrations/` | Order-store schema, with the invariants as DB constraints. |
-| `README_v0.md` | The previous long-form README, kept for its integration walk-through. |
 
 ## License
 

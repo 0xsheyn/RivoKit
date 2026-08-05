@@ -380,8 +380,7 @@ rivokit/
 ├── infra/supabase/     # order-store migrations (shipped with the package)
 ├── scripts/            # setup · health checks · live proofs · API probes
 ├── demo/               # Next.js marketplace + /sdk state-machine page
-├── .live-state/        # resume state for live scripts (gitignored, see below)
-└── README_v0.md        # the previous long-form README
+└── .live-state/        # resume state for live scripts (gitignored, see below)
 ```
 
 `.live-state/` is what lets an interrupted live run **continue** rather than
