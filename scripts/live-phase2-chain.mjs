@@ -20,8 +20,9 @@ import { createEscrow } from "../src/escrow/operations.ts";
 import { createSettlementFx } from "../src/settlement-fx/swap.ts";
 import { release } from "../src/orchestrator/release.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
-const STATE_FILE = ".live-phase2-chain.json";
+const STATE_FILE = stateFile("live-phase2-chain");
 const AMOUNT = parseUnits("5", 6);
 
 const env = readEnv();

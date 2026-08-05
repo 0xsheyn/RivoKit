@@ -25,8 +25,9 @@ import { expiriesFor, timeoutPolicyFor } from "../src/orchestrator/policy.ts";
 import { release, retrySettlement } from "../src/orchestrator/release.ts";
 import { isCaptured } from "../src/orchestrator/state-machine.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
-const STATE_FILE = ".live-recovery.json";
+const STATE_FILE = stateFile("live-recovery");
 const AMOUNT = parseUnits("4", 6);
 const WEDGE = "invoice";
 

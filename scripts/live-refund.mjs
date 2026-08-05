@@ -31,12 +31,13 @@ import { createBridge, BridgeStuckError, BridgeFailedError } from "../src/fundin
 import { refund } from "../src/orchestrator/refund.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
 // This network hijacks Circle's DNS (observed live); pin before use.
 installCircleDnsPinning();
 
-const FUNDING_STATE = ".live-funding.json";
-const STATE_FILE = ".live-refund.json";
+const FUNDING_STATE = stateFile("live-funding");
+const STATE_FILE = stateFile("live-refund");
 const SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
 
 const env = readEnv();

@@ -48,10 +48,11 @@ import { createCpnPayoutRail } from "../src/payout/cpn-payout.ts";
 import { normalizeTypedData } from "../src/ramp/cpn-sign.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
 installCircleDnsPinning();
 
-const STATE_FILE = ".live-sdk-bank.json";
+const STATE_FILE = stateFile("live-sdk-bank");
 
 // €10.00 guaranteed to the seller. Above the corridor's 9 EUR fiat minimum with
 // room to spare, and the USDC it costs (~11.6) clears the 11 USDC crypto

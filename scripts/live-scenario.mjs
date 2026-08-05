@@ -31,8 +31,9 @@ import { createOrderStore } from "../src/orchestrator/order-store.ts";
 import { expiriesFor, timeoutPolicyFor } from "../src/orchestrator/policy.ts";
 import { release } from "../src/orchestrator/release.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
-const STATE_FILE = ".live-scenario.json";
+const STATE_FILE = stateFile("live-scenario");
 
 /** €18.50 in micro-EURC — the figure SCENARIO.md and PRD §14 use. */
 const PRICE_EUR = 18_500_000n;

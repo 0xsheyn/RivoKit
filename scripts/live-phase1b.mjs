@@ -30,8 +30,9 @@ import { getPaymentInfoHash, getPayerAgnosticHash, ZERO_ADDRESS } from "../src/e
 import { ESCROW_ABI, ESCROW_SIGNATURES } from "../src/escrow/abi.ts";
 import { createEscrow } from "../src/escrow/operations.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
-const STATE_FILE = ".live-phase1b.json";
+const STATE_FILE = stateFile("live-phase1b");
 const AMOUNT = parseUnits("0.5", 6);
 /** Short enough to wait out in one run; long enough for authorize to land. */
 const RECLAIM_WINDOW_SECONDS = 180;

@@ -29,8 +29,9 @@ import {
   ZERO_ADDRESS,
 } from "../src/escrow/payment-info.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
-const STATE_FILE = ".live-phase1.json";
+const STATE_FILE = stateFile("live-phase1");
 const AMOUNT = parseUnits("1", 6); // 1 USDC — keep the blast radius small.
 
 // ── env ────────────────────────────────────────────────────────────────

@@ -32,12 +32,13 @@ import { expiriesFor, timeoutPolicyFor } from "../src/orchestrator/policy.ts";
 import { createBridge, BridgeStuckError, BridgeFailedError } from "../src/funding/bridge.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
 // Resolve *.circle.com out of band before any SDK call — this network hijacks
 // Circle's DNS (observed live). Must run before any AppKit/Circle use.
 installCircleDnsPinning();
 
-const STATE_FILE = ".live-funding.json";
+const STATE_FILE = stateFile("live-funding");
 const AMOUNT = parseUnits("2", 6);
 const WEDGE = "digital_goods";
 const RECEIVING_CHAIN = "Ethereum_Sepolia";

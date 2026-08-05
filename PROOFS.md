@@ -110,8 +110,8 @@ Not scripts calling the SDK — the demo applications' own code paths.
 Repeated on `ord_1785607838_340322` → CPN `f5c7fb2c…` `COMPLETED`. 2026-08-01.
 
 *How we know it was the UI and not a script:* both orders were created **without**
-an `mp.order` event (which `mpCheckout` always writes), and `.live-sdk-bank.json`
-held different order ids. Not the marketplace, not the script. Since then
+an `mp.order` event (which `mpCheckout` always writes), and the `live-sdk-bank`
+run state held different order ids. Not the marketplace, not the script. Since then
 `createOrderAction` writes an `sdk.order` event, so origin no longer has to be
 inferred from missing data.
 

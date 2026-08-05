@@ -37,10 +37,11 @@ import { createComplianceGate, createCircleScreener } from "../src/events/compli
 import { createRivoKit } from "../src/sdk/rivokit.ts";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
 import { readEnv } from "./lib/env.mjs";
+import { stateFile } from "./lib/state.mjs";
 
 installCircleDnsPinning();
 
-const STATE_FILE = ".live-sdk.json";
+const STATE_FILE = stateFile("live-sdk");
 const PRICE_EUR = parseUnits("1.5", 6); // €1.50 guaranteed to the receiver
 
 const env = readEnv();
