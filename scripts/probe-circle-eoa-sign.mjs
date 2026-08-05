@@ -3,17 +3,23 @@
  * COUNTERPARTY can recover?
  *
  * This is the one question that decides whether the demo's buyer and seller can
- * move from raw private keys onto Circle wallets. Both roles sign EIP-712 typed
+ * move from raw private keys onto Circle wallets. Every role signs EIP-712 typed
  * data that something else then recovers:
  *
  *   buyer  → ERC-3009 `ReceiveWithAuthorization`; USDC ecrecovers `from`
  *   seller → CPN's payment intent; the settlement contract ecrecovers the sender
+ *   buyer  → Gateway `BurnIntent`, to fund from another chain; Gateway
+ *            ecrecovers `sourceSigner`, and refuses outright to sign for an
+ *            account that has bytecode
  *
  * An `EOA` wallet returns a 65-byte ECDSA signature and recovers correctly. An
- * `SCA` wallet returns an ERC-1271 signature, which is validated by CALLING the
- * account contract — it recovers to nothing, and both counterparties above would
- * reject it. The account type is fixed when the wallet is created and cannot be
- * changed afterwards, so this is worth knowing before anything is built on it.
+ * `SCA` wallet signs for ERC-1271, which is validated by CALLING the account
+ * contract, and every counterparty above would reject it. It fails silently
+ * rather than loudly: the reply is also 65 bytes and also recovers — to an
+ * unrelated address, a different one for each message — because the owner key
+ * signed a wrapped replay-safe hash instead. Length tells you nothing; only
+ * recovery does. The account type is fixed when the wallet is created and cannot
+ * be changed afterwards, so this is worth knowing before anything is built on it.
  *
  * READ-ONLY BY DEFAULT. With no arguments it inspects the wallets already in the
  * entity and reports their account types, touching nothing. Signing needs a
@@ -26,10 +32,15 @@
  * No funds move and no transaction is sent — signing typed data is off-chain, so
  * the wallet under test does not need a balance.
  */
-import { recoverTypedDataAddress } from "viem";
+import { pad, recoverTypedDataAddress } from "viem";
 import { createCircleClient } from "./lib/circle.mjs";
 import { installCircleDnsPinning } from "../src/lib/circle-dns.ts";
-import { ARC_TESTNET_CHAIN_ID, USDC_ADDRESS } from "../src/constants/arc.ts";
+import {
+  ARC_TESTNET_CHAIN_ID,
+  GATEWAY_MINTER_ADDRESS,
+  GATEWAY_WALLET_ADDRESS,
+  USDC_ADDRESS,
+} from "../src/constants/arc.ts";
 import { readEnv } from "./lib/env.mjs";
 
 installCircleDnsPinning();
@@ -140,6 +151,84 @@ const permit2ish = (owner) => ({
   },
 });
 
+/**
+ * A Gateway v1 `BurnIntent` — what the buyer signs to spend a unified balance.
+ *
+ * Included because it is the one signature the demo's cross-chain funding rail
+ * needs, and because it is UNLIKE the two above in three ways that each break
+ * signing independently:
+ *
+ *   · the domain carries NO chainId and NO verifyingContract, only name and
+ *     version. Gateway is chain-agnostic by design — one intent names its source
+ *     and destination inside the message instead. A signer that assumes every
+ *     domain has a chainId has nothing to fall back on here.
+ *   · addresses travel as `bytes32`, left-padded, not as `address`.
+ *   · `hookData` is `bytes` — a DYNAMIC type, hashed as keccak256 of its
+ *     contents rather than inlined. Neither ERC-3009 nor Permit2 has one.
+ *
+ * Types, domain and field order are transcribed from the installed
+ * `@circle-fin/provider-gateway-v1` (`TRANSFER_SPEC_TYPES`, `BURN_INTENT_TYPES`,
+ * `GATEWAY_EIP712_DOMAIN`, `evmSigningData`), which is what actually signs these
+ * in production. They are copied rather than imported because the module does
+ * not export them.
+ *
+ * Modelled on the real rail: Avalanche Fuji → Arc. Gateway domain ids (Fuji 1,
+ * Arc 26) come from the chain table in `@circle-fin/adapter-circle-wallets`.
+ */
+const FUJI_GATEWAY_DOMAIN = 1;
+const ARC_GATEWAY_DOMAIN = 26;
+const FUJI_USDC = "0x5425890298aed601595a70ab815c96711a31bc65";
+/** Gateway's own encoding for an address inside a TransferSpec. */
+const b32 = (address) => pad(address, { size: 32 });
+
+const burnIntent = (signer) => ({
+  domain: { name: "GatewayWallet", version: "1" },
+  types: {
+    TransferSpec: [
+      { name: "version", type: "uint32" },
+      { name: "sourceDomain", type: "uint32" },
+      { name: "destinationDomain", type: "uint32" },
+      { name: "sourceContract", type: "bytes32" },
+      { name: "destinationContract", type: "bytes32" },
+      { name: "sourceToken", type: "bytes32" },
+      { name: "destinationToken", type: "bytes32" },
+      { name: "sourceDepositor", type: "bytes32" },
+      { name: "destinationRecipient", type: "bytes32" },
+      { name: "sourceSigner", type: "bytes32" },
+      { name: "destinationCaller", type: "bytes32" },
+      { name: "value", type: "uint256" },
+      { name: "salt", type: "bytes32" },
+      { name: "hookData", type: "bytes" },
+    ],
+    BurnIntent: [
+      { name: "maxBlockHeight", type: "uint256" },
+      { name: "maxFee", type: "uint256" },
+      { name: "spec", type: "TransferSpec" },
+    ],
+  },
+  primaryType: "BurnIntent",
+  message: {
+    maxBlockHeight: "99999999",
+    maxFee: "1000000",
+    spec: {
+      version: 1,
+      sourceDomain: FUJI_GATEWAY_DOMAIN,
+      destinationDomain: ARC_GATEWAY_DOMAIN,
+      sourceContract: b32(GATEWAY_WALLET_ADDRESS),
+      destinationContract: b32(GATEWAY_MINTER_ADDRESS),
+      sourceToken: b32(FUJI_USDC),
+      destinationToken: b32(USDC_ADDRESS),
+      sourceDepositor: b32(signer),
+      destinationRecipient: b32(signer),
+      sourceSigner: b32(signer),
+      destinationCaller: b32("0x0000000000000000000000000000000000000000"),
+      value: "1000000",
+      salt: "0x" + "22".repeat(32),
+      hookData: "0x",
+    },
+  },
+});
+
 // Wrapped in a function so the read-only pass can `return` instead of calling
 // `process.exit()`. Exiting while the DoH agent still holds handles trips a
 // libuv assertion on Windows — the probe's own output was fine and the crash
@@ -233,9 +322,11 @@ step("3 — sign typed data, then recover the signer");
 ok(target.accountType === "EOA", "wallet is EOA", `accountType=${target.accountType}`);
 if (target.accountType !== "EOA") {
   console.log(
-    "\n  An SCA wallet returns an ERC-1271 signature. It is a valid signature —\n" +
-      "  it simply does not recover, so USDC and CPN would both reject it. The\n" +
-      "  recovery checks below are expected to fail; that is the finding, not a bug.",
+    "\n  An SCA wallet signs for ERC-1271, which is validated by CALLING the account\n" +
+      "  contract. Expect the recovery checks below to fail; that is the finding, not\n" +
+      "  a bug. Expect them to fail in the nastiest available way, too: the bytes are\n" +
+      "  65 long and DO recover — to an unrelated address, a different one per\n" +
+      "  message. Nothing about the signature looks wrong until you check who signed.",
   );
 }
 
@@ -244,6 +335,7 @@ const address = target.address;
 for (const [label, typedData] of [
   ["ERC-3009 ReceiveWithAuthorization (the buyer's shape)", erc3009(address)],
   ["Permit2 PermitTransferFrom (the seller's family, nested struct)", permit2ish(address)],
+  ["Gateway BurnIntent (the funding rail — no chainId, bytes32, dynamic bytes)", burnIntent(address)],
 ]) {
   console.log(`\n  ${label}`);
   let signature;
@@ -257,9 +349,13 @@ for (const [label, typedData] of [
 
   ok(Boolean(signature), "a signature came back", signature ? `${signature.slice(0, 12)}…` : "");
   if (!signature) continue;
-  // 65 bytes = r,s,v. Anything longer is an ERC-1271 blob, which is the answer
-  // by itself even before recovery is attempted.
-  ok(signature.length === 132, "65 bytes (ECDSA, not an ERC-1271 blob)", `${(signature.length - 2) / 2} bytes`);
+  // 65 bytes = r,s,v. Kept as a check, but do NOT read it as the answer: an SCA
+  // wallet returns 65 bytes here too (observed 2026-08-05 on
+  // be14c77f…/0xddc260be…, all three shapes). Its owner key signs a wrapped,
+  // replay-safe hash, so the bytes are a well-formed ECDSA signature over a
+  // DIFFERENT message — same length, and it recovers, just to a stranger. Only
+  // the recovery check below separates the two.
+  ok(signature.length === 132, "65 bytes (ECDSA-shaped)", `${(signature.length - 2) / 2} bytes`);
 
   try {
     const recovered = await recoverTypedDataAddress({ ...forRecovery(withDomainType(typedData)), signature });
@@ -279,8 +375,10 @@ step("verdict");
 if (failures === 0) {
   console.log(
     "  This wallet can stand in for the demo buyer and seller.\n" +
-      "  Both signatures recover to its own address, which is exactly what USDC's\n" +
-      "  ERC-3009 and CPN's settlement contract each do before accepting one.",
+      "  All three signatures recover to its own address, which is exactly what USDC's\n" +
+      "  ERC-3009, CPN's settlement contract and Gateway each do before accepting one.\n" +
+      "  Gateway is explicit about it: `assertSignerIsEoa` in provider-gateway-v1\n" +
+      "  refuses to even sign for an account with bytecode.",
   );
 } else {
   console.log(
