@@ -118,7 +118,17 @@ export function DemoFooter() {
         backgroundSize: "26px 26px",
       }}
     >
-      <div className="mx-auto max-w-[1440px] px-4 py-8 sm:px-8">
+      {/*
+       * Full bleed, and padded to the HEADER's rhythm (`px-3 sm:px-5`) rather
+       * than to a rhythm of its own.
+       *
+       * It was centred inside `max-w-[1440px]`, which is a sensible measure for
+       * a document and the wrong one here: nothing else in this shell is
+       * centred. The header spans the viewport, and so does the board (`p-3` on
+       * its own main). On a wide screen that left the footer visibly inset from
+       * both — a band that looked like it belonged to a different page.
+       */}
+      <div className="px-3 py-8 sm:px-5">
         {/* ── Identity ─────────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4 border-b pb-7">
           {/* The mark spans both lines and the text column starts beside it, so
@@ -221,7 +231,7 @@ export function DemoFooter() {
        * its own would be claiming they did.
        */}
       <div className="border-t bg-muted/30">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-1.5 px-4 py-3.5 text-center font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground/80 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-8 sm:text-left">
+        <div className="flex flex-col gap-1.5 px-3 py-3.5 text-center font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground/80 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-5 sm:text-left">
           <p>Testnet-stage sample software — not a licensed financial product</p>
           <p>CPN reported completed — not a bank statement</p>
         </div>
