@@ -395,23 +395,36 @@ does not fail — it silently redoes work that costs money.
 
 | Group | Scripts |
 |---|---|
-| **Setup / health** | `preflight` (read-only, Arc) · `check-source-chains` (read-only, the four chains a buyer funds FROM — USDC *and* native gas, which is not USDC there) · `setup` (idempotent deploy) · `check-cpp` (8 wiring assertions) · `check-hash` (off-chain vs on-chain payment hash) · `check-operator` (refund allowance) · `sync-env` |
-| **Live proofs** | `live-sdk` (full flow through the facade) · `live-sdk-bank` · `live-demo-bank` · `live-payout-reconcile` · `live-cashout-reconcile` (standalone cash-out rows no order owns) · `live-wallet-rails` · `live-gateway-recover` · `live-cpn-to-mint` · `live-webhook-attribution` · `live-bridge` · `live-refund` · `live-recovery` · `live-charge` · `live-compliance` · `live-scenario` · `live-ramp*` · `live-mint-arc-deposit` · `live-cpn-subscribe` |
+| **Setup / health** | `preflight` (read-only, Arc) · `check-source-chains` (read-only, the four chains a buyer funds FROM — USDC *and* native gas, which is not USDC there) · `check-resilience` (read-only, which failure paths the stored data can currently reach, and which listing is buyable at all) · `setup` (idempotent deploy) · `check-cpp` (8 wiring assertions) · `check-hash` (off-chain vs on-chain payment hash) · `check-operator` (refund allowance) · `sync-env` |
+| **Live proofs** | `live-sdk` (full flow through the facade) · `live-sdk-bank` · `live-demo-bank` · `live-payout-reconcile` · `live-cashout-reconcile` (standalone cash-out rows no order owns) · `live-order-reconcile` (orders whose funding result was never written back) · `live-wallet-rails` · `live-gateway-recover` · `live-cpn-to-mint` · `live-webhook-attribution` · `live-bridge` · `live-refund` · `live-recovery` · `live-charge` · `live-compliance` · `live-scenario` · `live-ramp*` · `live-mint-arc-deposit` · `live-cpn-subscribe` |
 | **API probes** | `probe-cpn-source` (source currencies + corridor catalog) · `probe-cpn-lifecycle` (every state reachable without a broadcast) · `probe-cpn-status` · `probe-circle-eoa-sign` (can a Circle wallet sign so a counterparty can recover?) · `probe-circle-multichain` (does one wallet carry one address across chains?) · `probe-swap` · `probe-mint*` · `probe-wallet-rails` |
-| **Demo utils** | `demo-topup` · `reset-demo` |
+| **Demo utils** | `demo-topup` · `demo-expire` (age an unpaid order so the expiry branch can be walked without waiting an hour) · `reset-demo` |
+
+The three reconciliation sweeps are siblings and cover disjoint ground —
+`live-order-reconcile` for an order stuck in `funding_pending`,
+`live-payout-reconcile` for a payout's ledger row, `live-cashout-reconcile` for
+a `cpn_payments` row no order owns. All three are idempotent, and none of them
+can close what it cannot verify: a `refund_pending` order is reported, never
+marked refunded, because escrow state says nothing about the origin-chain leg.
 
 Everything that spends sits behind an explicit `CONFIRM=` environment variable —
-22 of the 29 `live-*` scripts — except two allowance writes, named below.
-`probe-*` scripts fund nothing and cost nothing.
+22 of the 30 `live-*` scripts — except two allowance writes, named below.
+`probe-*` and `check-*` scripts fund nothing and cost nothing.
 
-The seven ungated scripts, and why:
+The eight ungated scripts, and why:
 
 | Script | Why it is ungated |
 |---|---|
 | `live-ramp` | Stops before submit by design — quote and prepare only |
 | `live-ramp-preflight` | Reads |
-| `live-payout-reconcile` · `live-cashout-reconcile` · `live-compliance` | Touch status rows, not funds |
+| `live-payout-reconcile` · `live-cashout-reconcile` · `live-order-reconcile` · `live-compliance` | Touch status rows, not funds. `live-order-reconcile` is given an escrow sender that throws, so "read-only against the chain" is enforced rather than intended |
 | `live-ramp-approve` · `live-ramp-revoke` | On-chain allowance writes — real, but bounded and fully reversible, and `revoke` is `approve`'s undo. A prompt here would be ceremony |
+
+`demo-expire` writes no money either, and its guards are of a different kind:
+`pre_approval_expiry` is hashed into a payment's on-chain identity, so it
+refuses any order that is not `created` and any order that already has a
+payment row. On an unfunded order there is no on-chain payment to disagree with,
+which is the only reason the edit is safe at all.
 
 Two gates are placed on the **first** run rather than on the script.
 `live-bridge` and `live-bridge-amoy` skip the check once a burn has been
