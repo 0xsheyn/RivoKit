@@ -647,10 +647,26 @@ function Storefront({ pending, payer, hints, bankEnabled, onBuy }: {
                       <> · you pay ≈ {usd(toBank ? hint!.bankUsdc : hint!.walletUsdc)} USDC</>
                     )}
                   </p>
+                  {/*
+                    * Written for a shopper, not for whoever built this.
+                    *
+                    * It said "No USDC→EURC maker at this size right now, so the
+                    * seller's floor cannot be guaranteed" — every word of which
+                    * is true, and none of which answers the only question being
+                    * asked: is this broken, and is it my fault? Someone who has
+                    * never heard of an RFQ maker reads that as a bug report
+                    * addressed to them.
+                    *
+                    * So: what happened, whose fault it is not, and that it
+                    * fixes itself. The technical sentence still exists — it is
+                    * on the button's tooltip, where an operator can find it and
+                    * a shopper never has to.
+                    */}
                   {blocked && (
                     <p className="mt-1 text-xs text-destructive">
-                      No USDC→EURC maker at this size right now, so the seller&apos;s floor cannot be guaranteed —
-                      checkout is refused rather than stalled after payment.
+                      Temporarily unavailable — the currency exchange is not taking orders this size right now, so
+                      the seller&apos;s {fmtEUR(p.priceEURMinor)} cannot be guaranteed. It comes back on its own;
+                      nothing is wrong with your wallet.
                     </p>
                   )}
                 </CardContent>
@@ -659,8 +675,13 @@ function Storefront({ pending, payer, hints, bankEnabled, onBuy }: {
                       already chose — the buyer should never have to work out
                       why the same wording settled two different ways. */}
                   <Button size="sm" variant={toBank ? "default" : "outline"} disabled={pending || Boolean(blocked)}
+                    // The only place the exchange's own words survive. A
+                    // disabled button explains nothing by itself, and an
+                    // operator asking "why THIS listing" should not have to
+                    // read the server log to find out.
+                    {...(blocked ? { title: blocked } : {})}
                     onClick={() => onBuy(p.id, toBank ? "bank" : "wallet")}>
-                    {blocked ? "FX route unavailable" : toBank ? <><RiBankLine /> BUY → EURO FIAT</> : <>BUY → EURC</>}
+                    {blocked ? "Unavailable right now" : toBank ? <><RiBankLine /> BUY → EURO FIAT</> : <>BUY → EURC</>}
                   </Button>
                 </CardFooter>
               </Card>
