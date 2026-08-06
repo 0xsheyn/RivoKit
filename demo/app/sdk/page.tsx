@@ -18,6 +18,12 @@ export const metadata = {
     "The RivoKit API, the order lifecycle, and the Arc Testnet transactions behind each leg. Testnet only.",
 };
 
+// This page's Server Actions drive the real lifecycle — `releaseAction` on a
+// bank order captures, quotes CPN and broadcasts, each with its own polling
+// loop, inside one request. Segment config is where a Server Action's timeout
+// comes from, and the platform default is well under what that can take.
+export const maxDuration = 300;
+
 const ARC_TX = (h: string) => `${ARC_TESTNET_EXPLORER_URL}/tx/${h}`;
 const SEP_TX = (h: string) => `https://sepolia.etherscan.io/tx/${h}`;
 

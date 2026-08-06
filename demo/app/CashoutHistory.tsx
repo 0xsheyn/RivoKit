@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { RiArrowRightLine, RiHistoryLine } from "@remixicon/react";
-import { cpnHistoryAction, type CashoutRow } from "./ramp.actions";
-import { mintHistoryAction, type MintPayoutView } from "./mint.actions";
+import type { CashoutRow } from "../lib/board.server";
+import type { MintPayoutView } from "./mint.actions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, ToneBadge, railTone, statusLabel } from "./_ui";
 
@@ -68,24 +67,14 @@ function Row({ left, right, meta, status }: {
  *
  * Polled rather than pushed from the panel above: a webhook (or the reconcile
  * sweep) can move a row long after the tab stopped acting on it, and a history
- * that only knew what this tab did would go stale silently.
+ * that only knew what this tab did would go stale silently. The poll is the
+ * PAGE's now (see Withdraw.tsx) — this had its own, on its own interval, which
+ * is one more request queued behind everything else on the screen.
  */
-export function CpnHistory({ className }: { className?: string }) {
-  const [rows, setRows] = useState<CashoutRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const read = () => cpnHistoryAction().then((r) => {
-      if (r.ok) { setRows(r.rows); setError(null); } else setError(r.error);
-    });
-    read();
-    const id = setInterval(read, 20_000);
-    return () => clearInterval(id);
-  }, []);
-
+export function CpnHistory({ className, rows }: { className?: string; rows: CashoutRow[] | null }) {
   return (
     <HistoryCard title="All payment history" className={className}>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {rows == null && <p className="text-xs text-muted-foreground">Could not read the payment history.</p>}
       {rows?.length === 0 && <Empty className="text-xs">No payment yet.</Empty>}
       {rows?.map((r) => (
         <Row key={r.paymentId} status={r.status}
@@ -105,23 +94,11 @@ export function CpnHistory({ className }: { className?: string }) {
   );
 }
 
-/** Past Circle Mint redemptions, read back from Circle on every poll. */
-export function MintHistory({ className }: { className?: string }) {
-  const [rows, setRows] = useState<MintPayoutView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const read = () => mintHistoryAction().then((r) => {
-      if (r.ok) { setRows(r.payouts); setError(null); } else setError(r.error);
-    });
-    read();
-    const id = setInterval(read, 20_000);
-    return () => clearInterval(id);
-  }, []);
-
+/** Past Circle Mint redemptions, read back from Circle on the page's poll. */
+export function MintHistory({ className, rows }: { className?: string; rows: MintPayoutView[] | null }) {
   return (
     <HistoryCard title="Redemption history · Circle Mint" className={className}>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {rows == null && <p className="text-xs text-muted-foreground">Circle Mint is not reachable right now.</p>}
       {rows?.length === 0 && <Empty className="text-xs">No redemption yet.</Empty>}
       {rows?.map((p) => (
         <Row key={p.id} status={p.status}

@@ -1,6 +1,6 @@
 "use server";
 
-import { mintBalance, mintDepositInfo, mintPayouts, mintRedeem } from "../lib/mint.server.ts";
+import { mintRedeem } from "../lib/mint.server.ts";
 import { assertDecimalWithinCap, assertUnlocked, CAP_FIAT_MINOR } from "../lib/guard.server.ts";
 
 export type MintBalanceView = { amount: string; currency: string };
@@ -19,26 +19,12 @@ export type MintDepositView = {
 export type MintBalanceResult = { ok: true; balances: MintBalanceView[]; deposit: MintDepositView } | { ok: false; error: string };
 export type MintRedeemResult = { ok: true; payout: MintPayoutView } | { ok: false; error: string };
 
-/** The Circle Mint account's redeemable balance. */
-export async function mintBalanceAction(): Promise<MintBalanceResult> {
-  try {
-    const [balances, deposit] = await Promise.all([mintBalance(), mintDepositInfo()]);
-    return { ok: true, balances, deposit };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-export type MintHistoryResult = { ok: true; payouts: MintPayoutView[] } | { ok: false; error: string };
-
-/** Past Circle Mint redemptions, newest first — the panel's history. */
-export async function mintHistoryAction(limit = 8): Promise<MintHistoryResult> {
-  try {
-    return { ok: true, payouts: await mintPayouts(limit) };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
+/*
+ * Reading the Mint balance and the redemption history moved to
+ * `demo/lib/board.server.ts` (`GET /api/withdraw`). Two components used to ask
+ * for the balance separately, through the Server Action queue, for the same
+ * answer. Redeeming stays here — it moves fiat.
+ */
 
 /** Redeem `amount` of `currency` from the Mint balance to a linked bank. */
 export async function mintRedeemAction(amount: string, currency = "EUR"): Promise<MintRedeemResult> {

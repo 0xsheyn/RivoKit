@@ -1,184 +1,24 @@
 "use server";
 
 import { getRivoKit } from "../lib/rivokit.server.ts";
-import { CATALOG, canPayoutToBank, productById } from "../lib/catalog.ts";
-import { payoutRailFor } from "../lib/cpn.server.ts";
+import { productById } from "../lib/catalog.ts";
+import { viewOne, type Balances, type OrderView, type PriceHint, type RelayView } from "../lib/board.server.ts";
 import type { SourceChainId } from "../lib/source-chain.ts";
 import { fundsMayBeInFlight } from "./wallet-errors.ts";
-import { toDestinationMinor } from "../../src/payout/rail.ts";
 import { assertUnlocked } from "../lib/guard.server.ts";
 
-// Marketplace status derived from the on-chain OrderState PLUS off-chain signals
-// (shipping, buyer confirmation, dispute) recorded in the events table. The chain
-// stays the source of truth for MONEY; these signals only drive the host's
-// decision of WHEN to release or refund — never the funds themselves.
-export type OrderView = {
-  id: string;
-  payer: string;
-  product: { id: string; name: string; seller: string; emoji: string } | null;
-  priceEURMinor: string;
-  usdcAmount: string | null;
-  eurcOutMinor: string | null;
-  state: string;
-  status: string;
-  statusLabel: string;
-  shippedResi: string | null;
-  /** When the seller marked it shipped — the dispute window counts from here. */
-  shippedAt: string | null;
-  /** Two-wallet mode: the seller's own wallet, where the floor EURC is forwarded. */
-  sellerAddress: string | null;
-  buyerConfirmed: boolean;
-  disputeReason: string | null;
-  createdAt: string;
-  /**
-   * The ERC-3009 `validBefore` the payer signs against — one hour from checkout
-   * (`expiriesFor`). Past it the escrow REFUSES to collect, so an unfunded order
-   * is finished whether or not anything says so. The UI needs it to stop
-   * offering a payment the chain will reject.
-   */
-  preApprovalExpiry: string;
-  payments: Array<{ kind: string; status: string; txHash: string | null; chain: string | null }>;
-  /** Where this order's money is bound, and who holds the captured USDC. */
-  payoutTo: "wallet" | "bank";
-  receiver: string;
-  /**
-   * `label` is the field a UI must not soften: MOCK means nothing moved, LIVE
-   * means a real payment network has the money and `reference.status` is the
-   * only word on whether it arrived.
-   */
-  payout: {
-    kind: string;
-    label: "MOCK" | "LIVE";
-    executed: boolean;
-    targetAmountMinor: string;
-    targetCurrency: string;
-    targetScale: number;
-    sourceCurrency: string;
-    reference: { rail: string; corridor: string; paymentId: string; status: string; txHash?: string | undefined } | null;
-    disclaimer: string;
-  } | null;
-};
+// Re-exported so client components keep one import for "everything the
+// marketplace speaks". The definition lives with the reads, in board.server.ts.
+export type { Balances, OrderView, PriceHint, RelayView };
 
 export type MpResult = { ok: true; view: OrderView } | { ok: false; error: string };
 export type MpListResult = { ok: true; views: OrderView[] } | { ok: false; error: string };
 
 const RELEASE_PROOF = { kind: "manual" as const };
 
-async function view(orderId: string): Promise<OrderView> {
-  const { kit, store } = getRivoKit();
-  const order = await kit.status(orderId);
-  // The SDK's `Order` does not carry the expiries, and this is the demo — so the
-  // record is read directly rather than widening the published surface for it.
-  const record = await store.get(orderId);
-  const events = await store.listEvents(orderId);
-  const rawPayments = await store.listPayments(orderId);
-  const p = await kit.payoutFor(orderId);
-
-  const meta = events.find((e) => e.type === "mp.order")?.payload as
-    | { productId?: string; sellerAddress?: string } | undefined;
-  const product = meta?.productId ? productById(meta.productId) ?? null : null;
-  const shippedEvent = events.find((e) => e.type === "mp.shipped");
-  const shipped = shippedEvent?.payload as { resi?: string } | undefined;
-  const buyerConfirmed = events.some((e) => e.type === "mp.buyer_confirmed");
-  const dispute = [...events].reverse().find((e) => e.type === "mp.dispute")?.payload as { reason?: string } | undefined;
-  const disputeActive = Boolean(dispute) && !["released", "paid_out", "payout_pending", "refunded", "refund_pending"].includes(order.state);
-
-  const { status, statusLabel } = deriveStatus(order.state, {
-    shipped: Boolean(shipped),
-    buyerConfirmed,
-    dispute: disputeActive,
-    preApprovalPassed: record != null && Date.parse(record.pre_approval_expiry) <= Date.now(),
-  });
-
-  return {
-    id: order.id,
-    payer: order.payer,
-    // Where this order's money is bound, and who therefore holds the captured
-    // USDC. A bank order pays the seller's wallet, not the merchant's — the
-    // off-ramp spends from wherever capture landed.
-    payoutTo: order.payoutTo,
-    receiver: order.receiver,
-    product: product ? { id: product.id, name: product.name, seller: product.seller, emoji: product.emoji } : null,
-    priceEURMinor: order.priceEUR,
-    usdcAmount: order.usdcAmount,
-    // Only meaningful on the wallet path: a bank order runs no swap, so its
-    // payout source is USDC, not EURC. Reporting that as "eurcOut" would be a
-    // quiet lie about which asset the seller holds.
-    eurcOutMinor: p && p.source.currency === "EURC" ? p.source.amountMinor.toString() : null,
-    state: order.state,
-    status,
-    statusLabel,
-    shippedResi: shipped?.resi ?? null,
-    shippedAt: shippedEvent?.received_at ?? null,
-    sellerAddress: meta?.sellerAddress ?? null,
-    buyerConfirmed,
-    disputeReason: disputeActive ? dispute?.reason ?? "no reason given" : null,
-    createdAt: order.createdAt,
-    preApprovalExpiry: record?.pre_approval_expiry ?? order.createdAt,
-    payments: [
-      ...rawPayments.map((pm) => ({ kind: pm.kind as string, status: pm.status, txHash: pm.tx_hash, chain: pm.chain })),
-      // The two-wallet forward lives in events (see mpRelease) but belongs in
-      // the same list — it is the leg that actually put EURC in the seller's wallet.
-      ...events
-        .filter((e) => e.type === "mp.seller_payout")
-        .map((e) => ({
-          kind: "payout", status: "confirmed",
-          txHash: (e.payload as { txHash?: string })?.txHash ?? null,
-          chain: "Arc_Testnet",
-        })),
-    ],
-    // The payout record as it stands. `label` is the part a UI must not soften:
-    // MOCK means nothing moved, LIVE means a real payment network has the money
-    // and `reference.status` is the only word on whether it arrived.
-    payout: p
-      ? {
-          kind: p.kind,
-          label: p.label,
-          executed: p.executed,
-          targetAmountMinor: p.target.amountMinor.toString(),
-          targetCurrency: p.target.currency,
-          targetScale: p.target.scale,
-          sourceCurrency: p.source.currency,
-          reference: p.reference,
-          disclaimer: p.disclaimer,
-        }
-      : null,
-  };
-}
-
-function deriveStatus(
-  state: string,
-  s: { shipped: boolean; buyerConfirmed: boolean; dispute: boolean; preApprovalPassed: boolean },
-): { status: string; statusLabel: string } {
-  if (state === "failed") return { status: "failed", statusLabel: "Failed" };
-  if (state === "refunded") return { status: "refunded", statusLabel: "Refunded" };
-  if (state === "refund_pending") return { status: "refunding", statusLabel: "Refund in progress" };
-  if (state === "released") return { status: "completed", statusLabel: "Done — seller paid" };
-  // Broadcast is not delivery. `payout_pending` means the seller's USDC has left
-  // for a payment network that reports minutes later, so calling it "done" here
-  // would be the one claim this state exists to avoid.
-  if (state === "paid_out") return { status: "completed", statusLabel: "Done — paid to the seller's bank" };
-  if (state === "payout_pending") return { status: "paying_out", statusLabel: "Bank payout in transit" };
-  if (state === "settlement_pending") return { status: "settling", statusLabel: "Settlement stalled (retryable)" };
-  if (s.dispute) return { status: "dispute", statusLabel: "Disputed — awaiting the host" };
-  // Before anything else about an unfunded order: past `preApprovalExpiry` the
-  // escrow refuses to collect, so "awaiting payment" would be an invitation to a
-  // transaction the chain has already decided to reject. Only `created` and
-  // `funding_pending` can be here — every later state has the money.
-  if (s.preApprovalPassed && (state === "created" || state === "funding_pending")) {
-    return { status: "expired", statusLabel: "Expired — authorization window closed" };
-  }
-  if (state === "created") return { status: "waiting_payment", statusLabel: "Awaiting payment" };
-  if (state === "funding_pending") return { status: "processing_payment", statusLabel: "Processing payment…" };
-  // funded / shipped
-  if (s.buyerConfirmed) return { status: "confirmed", statusLabel: "Buyer confirmed — awaiting host settlement" };
-  if (s.shipped) return { status: "shipped", statusLabel: "In transit" };
-  return { status: "paid", statusLabel: "Paid — awaiting shipment" };
-}
-
 const wrap = async (fn: () => Promise<string>): Promise<MpResult> => {
   try {
-    return { ok: true, view: await view(await fn()) };
+    return { ok: true, view: await viewOne(await fn()) };
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) };
   }
@@ -252,153 +92,7 @@ export async function mpCheckout(
  * — so the same listing genuinely costs different amounts of USDC depending on
  * where the money is going.
  */
-export type PriceHint = { productId: string; walletUsdc: string | null; bankUsdc: string | null };
-
-const WALLET_BUFFER_BPS = 150n; // SDK default, sized for swap slippage
-const BANK_BUFFER_BPS = 400n; // what mpCheckout passes: CPN spread + four fees
-const HINT_TTL_MS = 60_000;
-
-let hintCache: { at: number; hints: PriceHint[] } | null = null;
-
-export async function mpPriceHints(): Promise<PriceHint[]> {
-  const fresh = hintCache && Date.now() - hintCache.at < HINT_TTL_MS;
-  if (fresh && hintCache) return hintCache.hints;
-
-  const { kit, addresses, payout } = getRivoKit();
-  const hints: PriceHint[] = CATALOG.map((p) => ({ productId: p.id, walletUsdc: null, bankUsdc: null }));
-
-  // ONE quote for the whole catalog, scaled per listing. Six live quotes on
-  // every page load would spend the Arc RPC's budget on a figure that is
-  // approximate by definition.
-  try {
-    const probeIn = 10_000_000n;
-    const q = await kit.estimateSwap({ address: addresses.buyer, amountInMinor: probeIn });
-    const out = BigInt(q.amountOutMinor);
-    if (out > 0n) {
-      for (const h of hints) {
-        const price = BigInt(productById(h.productId)!.priceEURMinor);
-        const net = (price * BigInt(q.amountInMinor)) / out;
-        h.walletUsdc = (net + (net * WALLET_BUFFER_BPS) / 10_000n).toString();
-      }
-    }
-  } catch {
-    /* leave null — the UI shows the guaranteed euro price and no estimate */
-  }
-
-  // The bank figure comes from the rail itself, and only for listings that
-  // clear the corridor minimum — everything else is refused at createOrder.
-  if (payout.enabled) {
-    const eligible = CATALOG.filter(canPayoutToBank);
-    for (const p of eligible) {
-      try {
-        const rail = payoutRailFor(payout.corridor);
-        if (!rail.estimate) break;
-        // The rail prices in the DESTINATION's scale — fiat cents, not the
-        // 6-decimal minor units money is carried in everywhere else. Handing it
-        // the 6-decimal figure asks for a payout 10 000× too large, and the
-        // quote comes back looking plausible: 119 982 USDC for a €10 listing.
-        const limits = await rail.limits();
-        const destinationMinor = toDestinationMinor(BigInt(p.priceEURMinor), limits.destinationScale);
-        const { requiredSourceMinor } = await rail.estimate(destinationMinor);
-        const hint = hints.find((h) => h.productId === p.id);
-        if (hint) {
-          hint.bankUsdc = (requiredSourceMinor + (requiredSourceMinor * BANK_BUFFER_BPS) / 10_000n).toString();
-        }
-      } catch {
-        /* corridor unreachable or below its minimum — no bank figure to show */
-      }
-    }
-  }
-
-  hintCache = { at: Date.now(), hints };
-  return hints;
-}
-
-/** What the UI needs to decide whether to offer a bank payout at all. */
-export async function mpPayoutOptions(): Promise<{ enabled: boolean; corridor: string }> {
-  const { payout } = getRivoKit();
-  return { enabled: payout.enabled, corridor: payout.corridor };
-}
-
 export type PaySource = "arc" | "unified" | "bridge";
-
-export type Balances = {
-  buyerArcUsdc: string;
-  /** USDC per source chain, keyed by `SourceChainId` — the bridge rail's stock. */
-  buyerSrcUsdc: Record<SourceChainId, string>;
-  buyerGatewayUsdc: string;
-  sellerEurc: string;
-};
-
-export async function mpBalances(): Promise<Balances | null> {
-  try { return await getRivoKit().balances(); } catch { return null; }
-}
-
-/**
- * The demo's server-signed buyer address. The UI needs it to tell a demo order
- * (server holds the key → may pay via the funding rails) from an order whose
- * payer is a browser wallet (only that wallet can sign the ERC-3009).
- */
-export async function mpDemoBuyer(): Promise<string | null> {
-  try { return getRivoKit().addresses.buyer; } catch { return null; }
-}
-
-/** Arc USDC balance of a connected browser wallet (minor units, string). */
-export async function mpAddrArcUsdc(address: string): Promise<string | null> {
-  try { return await getRivoKit().addrArcUsdc(address); } catch { return null; }
-}
-
-export type RelayView = {
-  /** Operator's Arc gas balance, in USDC (Arc gas IS USDC, 18 dp as gas). */
-  gasUsdc: string | null;
-  /** Below this, createOrder is refused rather than stalling mid-flight. */
-  minGasUsdc: string;
-  /** Operator fee in bps, grossed onto what the payer authorizes. */
-  feeBps: number;
-  feeReceiver: string;
-};
-
-/**
- * Health of the gasless relay: what the operator has left to pay gas with, and
- * the fee that refills it. Shown to the host — it is the host's cost.
- */
-export async function mpRelay(): Promise<RelayView | null> {
-  try {
-    const { relay } = getRivoKit();
-    let gasUsdc: string | null = null;
-    try {
-      gasUsdc = (Number(await relay.operatorGas() / 10n ** 12n) / 1e6).toFixed(4);
-    } catch { /* RPC quota — report unknown rather than a wrong zero */ }
-    return {
-      gasUsdc,
-      minGasUsdc: (Number(relay.minGasWei / 10n ** 12n) / 1e6).toFixed(2),
-      feeBps: relay.feeBps,
-      feeReceiver: relay.feeReceiver,
-    };
-  } catch { return null; }
-}
-
-/**
- * EURC balance of a connected seller wallet (minor units, string).
- *
- * The failure is reported rather than swallowed: Arc's public RPC rejects
- * around the third concurrent call, and a silent null is indistinguishable
- * from a genuinely empty wallet.
- */
-export async function mpAddrEurc(
-  address: string,
-): Promise<{ ok: true; minor: string } | { ok: false; error: string }> {
-  try {
-    return { ok: true, minor: await getRivoKit().addrEurc(address) };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-/** Per-source-chain USDC of a connected browser wallet (minor units, strings). */
-export async function mpAddrSrcUsdc(address: string): Promise<Record<SourceChainId, string> | null> {
-  try { return await getRivoKit().addrSrcUsdc(address); } catch { return null; }
-}
 
 /** The USDC an order needs on Arc, in minor units — what a wallet rail must deliver. */
 export async function mpOrderAmount(orderId: string): Promise<string | null> {
@@ -710,18 +404,3 @@ export async function mpRefund(orderId: string): Promise<MpResult> {
 }
 
 // ── Reads ──────────────────────────────────────────────────────────────
-
-export async function mpOrderView(orderId: string): Promise<MpResult> {
-  return wrap(async () => orderId);
-}
-
-export async function mpListOrders(): Promise<MpListResult> {
-  try {
-    const { store } = getRivoKit();
-    const orders = await store.listOrders(30);
-    const views = await Promise.all(orders.map((o) => view(o.id)));
-    return { ok: true, views };
-  } catch (e) {
-    return { ok: false, error: String((e as Error)?.message ?? e).slice(0, 300) };
-  }
-}

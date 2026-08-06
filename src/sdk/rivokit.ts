@@ -262,7 +262,14 @@ export class PayoutUnavailableError extends Error {
   }
 }
 
-function toOrder(r: OrderRecord): Order {
+/**
+ * A stored row as the published `Order`.
+ *
+ * Exported for the same reason `paymentInfoFromRecord` is: a caller that has
+ * already read the row — a list view, say — should not have to call `status()`
+ * and read it a second time to get the same object back.
+ */
+export function orderFromRecord(r: OrderRecord): Order {
   return {
     id: r.id,
     payer: r.payer,
@@ -899,7 +906,7 @@ export function createRivoKit(deps: RivoKitDeps) {
         timeoutDeadline: exp.authorizationExpiry,
         paymentInfoHash: hash,
       });
-      return toOrder(record);
+      return orderFromRecord(record);
     },
 
     /**
@@ -1110,7 +1117,7 @@ export function createRivoKit(deps: RivoKitDeps) {
     },
 
     async status(orderId: string): Promise<Order> {
-      return toOrder(await get(orderId));
+      return orderFromRecord(await get(orderId));
     },
   };
 }

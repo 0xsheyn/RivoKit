@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { RiBankLine, RiCheckboxCircleLine, RiLoader4Line } from "@remixicon/react";
 import {
-  mintBalanceAction,
   mintRedeemAction,
   type MintBalanceView,
   type MintDepositView,
@@ -33,17 +32,21 @@ const SYMBOL: Record<string, string> = { EUR: "€", USD: "$" };
  * the exit CPN cannot serve, because CPN only takes USDC as a source currency.
  */
 /** `className` is how the withdraw page places this panel on its grid. */
-export default function MintRedeem({ className }: { className?: string }) {
-  const [balances, setBalances] = useState<MintBalanceView[]>([]);
-  const [deposit, setDeposit] = useState<MintDepositView | null>(null);
+export default function MintRedeem({ className, mint, onDone }: {
+  className?: string;
+  /** Balances + deposit info, read once with the rest of the page. `null` when
+   *  Circle Mint could not be reached — the panel says so instead of looking empty. */
+  mint: { balances: MintBalanceView[]; deposit: MintDepositView } | null;
+  /** Re-read the page after a redemption, rather than this panel alone. */
+  onDone: () => void;
+}) {
+  const balances = mint?.balances ?? [];
+  const deposit = mint?.deposit ?? null;
   const [currency, setCurrency] = useState("EUR");
   const [amount, setAmount] = useState("10");
   const [payout, setPayout] = useState<MintPayoutView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-
-  const load = () => mintBalanceAction().then((r) => { if (r.ok) { setBalances(r.balances); setDeposit(r.deposit); } });
-  useEffect(() => { load(); }, []);
 
   // Only the fiat balances Circle can redeem to a bank; the sandbox account also
   // carries oddities like CIRBTC that have nothing to do with this panel.
@@ -63,7 +66,7 @@ export default function MintRedeem({ className }: { className?: string }) {
       setError(null);
       const r = await withToast(`Redeeming ${amount} ${currency} to the linked bank`,
         () => mintRedeemAction(amount, currency));
-      if (r.ok) { setPayout(r.payout); load(); }
+      if (r.ok) { setPayout(r.payout); onDone(); }
       else setError(r.error);
     });
 

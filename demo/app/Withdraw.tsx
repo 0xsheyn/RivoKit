@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { RiWallet3Line } from "@remixicon/react";
-import { mpAddrEurc, mpBalances, type Balances } from "./marketplace.actions";
+import type { WithdrawSnapshot } from "../lib/board.server";
+import { getJson, useLive } from "./live";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,30 +24,39 @@ import SellerWalletPicker from "./SellerWalletPicker";
  * balance being blank because a choice was never made on another page is not a
  * state worth shipping.
  */
-export default function Withdraw() {
-  const [bal, setBal] = useState<Balances | null>(null);
+export default function Withdraw({ initial }: {
+  /** Rendered on the server: every panel below starts with its data already in. */
+  initial: WithdrawSnapshot;
+}) {
   const [ownEurc, setOwnEurc] = useState<string | null>(null);
   const [eurcError, setEurcError] = useState<string | null>(null);
   const { sellerWallet, pick, candidates } = useSellerWallet();
 
-  useEffect(() => {
-    const read = () => mpBalances().then((b) => { if (b) setBal(b); });
-    read();
-    const id = setInterval(read, 15_000);
-    return () => clearInterval(id);
-  }, []);
+  // ONE poll for the whole page — balances, seller, corridors, both histories,
+  // Circle Mint. Twenty seconds rather than fifteen: nothing here moves unless
+  // someone on this screen makes it move, and the panels that do call `refresh`
+  // themselves.
+  const { data, refresh } = useLive<WithdrawSnapshot>("/api/withdraw", initial, 20_000);
+  const snap = data ?? initial;
+  const bal = snap.balances;
 
+  // The one thing the server cannot render: which wallet the seller picked is
+  // in this browser's localStorage, so its balance has to be read from here.
   const refreshEurc = useCallback(() => {
     if (!sellerWallet) { setOwnEurc(null); setEurcError(null); return; }
-    mpAddrEurc(sellerWallet).then((r) => {
-      if (r.ok) { setOwnEurc(r.minor); setEurcError(null); }
-      else setEurcError(r.error);
+    void getJson<{ eurc: string | null; eurcError: string | null }>(
+      `/api/wallet?address=${sellerWallet}&fields=eurc`,
+    ).then((r) => {
+      if (!r.ok) { setEurcError(r.error); return; }
+      if (r.eurc != null) { setOwnEurc(r.eurc); setEurcError(null); }
+      // A failed read is not an empty wallet — say which one it was.
+      else setEurcError(r.eurcError ?? "unavailable");
     });
   }, [sellerWallet]);
 
   useEffect(() => {
     refreshEurc();
-    const id = setInterval(refreshEurc, 15_000);
+    const id = setInterval(refreshEurc, 20_000);
     return () => clearInterval(id);
   }, [refreshEurc]);
 
@@ -108,8 +118,13 @@ export default function Withdraw() {
         </Card>
 
         {/* EURC on Arc into the Mint EUR balance — the step that has to happen
-            before the redemption panel below has anything to redeem. */}
-        <SendEurcToMint sellerWallet={sellerWallet} balanceMinor={ownEurc} onSent={refreshEurc} />
+            before the redemption panel below has anything to redeem. The
+            deposit address comes from the page's one read; this panel used to
+            ask Circle for it a second time, for the same answer MintRedeem was
+            already fetching. */}
+        <SendEurcToMint sellerWallet={sellerWallet} balanceMinor={ownEurc}
+          deposit={snap.mint?.deposit ?? null}
+          onSent={() => { refreshEurc(); refresh(); }} />
       </div>
 
       {eurcError && (
@@ -142,10 +157,11 @@ export default function Withdraw() {
           own heights (`self-start`) — they grow with the number of rows, and
           padding the shorter one out to the taller buys nothing. */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <SellerCashout className="lg:col-start-1 lg:row-start-1" />
-        <CpnHistory className="lg:col-start-1 lg:row-start-2 lg:self-start" />
-        <MintRedeem className="lg:col-start-2 lg:row-start-1" />
-        <MintHistory className="lg:col-start-2 lg:row-start-2 lg:self-start" />
+        <SellerCashout className="lg:col-start-1 lg:row-start-1"
+          corridors={snap.corridors} seller={snap.seller} onDone={refresh} />
+        <CpnHistory className="lg:col-start-1 lg:row-start-2 lg:self-start" rows={snap.cashouts} />
+        <MintRedeem className="lg:col-start-2 lg:row-start-1" mint={snap.mint} onDone={refresh} />
+        <MintHistory className="lg:col-start-2 lg:row-start-2 lg:self-start" rows={snap.mint?.payouts ?? null} />
       </div>
     </div>
   );

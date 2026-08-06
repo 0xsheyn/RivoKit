@@ -128,6 +128,14 @@ export type CpnPaymentRecord = {
   failure_reason: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * The unsigned transaction held between prepare and broadcast.
+   *
+   * Only present on a row read back with `getCpnPayment` — `listCpnPayments`
+   * leaves it out, because the history panel polls that list and has no use for
+   * a payload of this size. Absent once the intent has been broadcast.
+   */
+  prepared?: unknown;
 };
 
 export type RecordCpnPaymentParams = {
@@ -143,6 +151,13 @@ export type RecordCpnPaymentParams = {
   destinationScale?: number;
   status: CpnPaymentState;
   transactionId?: string | null;
+  /**
+   * Live-only state a later request has to pick up: the unsigned CPN
+   * transaction plus its corridor. Stored because prepare and broadcast are two
+   * requests, and on a serverless host they are two PROCESSES — see
+   * `0008_cpn_prepared.sql`.
+   */
+  prepared?: unknown;
 };
 
 /**
@@ -193,6 +208,23 @@ export interface OrderStore {
   listPayments(orderId: string): Promise<PaymentRecord[]>;
   listOrders(limit?: number): Promise<OrderRecord[]>;
   listEvents(orderId: string): Promise<Array<{ type: string; payload: unknown; received_at: string }>>;
+
+  /**
+   * The same three reads, for MANY orders at once.
+   *
+   * They exist because a board that lists N orders was making 5N round trips —
+   * `status`, `get`, `listEvents`, `listPayments`, `getPayout` per order — on a
+   * four-second poll. Thirty orders meant a hundred and fifty queries every
+   * tick, which is not a slow query anywhere; it is a slow SHAPE. One query per
+   * table, keyed back to the order, is the same information for three.
+   *
+   * Each returns a map keyed by order id, and an order with nothing recorded is
+   * present with an empty value rather than missing — a caller reading a map
+   * should not have to distinguish "no events" from "not asked about".
+   */
+  listEventsFor(orderIds: readonly string[]): Promise<Record<string, Array<{ type: string; payload: unknown; received_at: string }>>>;
+  listPaymentsFor(orderIds: readonly string[]): Promise<Record<string, PaymentRecord[]>>;
+  listPayoutsFor(orderIds: readonly string[]): Promise<Record<string, PayoutInstruction | null>>;
   listPending(): Promise<OrderRecord[]>;
   findOrderIdByTxHash(txHash: string): Promise<string | null>;
   /** Persist the payout instruction emitted on release. */
@@ -211,6 +243,15 @@ export interface OrderStore {
     patch?: { transactionId?: string; failureReason?: string },
   ): Promise<CpnPaymentRecord>;
   listCpnPayments(limit?: number): Promise<CpnPaymentRecord[]>;
+  /**
+   * Attach or drop the unsigned transaction a broadcast will need.
+   *
+   * Separate from `advanceCpnPayment` because clearing it is not a state
+   * change: a broadcast payment is still CREATED at the moment it stops needing
+   * its intent, and folding the two would make "forget the intent" require a
+   * transition that has not happened yet.
+   */
+  setCpnPrepared(paymentId: string, prepared: unknown | null): Promise<void>;
 
   deleteOrder(id: string): Promise<void>;
 }
@@ -516,6 +557,67 @@ export function createOrderStore(url: string, serviceKey: string): OrderStore {
       return (data ?? []) as never;
     },
 
+    /**
+     * The batch reads. One query each, grouped in memory.
+     *
+     * An empty id list short-circuits: PostgREST would happily run `in.()` and
+     * return nothing, but the round trip is pure waste on a board with no
+     * orders — the state a fresh deployment is in.
+     */
+    async listEventsFor(orderIds: readonly string[]) {
+      const out: Record<string, Array<{ type: string; payload: unknown; received_at: string }>> = {};
+      for (const id of orderIds) out[id] = [];
+      if (orderIds.length === 0) return out;
+
+      const { data, error } = await db
+        .from("events")
+        .select("order_id, type, payload, received_at")
+        .in("order_id", orderIds as string[])
+        .order("received_at", { ascending: true });
+      fail("listEventsFor", error);
+      for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+        const id = row.order_id as string;
+        // An event may be stored unattributed (a webhook we could not tie to an
+        // order); `in` cannot return one, but a defensive skip costs nothing.
+        out[id]?.push({ type: row.type as string, payload: row.payload, received_at: row.received_at as string });
+      }
+      return out;
+    },
+
+    async listPaymentsFor(orderIds: readonly string[]) {
+      const out: Record<string, PaymentRecord[]> = {};
+      for (const id of orderIds) out[id] = [];
+      if (orderIds.length === 0) return out;
+
+      const { data, error } = await db
+        .from("payments")
+        .select("order_id, kind, status, tx_hash, chain, amount")
+        .in("order_id", orderIds as string[])
+        .order("created_at", { ascending: true });
+      fail("listPaymentsFor", error);
+      for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+        out[row.order_id as string]?.push(normalizeAmount(row) as never);
+      }
+      return out;
+    },
+
+    async listPayoutsFor(orderIds: readonly string[]) {
+      const out: Record<string, PayoutInstruction | null> = {};
+      for (const id of orderIds) out[id] = null;
+      if (orderIds.length === 0) return out;
+
+      const { data, error } = await db
+        .from("orders")
+        .select("id, payout")
+        .in("id", orderIds as string[]);
+      fail("listPayoutsFor", error);
+      for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+        const wire = row.payout as PayoutInstructionWire | null | undefined;
+        out[row.id as string] = wire ? fromPayoutWire(wire) : null;
+      }
+      return out;
+    },
+
     /** Orders waiting on an external event — the reconciliation sweep. */
     async listPending(): Promise<OrderRecord[]> {
       const { data, error } = await db
@@ -593,11 +695,20 @@ export function createOrderStore(url: string, serviceKey: string): OrderStore {
           destination_scale: params.destinationScale ?? 2,
           status: params.status,
           transaction_id: params.transactionId ?? null,
+          ...(params.prepared === undefined ? {} : { prepared: params.prepared }),
         })
         .select()
         .single();
       fail("recordCpnPayment", error);
       return normalizeCpn(data as CpnPaymentRecord);
+    },
+
+    async setCpnPrepared(paymentId: string, prepared: unknown | null): Promise<void> {
+      const { error } = await db
+        .from("cpn_payments")
+        .update({ prepared, updated_at: new Date().toISOString() })
+        .eq("payment_id", paymentId);
+      fail("setCpnPrepared", error);
     },
 
     async getCpnPayment(paymentId: string): Promise<CpnPaymentRecord | null> {
@@ -623,10 +734,22 @@ export function createOrderStore(url: string, serviceKey: string): OrderStore {
     },
 
     async listCpnPayments(limit = 50): Promise<CpnPaymentRecord[]> {
+      // Columns spelled out rather than `select()`: this list is polled by the
+      // history panel, and `prepared` holds a whole EIP-712 payload that no
+      // reader of the list ever looks at.
       const { data, error } = await db
-        .from("cpn_payments").select().order("created_at", { ascending: false }).limit(limit);
+        .from("cpn_payments")
+        .select(
+          "payment_id, order_id, corridor, sender_address, signed_by, source_minor, source_currency," +
+            " destination_minor, destination_currency, destination_scale, status, transaction_id," +
+            " failure_reason, created_at, updated_at",
+        )
+        .order("created_at", { ascending: false }).limit(limit);
       fail("listCpnPayments", error);
-      return ((data ?? []) as CpnPaymentRecord[]).map(normalizeCpn);
+      // Through `unknown`: supabase-js infers the row type from the select
+      // string as a literal, and a column list assembled by concatenation is
+      // not one it can read.
+      return ((data ?? []) as unknown as CpnPaymentRecord[]).map(normalizeCpn);
     },
 
     async deleteOrder(id: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   RiArrowRightLine, RiCashLine, RiCheckboxCircleLine, RiErrorWarningLine, RiLoader4Line, RiWallet3Line,
 } from "@remixicon/react";
@@ -9,10 +9,8 @@ import { erc20Abi } from "viem";
 import {
   cpnBroadcastAction,
   cpnBroadcastSignedAction,
-  cpnCorridorsAction,
   cpnIntentAction,
   cpnPrepareAction,
-  cpnSellerBalanceAction,
   type BroadcastView,
   type PreparedView,
 } from "./ramp.actions";
@@ -56,10 +54,16 @@ const two = (decimal: string | number) => Number(decimal).toFixed(2);
  *     leave. Written and wired; not yet executed on-chain.
  */
 /** `className` is how the withdraw page places this panel on its grid. */
-export default function SellerCashout({ className }: { className?: string }) {
-  const [corridors, setCorridors] = useState<Corridor[]>([]);
+export default function SellerCashout({ className, corridors, seller, onDone }: {
+  className?: string;
+  /** Both read once with the page — this panel used to fetch each on mount,
+   *  through the Server Action queue, behind everything else on the screen. */
+  corridors: Corridor[];
+  seller: { address: string; usdcMinor: string } | null;
+  /** Re-read the page (balances and both histories) once a cash-out lands. */
+  onDone: () => void;
+}) {
   const [corridorKey, setCorridorKey] = useState<string>("");
-  const [balMinor, setBalMinor] = useState<string | null>(null);
   const [walletBalMinor, setWalletBalMinor] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [prepared, setPrepared] = useState<PreparedView | null>(null);
@@ -76,26 +80,27 @@ export default function SellerCashout({ className }: { className?: string }) {
   const { switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient({ chainId: ARC_TESTNET_CHAIN_ID });
 
+  // Never land on a corridor the toggle then refuses to select.
   useEffect(() => {
-    cpnCorridorsAction().then((cs) => {
-      setCorridors(cs);
-      // Never land on a corridor the toggle then refuses to select.
-      const first = cs.find((c) => !c.roadmap) ?? cs[0];
-      if (first) setCorridorKey(first.key);
-    });
-  }, []);
+    if (corridorKey) return;
+    const first = corridors.find((c) => !c.roadmap) ?? corridors[0];
+    if (first) setCorridorKey(first.key);
+  }, [corridors, corridorKey]);
 
   // A connected wallet is the interesting case, so default to it — but never
   // silently: the mode is visible and switchable.
   useEffect(() => { if (isConnected) setSignMode("wallet"); else setSignMode("server"); }, [isConnected]);
 
-  const loadBalance = useCallback((prefill = false) =>
-    cpnSellerBalanceAction().then((r) => {
-      if (!r.ok) return;
-      setBalMinor(r.seller.usdcMinor);
-      if (prefill) setAmount(two(Number(r.seller.usdcMinor) / 1e6));
-    }), []);
-  useEffect(() => { loadBalance(true); }, [loadBalance]);
+  // The server-held seller balance arrives with the page. Prefilled ONCE, on
+  // the first value seen: re-prefilling on every poll would overwrite an amount
+  // the user was in the middle of typing.
+  const balMinor = seller?.usdcMinor ?? null;
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefilled.current || balMinor == null) return;
+    prefilled.current = true;
+    setAmount(two(Number(balMinor) / 1e6));
+  }, [balMinor]);
 
   // The connected wallet's own USDC on Arc — what IT can actually cash out.
   useEffect(() => {
@@ -137,7 +142,7 @@ export default function SellerCashout({ className }: { className?: string }) {
     setBusy("broadcast");
     const r = await withToast("Broadcasting to CPN — following the payment to a terminal status",
       () => cpnBroadcastAction(paymentId));
-    if (r.ok) { setBroadcast(r.result); loadBalance(); } else setError(r.error);
+    if (r.ok) { setBroadcast(r.result); onDone(); } else setError(r.error);
   };
 
   /**
@@ -182,7 +187,7 @@ export default function SellerCashout({ className }: { className?: string }) {
     setBusy("broadcast");
     const r = await withToast("Broadcasting the wallet-signed intent to CPN",
       () => cpnBroadcastSignedAction(paymentId, signature));
-    if (r.ok) setBroadcast(r.result); else setError(r.error);
+    if (r.ok) { setBroadcast(r.result); onDone(); } else setError(r.error);
   };
 
   const doBroadcast = () => {

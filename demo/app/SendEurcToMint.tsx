@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { RiArrowRightLine, RiExternalLinkLine, RiLoader4Line, RiSendPlaneLine } from "@remixicon/react";
 import { erc20Abi, isAddress, parseUnits } from "viem";
 import { useAccount, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
-import { mintBalanceAction, type MintDepositView } from "./mint.actions";
+import type { MintDepositView } from "./mint.actions";
 import { ARC_TESTNET_CHAIN_ID, ARC_TESTNET_EXPLORER_URL, EURC_ADDRESS } from "../../src/constants/arc";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -31,13 +31,17 @@ import { withToast } from "./toast";
 export default function SendEurcToMint({
   sellerWallet,
   balanceMinor,
+  deposit,
   onSent,
 }: {
   sellerWallet: string | null;
   balanceMinor: string | null;
+  /** Handed down rather than fetched: MintRedeem was already asking Circle for
+   *  exactly this, and two components asking the same question is two requests
+   *  the Server Action queue ran one after the other. */
+  deposit: MintDepositView | null;
   onSent: () => void;
 }) {
-  const [deposit, setDeposit] = useState<MintDepositView | null>(null);
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState<null | "switch" | "send" | "wait">(null);
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -47,8 +51,6 @@ export default function SendEurcToMint({
   const { writeContractAsync } = useWriteContract();
   const { switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient({ chainId: ARC_TESTNET_CHAIN_ID });
-
-  useEffect(() => { mintBalanceAction().then((r) => { if (r.ok) setDeposit(r.deposit); }); }, []);
 
   const target = deposit?.eurOnArc?.address ?? null;
   const held = balanceMinor == null ? 0 : Number(balanceMinor) / 1e6;
