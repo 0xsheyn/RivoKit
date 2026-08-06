@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RiWallet3Line } from "@remixicon/react";
-import type { WithdrawSnapshot } from "../lib/board.server";
+import { RiArrowRightLine, RiArrowRightUpLine, RiWallet3Line } from "@remixicon/react";
+import type { SellerPayoutRow, WithdrawSnapshot } from "../lib/board.server";
+import { ARC_TESTNET_EXPLORER_URL } from "../../src/constants/arc";
 import { getJson, useLive } from "./live";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -107,13 +108,17 @@ export default function Withdraw({ initial }: {
             </CardContent>
           )}
 
-          <CardFooter>
+          {/* `flex-col items-stretch`: CardFooter is a row by default, and the
+              two children here read top-to-bottom — the claim, then the last
+              time it actually happened. */}
+          <CardFooter className="flex-col items-stretch gap-2.5">
             <p className="text-sm text-muted-foreground">
               {sellerWallet
                 ? <>The settlement wallet runs the floored swap and forwards the floor to the seller wallet — so it is
                   a <span className="font-medium text-foreground">hop</span>, not the destination.</>
                 : <>No second wallet chosen, so the settlement wallet keeps the floored EURC itself.</>}
             </p>
+            <LastForward row={snap.lastSellerPayout} />
           </CardFooter>
         </Card>
 
@@ -163,6 +168,61 @@ export default function Withdraw({ initial }: {
         <MintRedeem className="lg:col-start-2 lg:row-start-1" mint={snap.mint} onDone={refresh} />
         <MintHistory className="lg:col-start-2 lg:row-start-2 lg:self-start" rows={snap.mint?.payouts ?? null} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * The last time floored EURC actually left the settlement wallet for a seller's
+ * own one — one row, newest, and never a list.
+ *
+ * The paragraph above it makes a claim about how settlement works ("a hop, not
+ * the destination"), and every other number on this panel is a BALANCE: what is
+ * there now, with nothing to say about how it arrived. This is the one line that
+ * closes that gap, which is why it sits directly under the sentence it evidences
+ * rather than in a history card of its own.
+ *
+ * Rendered even when nothing has been forwarded yet. A row that appears and
+ * disappears would move the two exit panels beside it every time a release
+ * lands, and "not yet" is a real answer to the question the sentence raises.
+ */
+function LastForward({ row }: { row: SellerPayoutRow | null }) {
+  if (!row) {
+    return (
+      <p className="rounded-2xl border border-dashed px-3 py-2 text-xs text-muted-foreground">
+        No forward yet — the settlement wallet is still holding every floor it has swapped.
+      </p>
+    );
+  }
+
+  const when = new Date(row.at);
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl border px-3 py-2 text-xs">
+      <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+        Last forward
+      </span>
+      <span className="font-semibold tabular-nums text-foreground">€{usd(row.amountMinor)}</span>
+      <RiArrowRightLine className="size-3 shrink-0 text-muted-foreground" />
+      {/* The recipient, always — this row is deliberately not filtered to the
+          wallet chosen in THIS browser, so which one received it is the part
+          that stops the line being ambiguous. */}
+      <span className="font-mono text-foreground">{shortAddr(row.to)}</span>
+      <span className="ml-auto flex shrink-0 items-center gap-2 text-muted-foreground">
+        {Number.isNaN(when.getTime())
+          ? null
+          : when.toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+        {row.txHash && (
+          <a
+            href={`${ARC_TESTNET_EXPLORER_URL}/tx/${row.txHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-0.5 font-mono underline-offset-4 hover:text-foreground hover:underline"
+          >
+            {row.txHash.slice(0, 8)}…
+            <RiArrowRightUpLine className="size-3 shrink-0" />
+          </a>
+        )}
+      </span>
     </div>
   );
 }

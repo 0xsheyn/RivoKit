@@ -519,12 +519,36 @@ export type MintSnapshot = {
   payouts: Awaited<ReturnType<typeof mintPayouts>>;
 };
 
+/**
+ * The last time floored EURC actually reached a seller's own wallet.
+ *
+ * Recorded as an event rather than a payments row because `payment_kind` is a
+ * Postgres enum with no "payout" member, and a demo-only leg does not justify
+ * migrating the ledger schema (see `mpRelease`). It only exists in two-wallet
+ * mode — with no seller wallet chosen the settlement wallet keeps the EURC and
+ * there is no forward to record.
+ */
+export type SellerPayoutRow = {
+  orderId: string | null;
+  /** Whoever received it — the demo's own wallet or one the seller picked. */
+  to: string;
+  amountMinor: string;
+  txHash: string | null;
+  at: string;
+};
+
 export type WithdrawSnapshot = {
   balances: Balances | null;
   seller: { address: string; usdcMinor: string } | null;
   corridors: CorridorInfo[];
   cashouts: CashoutRow[] | null;
   mint: MintSnapshot | null;
+  /**
+   * ONE row, the newest. The withdraw page has a footer's worth of space for
+   * this and no more; a list would push the two exit panels below the fold to
+   * answer a question ("did the last one arrive?") that one line answers.
+   */
+  lastSellerPayout: SellerPayoutRow | null;
 };
 
 /**
@@ -539,13 +563,38 @@ export type WithdrawSnapshot = {
  * being unreachable must not blank the CPN panels beside it.
  */
 export async function withdrawSnapshot(): Promise<WithdrawSnapshot> {
-  const [balances, seller, cashouts, mint] = await Promise.all([
+  const [balances, seller, cashouts, mint, lastSellerPayout] = await Promise.all([
     cachedBalances().catch(() => null),
     sellerInfo().catch(() => null),
     cashoutRows().catch(() => null),
     mintSnapshot().catch(() => null),
+    lastSellerPayoutRow().catch(() => null),
   ]);
-  return { balances, seller, corridors: corridorList(), cashouts, mint };
+  return { balances, seller, corridors: corridorList(), cashouts, mint, lastSellerPayout };
+}
+
+/**
+ * The newest `mp.seller_payout`, or null if EURC has never been forwarded.
+ *
+ * Deliberately NOT filtered to the wallet this browser has chosen. The question
+ * on that panel is whether the forward leg works at all, and answering it only
+ * for a locally-stored address would blank the line for anyone arriving without
+ * that localStorage entry — including on the very run that produced the row.
+ * The recipient is shown instead, so which wallet it was stays visible.
+ */
+async function lastSellerPayoutRow(): Promise<SellerPayoutRow | null> {
+  const { store } = getRivoKit();
+  const [row] = await store.listEventsByType("mp.seller_payout", 1);
+  if (!row) return null;
+  const p = (row.payload ?? {}) as { txHash?: string; to?: string; amountMinor?: string };
+  if (!p.to || !p.amountMinor) return null;
+  return {
+    orderId: row.order_id,
+    to: p.to,
+    amountMinor: p.amountMinor,
+    txHash: p.txHash ?? null,
+    at: row.received_at,
+  };
 }
 
 export async function mintSnapshot(): Promise<MintSnapshot> {
