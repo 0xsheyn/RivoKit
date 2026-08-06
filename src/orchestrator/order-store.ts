@@ -210,6 +210,20 @@ export interface OrderStore {
   listEvents(orderId: string): Promise<Array<{ type: string; payload: unknown; received_at: string }>>;
 
   /**
+   * The most recent events of one type, across every order — newest first.
+   *
+   * The other event reads all start from an order id, which is the right shape
+   * when the order is what you are looking at. It is the wrong shape for a
+   * question like "when did EURC last reach a seller wallet": the answer is not
+   * about any particular order, and finding it through the order list means
+   * reading every order's whole event log to keep one row.
+   */
+  listEventsByType(
+    type: string,
+    limit?: number,
+  ): Promise<Array<{ order_id: string | null; type: string; payload: unknown; received_at: string }>>;
+
+  /**
    * The same three reads, for MANY orders at once.
    *
    * They exist because a board that lists N orders was making 5N round trips —
@@ -554,6 +568,17 @@ export function createOrderStore(url: string, serviceKey: string): OrderStore {
         .eq("order_id", orderId)
         .order("received_at", { ascending: true });
       fail("listEvents", error);
+      return (data ?? []) as never;
+    },
+
+    async listEventsByType(type: string, limit = 10) {
+      const { data, error } = await db
+        .from("events")
+        .select("order_id, type, payload, received_at")
+        .eq("type", type)
+        .order("received_at", { ascending: false })
+        .limit(limit);
+      fail("listEventsByType", error);
       return (data ?? []) as never;
     },
 
