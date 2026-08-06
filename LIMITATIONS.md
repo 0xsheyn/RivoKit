@@ -98,6 +98,27 @@ The threshold sits deliberately above the observed ~€9.4 so nothing lands in t
 gap, and it is only a hint: the authority is `PayoutRail.limits()`, read live at
 `createOrder`, because that USDC minimum drifts with FX.
 
+### StableFX liquidity on Arc Testnet has a ceiling, and it is small
+
+USDC→EURC is quoted per SIZE, not per pair. Measured 2026-08-07 from the
+settlement wallet: clean quotes at 6.50, 8.00, 9.00, 9.20, 9.50 and **9.80**
+USDC, and from **10.00** USDC upward either `no route available` or
+`Insufficient liquidity for the requested swap`. The rate itself was flat across
+the range that worked (~0.7500 EURC per USDC), so this is depth, not price.
+
+A €9.00 listing needs ~12.2 USDC and therefore **cannot settle to a wallet at
+all** while the ceiling sits there. Two consequences, both now handled:
+
+- `lockQuote` re-quotes at the size it derived rather than trusting the probe.
+  A probe at €9.00-as-USDC is a third smaller than the trade and passed cleanly;
+  the order then failed its swap AFTER capture. It is refused at `createOrder`
+  now, before anything moves, and the storefront greys the listing out.
+- Orders already stuck that way are recoverable: `retrySettlement()` re-runs the
+  swap without touching the escrow, and the marketplace host panel exposes it.
+  The ceiling is a market state, not a fault — it can lift.
+
+This is testnet market depth and nothing in this repo controls it.
+
 ### The webhook endpoint does not survive its own process
 
 The live webhook proof rode a Cloudflare quick tunnel. The URL dies with the
@@ -177,7 +198,7 @@ transfer, and it says so.
 
 ## What the tests do not guard
 
-The 465 unit tests are weighted toward pure logic — state machines, money
+The 488 unit tests are weighted toward pure logic — state machines, money
 conversion, fee arithmetic, reducers, signature verification against a keypair
 the test itself creates. **The modules that talk to a network or a chain have no
 direct tests, and the facade tests mock them.**

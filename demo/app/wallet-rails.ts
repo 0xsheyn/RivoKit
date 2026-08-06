@@ -18,7 +18,7 @@
  */
 import { AppKit, BridgeChain } from "@circle-fin/app-kit";
 import { createViemAdapterFromProvider } from "@circle-fin/adapter-viem-v2";
-import { createUnifiedBalance } from "../../src/funding/unified-balance.ts";
+import { createUnifiedBalance, planAllocations } from "../../src/funding/unified-balance.ts";
 import { createBridge } from "../../src/funding/bridge.ts";
 import {
   ARC_TESTNET_CHAIN_ID, ARC_TESTNET_RPC_FALLBACKS, ARC_TESTNET_EXPLORER_URL,
@@ -223,22 +223,42 @@ export function resetWalletRails(): void {
 }
 
 /**
- * The wallet's Gateway unified balance (confirmed = spendable now).
+ * The wallet's Gateway unified balance (confirmed = spendable now), with the
+ * per-chain split the spend below actually allocates against.
  *
- * Deliberately not per-chain: Gateway's balance IS chain-abstracted, and
- * `getBalances` returns one total across every chain the address deposited
- * from. The source chain only decides which deposit the spend below draws down.
+ * The total is chain-abstracted; a spend is not. Both are returned because both
+ * are true and they answer different questions: the total is what the payer
+ * owns, `byChain` is what a burn intent can name.
  */
 export async function walletGatewayBalance(
   provider: Eip1193,
-): Promise<{ confirmedMinor: string; pendingMinor: string }> {
+): Promise<{
+  confirmedMinor: string;
+  pendingMinor: string;
+  byChain: Array<{ chain: string; confirmedMinor: string; pendingMinor: string }>;
+}> {
   const bal = await ub.getBalance(await sourceAdapter(provider));
-  return { confirmedMinor: bal.confirmedMinor.toString(), pendingMinor: bal.pendingMinor.toString() };
+  return {
+    confirmedMinor: bal.confirmedMinor.toString(),
+    pendingMinor: bal.pendingMinor.toString(),
+    byChain: bal.byChain.map((b) => ({
+      chain: b.chain,
+      confirmedMinor: b.confirmedMinor.toString(),
+      pendingMinor: b.pendingMinor.toString(),
+    })),
+  };
 }
 
 /**
  * Spend the wallet's Gateway balance onto Arc, minting to the wallet itself.
  * Sub-second when the balance is confirmed; a just-made deposit is not.
+ *
+ * The source chain the payer picked is a PREFERENCE, not the whole plan. It used
+ * to be the whole plan — one allocation, pinned to that chain — and the result
+ * was a rail that failed with "Insufficient USDC balance on Ethereum Sepolia.
+ * Available: 0 USDC" on a wallet whose Gateway balance was sitting on Fuji, in
+ * the same total the UI was showing as available. `planAllocations` reads where
+ * the money actually is and draws the preferred chain down first.
  */
 export async function walletSpendToArc(
   provider: Eip1193,
@@ -247,12 +267,13 @@ export async function walletSpendToArc(
   // Two adapters, one wallet. The burn is authorized on the source chain and the
   // mint is sent on Arc, so each side needs a view pinned to its own chain — see
   // `pinnedTo` for what passing a single adapter here actually cost.
+  const fromAdapter = await sourceAdapter(provider, params.from);
+  const balance = await ub.getBalance(fromAdapter);
   const res = await ub.spend({
-    fromAdapter: await sourceAdapter(provider, params.from),
-    // Names which chain's deposit to draw down. It has to be the chain the
-    // buyer actually deposited from, or Gateway reports BALANCE_INSUFFICIENT
-    // against a balance the UI is showing as available.
-    fromChain: usableSourceChain(params.from).name,
+    fromAdapter,
+    allocations: planAllocations(balance.byChain, params.amountMinor, {
+      prefer: usableSourceChain(params.from).name,
+    }),
     toAdapter: await arcAdapter(provider),
     toChain: "Arc_Testnet",
     recipientAddress: params.recipient,

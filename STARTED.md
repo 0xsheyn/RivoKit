@@ -47,7 +47,7 @@ version bump.
 ```bash
 git clone https://github.com/0xsheyn/RivoKit.git && cd RivoKit
 npm install                 # runs `prepare` → builds dist/
-npm test                    # 465 tests / 26 files — needs no credentials at all
+npm test                    # 488 tests / 28 files — needs no credentials at all
 ```
 
 `npm test` passing on a fresh clone with an empty `.env.local` is the intended
@@ -55,7 +55,7 @@ first checkpoint. Nothing below is required to reach it.
 
 | Command | Does |
 |---|---|
-| `npm test` | vitest — 465 green / 26 files, no credentials |
+| `npm test` | vitest — 488 green / 28 files, no credentials |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build:lib` | SDK → `dist/` (ESM + `.d.ts`), entry `src/index.ts` |
 | `npm run setup` | Deploy CPP instances + operator/merchant wallets (idempotent) |

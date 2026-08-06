@@ -47,6 +47,13 @@ export type OrderView = {
   sellerAddress: string | null;
   buyerConfirmed: boolean;
   disputeReason: string | null;
+  /**
+   * Why the order stopped, when it stopped. Set on `settlement_pending` and
+   * `failed`, and the only thing that distinguishes a stall worth retrying now
+   * from one worth retrying later — a "Settlement stalled (retryable)" badge on
+   * its own tells an operator nothing about which.
+   */
+  failureReason: string | null;
   createdAt: string;
   /**
    * The ERC-3009 `validBefore` the payer signs against — one hour from checkout
@@ -134,6 +141,7 @@ function buildView(
     sellerAddress: meta?.sellerAddress ?? null,
     buyerConfirmed,
     disputeReason: disputeActive ? dispute?.reason ?? "no reason given" : null,
+    failureReason: order.failureReason,
     createdAt: order.createdAt,
     preApprovalExpiry: record.pre_approval_expiry,
     payments: [
@@ -281,7 +289,22 @@ export type RelayView = {
   feeReceiver: string;
 };
 
-export type PriceHint = { productId: string; walletUsdc: string | null; bankUsdc: string | null };
+export type PriceHint = {
+  productId: string;
+  walletUsdc: string | null;
+  bankUsdc: string | null;
+  /**
+   * Why this listing's wallet settlement cannot be served right now, or null.
+   *
+   * StableFX is RFQ-based and a maker quotes per SIZE, so "there is a
+   * USDC→EURC route" is not a property of the pair — it is a property of the
+   * amount. Measured on Arc Testnet 2026-08-07: clean quotes up to 9.80 USDC,
+   * no route at 10.00. A €9.00 listing needs ~12.2 USDC and therefore cannot
+   * settle at all, which used to be discovered only AFTER the escrow had been
+   * captured. Checked here so the storefront can decline to sell it.
+   */
+  walletBlocked: string | null;
+};
 
 export type BoardSnapshot = {
   views: OrderView[];
@@ -359,13 +382,21 @@ export async function priceHints(): Promise<PriceHint[]> {
 
 async function computeHints(): Promise<PriceHint[]> {
   const { kit, addresses, payout } = getRivoKit();
-  const hints: PriceHint[] = CATALOG.map((p) => ({ productId: p.id, walletUsdc: null, bankUsdc: null }));
+  const hints: PriceHint[] = CATALOG.map((p) => ({
+    productId: p.id, walletUsdc: null, bankUsdc: null, walletBlocked: null,
+  }));
 
   // ONE quote for the whole catalog, scaled per listing. Six live quotes on
   // every page load would spend the Arc RPC's budget on a figure that is
   // approximate by definition.
+  //
+  // The probe is deliberately SMALL. It is asked for a rate, and a rate is the
+  // one thing every size agrees on while liquidity lasts; asking it at a size
+  // the market cannot serve returns no rate for anything. It sat at 10 USDC,
+  // which is above the ceiling measured on 2026-08-07, so every wallet estimate
+  // on the storefront was blank.
   try {
-    const probeIn = 10_000_000n;
+    const probeIn = 5_000_000n;
     const q = await kit.estimateSwap({ address: addresses.buyer, amountInMinor: probeIn });
     const out = BigInt(q.amountOutMinor);
     if (out > 0n) {
@@ -377,6 +408,33 @@ async function computeHints(): Promise<PriceHint[]> {
     }
   } catch {
     /* leave null — the UI shows the guaranteed euro price and no estimate */
+  }
+
+  // Now ask the question the scaled figure cannot answer: is that size SERVED?
+  // Only for the listings that actually settle through a swap — a bank order
+  // runs none, and its own feasibility is checked against the corridor below.
+  //
+  // `payout.enabled` is part of that test, not decoration: with no rail wired,
+  // the dear listings become wallet orders too, and those are the sizes most
+  // likely to be refused.
+  //
+  // One quote per wallet listing, behind the same 60-second cache as everything
+  // else here. It is the cheapest honest version of this check: the alternative
+  // is selling a listing whose settlement is already known to fail, and
+  // recovering it by hand after the capture.
+  for (const h of hints) {
+    const product = productById(h.productId)!;
+    const settlesToBank = payout.enabled && canPayoutToBank(product);
+    if (settlesToBank || h.walletUsdc == null) continue;
+    try {
+      // `walletUsdc` is already the NET — the operator fee is grossed on top of
+      // it at `createOrder`, and the escrow splits that share off at capture. So
+      // this figure is the amount the swap itself will be handed.
+      await kit.estimateSwap({ address: addresses.buyer, amountInMinor: BigInt(h.walletUsdc) });
+    } catch (e) {
+      h.walletBlocked = String((e as Error)?.message ?? e).slice(0, 200);
+      h.walletUsdc = null;
+    }
   }
 
   // The bank figure comes from the rail itself, and only for listings that

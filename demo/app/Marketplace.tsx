@@ -13,6 +13,7 @@ import {
   mpCheckout, mpPay, mpConfirm, mpDispute, mpShip, mpRelease, mpRefund,
   mpAuthTypedData, mpPaySigned,
   mpOrderAmount, mpMarkFunding, mpRecordWalletFunding, mpRefreshPayout, mpExpireOrder,
+  mpRetrySettlement,
   type OrderView, type PaySource, type Balances, type RelayView, type PriceHint,
 } from "./marketplace.actions";
 import type { BoardSnapshot } from "../lib/board.server";
@@ -617,6 +618,11 @@ function Storefront({ pending, payer, hints, bankEnabled, onBuy }: {
             // only honest offer on a cheap listing is the wallet one. With no
             // rail configured at all, everything settles to a wallet.
             const toBank = bankEnabled && canPayoutToBank(p);
+            // A wallet listing whose swap size no maker will serve. Selling it
+            // would take the buyer's USDC, capture the escrow, and then stall —
+            // `createOrder` now refuses it outright, so offering the button is
+            // offering a checkout that throws.
+            const blocked = !toBank ? hint?.walletBlocked ?? null : null;
             return (
               // Stock Card, only tightened: six listings sit above the role
               // columns, so the strip keeps the default 6-unit rhythm halved.
@@ -641,14 +647,20 @@ function Storefront({ pending, payer, hints, bankEnabled, onBuy }: {
                       <> · you pay ≈ {usd(toBank ? hint!.bankUsdc : hint!.walletUsdc)} USDC</>
                     )}
                   </p>
+                  {blocked && (
+                    <p className="mt-1 text-xs text-destructive">
+                      No USDC→EURC maker at this size right now, so the seller&apos;s floor cannot be guaranteed —
+                      checkout is refused rather than stalled after payment.
+                    </p>
+                  )}
                 </CardContent>
                 <CardFooter className="flex-col items-stretch gap-1.5 px-4">
                   {/* One button, and its label names the destination the price
                       already chose — the buyer should never have to work out
                       why the same wording settled two different ways. */}
-                  <Button size="sm" variant={toBank ? "default" : "outline"} disabled={pending}
+                  <Button size="sm" variant={toBank ? "default" : "outline"} disabled={pending || Boolean(blocked)}
                     onClick={() => onBuy(p.id, toBank ? "bank" : "wallet")}>
-                    {toBank ? <><RiBankLine /> BUY → EURO FIAT</> : <>BUY → EURC</>}
+                    {blocked ? "FX route unavailable" : toBank ? <><RiBankLine /> BUY → EURO FIAT</> : <>BUY → EURC</>}
                   </Button>
                 </CardFooter>
               </Card>
@@ -1231,6 +1243,9 @@ function HostPanel({ views, busy, run, cap, relay }: {
   // settled the instant the seller says so.
   const settleable = active.filter((v) => (v.status === "confirmed" || v.status === "shipped") && !v.disputeReason);
   const disputes = active.filter((v) => v.status === "dispute");
+  // Captured, holding the source token, never converted. The escrow is empty
+  // here, so `release()` is the wrong door — it starts with a second capture.
+  const stalled = active.filter((v) => v.state === "settlement_pending");
 
   // The relay is the host's running cost: the operator pays Arc gas (USDC) for
   // every escrow call, and the fee is what refills it. It rides along with the
@@ -1291,6 +1306,40 @@ function HostPanel({ views, busy, run, cap, relay }: {
                 <Button size="xs" variant="outline" disabled={busy(v.id)} onClick={() => run(v.id, () => mpRelease(v.id), releaseLabel(v))}>
                   Release to seller
                 </Button>
+              </CardFooter>
+            </Card>
+          ))}
+        </>
+      )}
+
+      {stalled.length > 0 && (
+        <>
+          <SectionLabel count={stalled.length}>Settlement stalled</SectionLabel>
+          {stalled.map((v) => (
+            <Card key={v.id} data-order-row>
+              <CardHeader>
+                <CardTitle className="text-sm">
+                  {v.product?.emoji} {v.product?.name} · {fmtEUR(v.priceEURMinor)}
+                </CardTitle>
+                <CardDescription>
+                  Captured — the USDC is with {v.payoutTo === "bank" ? "the seller" : "the settlement wallet"} and the
+                  escrow is empty. Nothing is lost; what is missing is the {v.payoutTo === "bank" ? "payout" : "swap"}.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground">
+                  {v.failureReason ?? "No reason was recorded."}
+                </p>
+              </CardContent>
+              <CardFooter className="gap-2">
+                <Button size="xs" disabled={busy(v.id)}
+                  onClick={() => run(v.id, () => mpRetrySettlement(v.id),
+                    v.payoutTo === "bank" ? "Re-quoting and re-broadcasting the payout" : "Retrying the floored swap")}>
+                  {busy(v.id) ? "…" : "Retry settlement"}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Never <span className="font-mono">release</span> again — that would capture twice.
+                </span>
               </CardFooter>
             </Card>
           ))}

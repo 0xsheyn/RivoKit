@@ -44,7 +44,35 @@ export function fundsMayBeInFlight(e: unknown): boolean {
   // Nothing was signed, so nothing can be in flight.
   if (hasCode(e, 4001)) return false;
   if (hasCode(e, "WALLET_CHAIN_REJECTED")) return false;
+  // Our own pre-flight refusal: the plan was rejected before a single intent
+  // was built, let alone signed.
+  if (hasCode(e, "GATEWAY_BALANCE_SHORT")) return false;
+  if (isPreflightKitError(e)) return false;
   return true;
+}
+
+/**
+ * A KitError raised while VALIDATING a transfer, before anything is signed.
+ *
+ * App Kit classifies its errors by `type`, and two of those classes are decided
+ * entirely from inputs and balances: `INPUT` (bad amount, unsupported route,
+ * unknown chain) and `BALANCE` (not enough token, not enough gas). Both are
+ * refusals to start. Reading them as "money might be moving" is what turned a
+ * Gateway spend that never left the browser — "Insufficient USDC balance on
+ * Ethereum Sepolia. Available: 0 USDC" — into an order frozen at
+ * `funding_pending` under a "Funding never completed" warning, with its pay
+ * control gone and nothing to retry with.
+ *
+ * Matched on `type` rather than on the numeric code so a new BALANCE/INPUT
+ * member of the taxonomy is covered the day it ships. Everything else still
+ * defaults to TRUE upstream: `EXECUTION`, `ONCHAIN` and `NETWORK` can all fail
+ * after a burn has landed.
+ */
+function isPreflightKitError(e: unknown, depth = 0): boolean {
+  if (e == null || typeof e !== "object" || depth > 4) return false;
+  const o = e as Record<string, unknown>;
+  if (o["type"] === "INPUT" || o["type"] === "BALANCE") return true;
+  return ["data", "cause", "error", "originalError"].some((k) => isPreflightKitError(o[k], depth + 1));
 }
 
 /**

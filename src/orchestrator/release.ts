@@ -79,6 +79,18 @@ export type ReleaseRequest = {
 
 const ZERO = "0x0000000000000000000000000000000000000000" as Address;
 
+/**
+ * What the service actually said, appended to our own summary.
+ *
+ * `failure_reason` is a text column an operator reads to choose a repair, so the
+ * underlying sentence is worth more than the classification we wrapped it in.
+ * Trimmed hard: this rides on a state transition, not in a log.
+ */
+function causeOf(e: { cause?: unknown }): string {
+  const raw = String((e.cause as Error)?.message ?? e.cause ?? "").trim();
+  return raw ? ` Service said: ${raw.slice(0, 160)}` : "";
+}
+
 export async function release(
   deps: ReleaseDeps,
   req: ReleaseRequest,
@@ -129,9 +141,16 @@ export async function release(
   } catch (e) {
     // The floor held — the recipient was never shortchanged. But the capture
     // already happened, so this is NOT "funds safe in escrow". Say so plainly.
+    //
+    // And say WHY, not just that. "Floor not met" was the whole message, and it
+    // named the one thing that is always true of a failed floored swap while
+    // hiding the thing that differs between them: a rate that moved reads
+    // identically to a market that would not serve the size at all, and only
+    // the second is worth retrying later rather than sooner.
     const reason =
       e instanceof FloorNotMetError
-        ? `Floor ${req.priceOutMinor} not met; ${netMinor} ${tokenIn} sits at ${deps.settlementAddress}, not yet converted.`
+        ? `Floor ${req.priceOutMinor} not met; ${netMinor} ${tokenIn} sits at ${deps.settlementAddress}, ` +
+          `not yet converted.${causeOf(e)}`
         : `Settlement failed: ${String((e as Error)?.message ?? e).slice(0, 200)}`;
 
     return {
