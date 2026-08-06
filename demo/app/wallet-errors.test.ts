@@ -96,6 +96,33 @@ describe("fundsMayBeInFlight", () => {
     expect(fundsMayBeInFlight(failed)).toBe(false);
   });
 
+  /**
+   * The regression this exists for: a Gateway spend refused for want of a
+   * balance never reaches a wallet, let alone a chain. It was reported as
+   * possibly-in-flight, so the order was moved to `funding_pending` — a state
+   * with no way back — and shown under "Funding never completed" with its pay
+   * control gone. Nothing had moved. App Kit says so itself: `type: 'BALANCE'`
+   * and `type: 'INPUT'` are decided before anything is signed.
+   */
+  it("says NO to App Kit's pre-flight refusals", () => {
+    const insufficient = Object.assign(
+      new Error("Insufficient USDC balance on Ethereum Sepolia. Available: 0 USDC, required: 13.208313 USDC"),
+      { code: 9001, name: "BALANCE_INSUFFICIENT_TOKEN", type: "BALANCE", recoverability: "FATAL" },
+    );
+    expect(fundsMayBeInFlight(insufficient)).toBe(false);
+    expect(fundsMayBeInFlight({ code: 9002, type: "BALANCE" })).toBe(false);
+    expect(fundsMayBeInFlight({ code: 1003, type: "INPUT" })).toBe(false);
+    // Wrapped the same way every other classification is read.
+    expect(fundsMayBeInFlight(Object.assign(new Error("spend"), { cause: insufficient }))).toBe(false);
+    // Our own plan refusing before a single intent is built.
+    expect(fundsMayBeInFlight(withCode("GATEWAY_BALANCE_SHORT"))).toBe(false);
+  });
+
+  it("still says YES to the App Kit classes that CAN fail after a burn", () => {
+    expect(fundsMayBeInFlight({ code: 5001, type: "ONCHAIN" })).toBe(true);
+    expect(fundsMayBeInFlight({ code: 2001, type: "NETWORK" })).toBe(true);
+  });
+
   it("defaults to YES for anything it does not recognise", () => {
     // Deliberate asymmetry: a wrong YES costs a stalled badge the retry path can
     // clear, a wrong NO invites a second burn.

@@ -22,7 +22,7 @@ import { createCpnRamp, type CpnRamp } from "../../src/ramp/cpn-ramp.ts";
 import { signPaymentIntent } from "../../src/ramp/cpn-sign.ts";
 import { createCpnPayoutRail } from "../../src/payout/cpn-payout.ts";
 import type { PayoutRail } from "../../src/payout/rail.ts";
-import { applyPaymentEvent, type CpnPaymentState } from "../../src/ramp/cpn-state.ts";
+import { reconcilePaymentStatus, type CpnPaymentState } from "../../src/ramp/cpn-state.ts";
 import { fromDecimalStringScaled } from "../../src/settlement-fx/units.ts";
 import { createOrderStore, type CpnPaymentRecord, type OrderStore } from "../../src/orchestrator/order-store.ts";
 import type { CpnPayment, CpnQuote, CpnTransaction } from "../../src/ramp/cpn-client.ts";
@@ -328,20 +328,23 @@ export async function preparePayment(
 /**
  * Write an observed status onto the stored cash-out, forward-only.
  *
- * Uses the same reducer the webhook path uses, so polling can never push the
- * record somewhere a webhook would have refused — and a status we already hold
- * is a silent no-op rather than a redundant write.
+ * The POLL reducer, not the webhook one. That distinction is the whole content
+ * of this function, and getting it wrong is what left every released payout
+ * showing `created` in the history while the order it belonged to was already
+ * `paid_out`: this used to translate the polled status into the webhook it
+ * would have arrived as and hand it to `applyPaymentEvent`, which correctly
+ * refuses `CREATED → COMPLETED` because a single EVENT cannot cross two edges.
+ * A poll is not an event — it is "this is where the payment is now", and the
+ * notifications in between were simply never delivered (this demo has no
+ * webhook endpoint at all). `reconcilePaymentStatus` allows that jump and still
+ * refuses the two things that would lose information: going backwards, and
+ * leaving a terminal state.
  */
 async function persistStatus(paymentId: string, status: string): Promise<void> {
   const store = cpnStore();
   const current = await store.getCpnPayment(paymentId);
   if (!current) return;
-  const outcome = applyPaymentEvent(current.status, {
-    component: "payment",
-    notificationType: POLL_EVENT[status] ?? "",
-    paymentId,
-    raw: { polled: status },
-  });
+  const outcome = reconcilePaymentStatus(current.status, status);
   if (outcome.changed) await store.advanceCpnPayment(paymentId, outcome.state);
 }
 
@@ -355,14 +358,6 @@ async function persistStatus(paymentId: string, status: string): Promise<void> {
  */
 const PREPARED_GONE =
   "No intent to broadcast for this payment — it was never prepared, or it has already been broadcast. Prepare a new cash-out.";
-
-/** Poll status → the webhook notificationType that means the same thing. */
-const POLL_EVENT: Record<string, string> = {
-  CRYPTO_FUNDS_PENDING: "cpn.payment.cryptoFundsPending",
-  FIAT_PAYMENT_INITIATED: "cpn.payment.fiatPaymentInitiated",
-  COMPLETED: "cpn.payment.completed",
-  FAILED: "cpn.payment.failed",
-};
 
 /** Ensure Permit2 can pull at least `amountMinor` USDC from the seller on Arc. */
 async function ensureAllowance(amountMinor: bigint): Promise<void> {

@@ -1,6 +1,7 @@
 "use server";
 
 import { getRivoKit } from "../lib/rivokit.server.ts";
+import { planAllocations } from "../../src/funding/unified-balance.ts";
 import { productById } from "../lib/catalog.ts";
 import { viewOne, type Balances, type OrderView, type PriceHint, type RelayView } from "../lib/board.server.ts";
 import type { SourceChainId } from "../lib/source-chain.ts";
@@ -272,8 +273,14 @@ export async function mpPay(
 
     if (source === "unified") {
       await runRail(async () => {
+        // Where the money is, not where the payer pointed. Gateway's balance is
+        // chain-abstracted and a burn intent is not, so an allocation pinned to
+        // the picked chain is refused whenever the deposit went in from another
+        // one — against a total the UI is showing as available.
+        const balance = await funding.ub.getBalance(src.adapter);
         const spend = await funding.ub.spend({
-          fromAdapter: src.adapter, fromChain: src.chain,
+          fromAdapter: src.adapter,
+          allocations: planAllocations(balance.byChain, amount, { prefer: src.chain }),
           toAdapter: funding.arcAdapter, toChain: "Arc_Testnet",
           recipientAddress: funding.buyer, amountMinor: amount,
         });
@@ -388,6 +395,26 @@ export async function mpRefreshPayout(orderId: string): Promise<MpResult> {
   return wrap(async () => {
     const { kit } = getRivoKit();
     await kit.refreshPayout(orderId);
+    return orderId;
+  });
+}
+
+/**
+ * Host retries a settlement that was captured but never converted.
+ *
+ * The ONLY way out of `settlement_pending`: the escrow is already empty there,
+ * so calling `release()` again would start with a second capture. On the wallet
+ * path this re-runs the floored swap, on the bank path it re-quotes and
+ * re-broadcasts — and a retry that fails again leaves the order exactly where it
+ * was, with the new reason recorded as an event.
+ *
+ * Worth having on screen rather than only in a script: the state is reached by a
+ * market that would not serve the size, and a market changes its mind.
+ */
+export async function mpRetrySettlement(orderId: string): Promise<MpResult> {
+  return wrap(async () => {
+    await assertUnlocked("Retrying settlement");
+    await getRivoKit().kit.retrySettlement(orderId);
     return orderId;
   });
 }

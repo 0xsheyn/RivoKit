@@ -4,7 +4,7 @@
 
 ### An embeddable cross-border settlement SDK on Arc — multi-chain USDC in, local-currency out.
 
-![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![contracts](https://img.shields.io/badge/contracts-verified%20on%20Arc-success) ![tests](https://img.shields.io/badge/tests-465%20passing-brightgreen) ![status](https://img.shields.io/badge/status-mvp%20%C2%B7%20testnet-orange) ![license](https://img.shields.io/badge/license-MIT-green)
+![chain](https://img.shields.io/badge/chain-Arc%20Testnet%20(5042002)-blue) ![contracts](https://img.shields.io/badge/contracts-verified%20on%20Arc-success) ![tests](https://img.shields.io/badge/tests-488%20passing-brightgreen) ![status](https://img.shields.io/badge/status-mvp%20%C2%B7%20testnet-orange) ![license](https://img.shields.io/badge/license-MIT-green)
 
 **[Getting started](STARTED.md)** · **[Architecture](ARCHITECTURE.md)** · **[Proofs](PROOFS.md)** · **[Limitations](LIMITATIONS.md)**
 
@@ -55,7 +55,7 @@ leaving a wallet on Arc.
   and the server only broadcasts it. Proven from a zero Permit2 allowance.
 - Webhooks that are **verified, not trusted** — signature-checked against the
   live key before any reducer sees a body, with a one-digit edit refused.
-- **465 unit tests** across 26 files, runnable with no credentials at all.
+- **488 unit tests** across 28 files, runnable with no credentials at all.
 
 And the ceiling on all of it: **`COMPLETED` is CPN reporting the fiat leg
 finished, not anyone watching euros arrive.** That distinction is not a
@@ -212,7 +212,7 @@ Wiring all of this into a real app, step by step: **[STARTED.md](STARTED.md)**.
 
 | | |
 |---|---|
-| Tests | **465 passing / 26 files**, runnable with no credentials at all |
+| Tests | **488 passing / 28 files**, runnable with no credentials at all |
 | Typecheck | clean (`tsc --noEmit`) |
 | Chain | Arc Testnet (`5042002`) — RivoKit's own CPP instances, all source-verified full match |
 | Corridors proven | **EUR/SEPA** and **USD/WIRE**, both `COMPLETED` |
