@@ -10,12 +10,14 @@ import {
 } from "@remixicon/react";
 import { CATALOG, canPayoutToBank, fmtEUR } from "../lib/catalog";
 import {
-  mpCheckout, mpPay, mpConfirm, mpDispute, mpShip, mpRelease, mpRefund, mpListOrders, mpBalances,
-  mpAddrArcUsdc, mpAuthTypedData, mpPaySigned, mpDemoBuyer,
-  mpAddrSrcUsdc, mpOrderAmount, mpMarkFunding, mpRecordWalletFunding, mpRelay,
-  mpPriceHints, mpPayoutOptions, mpRefreshPayout, mpExpireOrder,
+  mpCheckout, mpPay, mpConfirm, mpDispute, mpShip, mpRelease, mpRefund,
+  mpAuthTypedData, mpPaySigned,
+  mpOrderAmount, mpMarkFunding, mpRecordWalletFunding, mpRefreshPayout, mpExpireOrder,
   type OrderView, type PaySource, type Balances, type RelayView, type PriceHint,
 } from "./marketplace.actions";
+import type { BoardSnapshot } from "../lib/board.server";
+import { getJson, useLive } from "./live";
+import { useWalletBalance } from "./wallet-balance";
 import { cn } from "@/lib/utils";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -440,16 +442,17 @@ function SourceChainPicker({ value, onChange, usdcByChain, disabled }: {
 
 /* ── board ────────────────────────────────────────────────────────────────── */
 
-export default function Marketplace() {
-  const [views, setViews] = useState<OrderView[]>([]);
-  const [bal, setBal] = useState<Balances | null>(null);
+export default function Marketplace({ initial, demoBuyer }: {
+  /** Rendered on the server, so the board is populated on first paint. */
+  initial: BoardSnapshot;
+  demoBuyer: string | null;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   const { address, isConnected } = useAccount();
-  const [walletUsdc, setWalletUsdc] = useState<string | null>(null);
-  const [demoBuyer, setDemoBuyer] = useState<string | null>(null);
+  const { arcUsdc: walletUsdc, refresh: refreshWallet } = useWalletBalance();
 
   // Two-wallet mode: buyer and seller are different addresses the user actually
   // controls. The seller only RECEIVES, so it needs no signature — which is why
@@ -459,38 +462,46 @@ export default function Marketplace() {
   // A second wallet for the seller is OPTIONAL. Without one the settlement
   // wallet keeps the floored EURC, exactly as in the no-wallet flow — the buyer
   // leg is unaffected, so it must never block checkout.
-  useEffect(() => { mpDemoBuyer().then(setDemoBuyer); }, []);
-  useEffect(() => {
-    if (!isConnected || !address) { setWalletUsdc(null); return; }
-    mpAddrArcUsdc(address).then(setWalletUsdc);
-  }, [address, isConnected]);
 
-  const refresh = async () => {
-    const [r, b] = await Promise.all([mpListOrders(), mpBalances()]);
-    if (r.ok) { setViews(r.views); setError(null); } else setError(r.error);
-    // A bank order stops at `payout_pending` until someone reads the rail again:
-    // CPN's submit returns BEFORE the Arc tx is mined, so the payout row is born
-    // without a hash and cannot be confirmed on first sight. Nothing else in the
-    // browser would ever ask, and the order would sit there looking stuck.
-    if (r.ok) {
-      for (const v of r.views.filter((x) => x.state === "payout_pending")) {
-        await mpRefreshPayout(v.id).catch(() => undefined);
-      }
-    }
-    if (b) setBal(b);
-    if (isConnected && address) mpAddrArcUsdc(address).then(setWalletUsdc);
-  };
-  useEffect(() => { refresh(); }, []);
+  // An expired order is finished — polling it would keep the board busy forever
+  // over something that can no longer change. `null` is not "stop reading": the
+  // board still refreshes on demand, it just has no reason to do so on a timer.
+  const [board, setBoard] = useState<BoardSnapshot>(initial);
+  const liveWork = board.views.some((v) =>
+    v.status !== "expired"
+    && (v.state.endsWith("_pending") || v.status === "processing_payment" || v.status === "refunding"));
+  const { data, error: boardError, refresh: refreshBoard } =
+    useLive<BoardSnapshot>("/api/board", initial, liveWork || pending ? 4000 : null);
+  useEffect(() => { if (data) setBoard(data); }, [data]);
+
+  const views = board.views;
+  const bal = board.balances;
+
+  /**
+   * Read the rail again for orders that are waiting on it.
+   *
+   * OUT of the board poll on purpose. It used to run inside it, sequentially,
+   * once per `payout_pending` order — so a four-second tick carried a CPN API
+   * call per pending payout and the whole board waited for them. It belongs on
+   * its own clock: CPN reports in minutes, not seconds.
+   *
+   * A bank order stops at `payout_pending` until someone asks, because CPN's
+   * submit returns BEFORE the Arc tx is mined and the payout row is born without
+   * a hash. Nothing else in the browser would ever ask.
+   */
+  const pendingPayouts = views.filter((v) => v.state === "payout_pending").map((v) => v.id).join(",");
   useEffect(() => {
-    // An expired order is finished — polling it would keep the board busy
-    // forever over something that can no longer change.
-    const live = views.some((v) =>
-      v.status !== "expired"
-      && (v.state.endsWith("_pending") || v.status === "processing_payment" || v.status === "refunding"));
-    if (!live && !pending) return;
-    const id = setInterval(refresh, 4000);
+    if (!pendingPayouts) return;
+    const sweep = async () => {
+      for (const id of pendingPayouts.split(",")) await mpRefreshPayout(id).catch(() => undefined);
+      refreshBoard();
+    };
+    void sweep();
+    const id = setInterval(() => void sweep(), 20_000);
     return () => clearInterval(id);
-  }, [views, pending]);
+  }, [pendingPayouts, refreshBoard]);
+
+  const refresh = () => { refreshBoard(); refreshWallet(); };
 
   const run: RunFn = (id, fn, label) =>
     start(async () => {
@@ -499,8 +510,13 @@ export default function Marketplace() {
       // release can run past a minute with nothing else moving on screen.
       const r = label ? await withActionToast(label, fn) : await fn();
       if (!r.ok && "error" in r) setError(r.error ?? "failed");
-      await refresh();
+      // Freed BEFORE the re-read, not after. The toast closes when the action
+      // settles, and the button used to stay dead through a full board reload
+      // after that — so the screen said "done" while nothing was clickable,
+      // which reads as the click having been lost. The re-read still happens;
+      // it just no longer holds the UI hostage.
       setBusyId(null);
+      refresh();
     });
   const busy = (id: string) => pending && busyId === id;
 
@@ -512,6 +528,7 @@ export default function Marketplace() {
     <>
       <div className="flex min-h-0 flex-col gap-3">
         <Storefront pending={pending} payer={isConnected ? address ?? null : null}
+          hints={board.hints} bankEnabled={board.payout.enabled}
           onBuy={(id, payoutTo) =>
             run(
               null,
@@ -529,19 +546,22 @@ export default function Marketplace() {
             demoBuyer={demoBuyer} cap={caps[0]} />
           {/* Buyer → Host → Seller: the host sits between the two parties it
               arbitrates, and the money moves left to right. */}
-          <HostPanel views={views} busy={busy} run={run} cap={caps[1]} />
+          <HostPanel views={views} busy={busy} run={run} cap={caps[1]} relay={board.relay} />
           <SellerPanel views={views} busy={busy} run={run}
             sellerWallet={sellerWallet} candidates={sellerCandidates} onPick={pickSeller}
             cap={caps[2]} />
         </div>
       </div>
 
-      {error && (
+      {/* An action's failure outranks a poll's: the poll will try again in four
+          seconds and says nothing the user did, while a failed action is the
+          answer to something they just pressed. */}
+      {(error ?? boardError) && (
         <div className="fixed inset-x-0 bottom-4 z-50 mx-auto w-fit max-w-[90vw] px-4">
           <Alert variant="destructive" className="shadow-lg">
             <RiErrorWarningLine />
             <AlertTitle>Something went wrong</AlertTitle>
-            <AlertDescription className="truncate">{error}</AlertDescription>
+            <AlertDescription className="truncate">{error ?? boardError}</AlertDescription>
             <AlertAction>
               <Button variant="ghost" size="icon-sm" aria-label="Dismiss" onClick={() => setError(null)}>
                 <RiCloseLine />
@@ -567,15 +587,12 @@ type RunFn = (
  * The catalog sits above the role columns, not inside Buyer: it is the entry
  * point of the whole demo and keeps the four columns evenly tall.
  */
-function Storefront({ pending, payer, onBuy }: {
-  pending: boolean; payer: string | null; onBuy: (productId: string, payoutTo: "wallet" | "bank") => void;
+function Storefront({ pending, payer, hints, bankEnabled, onBuy }: {
+  pending: boolean; payer: string | null;
+  /** Both arrive with the board — they used to be two more requests on mount. */
+  hints: PriceHint[]; bankEnabled: boolean;
+  onBuy: (productId: string, payoutTo: "wallet" | "bank") => void;
 }) {
-  const [hints, setHints] = useState<PriceHint[]>([]);
-  const [bankEnabled, setBankEnabled] = useState(false);
-  useEffect(() => {
-    mpPriceHints().then(setHints);
-    mpPayoutOptions().then((o) => setBankEnabled(o.enabled));
-  }, []);
   const hintFor = (id: string) => hints.find((h) => h.productId === id);
 
   return (
@@ -671,7 +688,11 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
     ((await connector?.getProvider?.()) as Eip1193 | undefined) ?? null;
 
   const loadWalletRails = async (address: string) => {
-    mpAddrSrcUsdc(address).then(setSrcUsdc);
+    // Once per connect, not on a timer: this is four more reads against public
+    // RPCs that rate-limit, and only the rail selector below looks at them.
+    void getJson<{ srcUsdc: Record<SourceChainId, string> | null }>(
+      `/api/wallet?address=${address}&fields=src`,
+    ).then((r) => setSrcUsdc(r.ok ? r.srcUsdc : null));
     try {
       const provider = await getProvider();
       if (!provider) return;
@@ -1183,8 +1204,10 @@ function SellerPanel({ views, busy, run, sellerWallet, candidates, onPick, cap }
 
 /* ── 3. Host — the authority ──────────────────────────────────────────────── */
 
-function HostPanel({ views, busy, run, cap }: {
+function HostPanel({ views, busy, run, cap, relay }: {
   views: OrderView[]; busy: (id: string) => boolean; run: RunFn; cap: PanelCap;
+  /** The operator's running cost, carried by the board rather than polled here. */
+  relay: RelayView | null;
 }) {
   // A clock, started after mount so the server and the client agree on the
   // first paint. Null until then, which reads as "window not yet known".
@@ -1210,13 +1233,9 @@ function HostPanel({ views, busy, run, cap }: {
   const disputes = active.filter((v) => v.status === "dispute");
 
   // The relay is the host's running cost: the operator pays Arc gas (USDC) for
-  // every escrow call, and the fee is what refills it.
-  const [relay, setRelay] = useState<RelayView | null>(null);
-  useEffect(() => {
-    mpRelay().then(setRelay);
-    const id = setInterval(() => mpRelay().then(setRelay), 30_000);
-    return () => clearInterval(id);
-  }, []);
+  // every escrow call, and the fee is what refills it. It rides along with the
+  // board — it was a poll of its own, every thirty seconds, for a number that
+  // moves only when the board does.
   const gasLow = relay?.gasUsdc != null && Number(relay.gasUsdc) < Number(relay.minGasUsdc);
 
   return (

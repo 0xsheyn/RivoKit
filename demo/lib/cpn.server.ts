@@ -141,8 +141,8 @@ function cpnStore(): OrderStore {
  *
  * Read from the store rather than from CPN: the stored row is what the webhook
  * and the polling fallback both advance, so it is the record the demo actually
- * acts on — and it survives a server restart, which the in-memory prepared-intent
- * map does not.
+ * acts on — and it survives a restart, or a second serverless instance, which
+ * no in-process copy does.
  */
 export function listCashouts(limit = 10): Promise<CpnPaymentRecord[]> {
   return cpnStore().listCpnPayments(limit);
@@ -179,8 +179,54 @@ export function getCpnRamp(): CpnRamp {
 
 // ── Seller wallet & payment flow ───────────────────────────────────────
 
-/** Prepared transactions held between prepare and broadcast, keyed by paymentId. */
-const preparedTx = new Map<string, { transaction: CpnTransaction; corridorKey: string }>();
+type PreparedEntry = { transaction: CpnTransaction; corridorKey: string };
+
+/**
+ * Prepared transactions held between prepare and broadcast, keyed by paymentId.
+ *
+ * A CACHE, not the record. It used to be the record, and that was correct for
+ * exactly one deployment shape: one long-lived process. Prepare and broadcast
+ * are two requests, and on a serverless host they are two INSTANCES — so the
+ * Map the broadcast reads is very often not the Map the prepare wrote. The
+ * failure was reported as "the server restarted", which is not what happened
+ * and sent the reader looking in the wrong place; what it left behind was a
+ * `cpn_payments` row stuck at CREATED with no way forward.
+ *
+ * The row carries the intent now (`cpn_payments.prepared`). This stays because
+ * a same-instance broadcast is the common case and a database round trip inside
+ * a 30–60 second quote window is worth skipping.
+ */
+const preparedTx = new Map<string, PreparedEntry>();
+
+/** The prepared intent, from this process if it has it and from the row if not. */
+async function loadPrepared(paymentId: string): Promise<PreparedEntry | null> {
+  const hot = preparedTx.get(paymentId);
+  if (hot) return hot;
+
+  const row = await cpnStore().getCpnPayment(paymentId);
+  const stored = row?.prepared as PreparedEntry | null | undefined;
+  // A row whose `prepared` is null is not an error: it is a payment that has
+  // already been broadcast. The caller's message has to cover both.
+  if (!stored?.transaction) return null;
+  preparedTx.set(paymentId, stored);
+  return stored;
+}
+
+/**
+ * Drop the intent once it has been broadcast — from memory AND from the row.
+ *
+ * Never throws. The broadcast is irreversible and has already happened by the
+ * time this runs; failing here would report a payment that CPN is processing as
+ * an error, which is the one thing this path must not do.
+ */
+async function forgetPrepared(paymentId: string): Promise<void> {
+  preparedTx.delete(paymentId);
+  try {
+    await cpnStore().setCpnPrepared(paymentId, null);
+  } catch (e) {
+    console.warn(`[cpn] prepared intent for ${paymentId} not cleared: ${String((e as Error).message)}`);
+  }
+}
 
 // The public Arc RPC rate-limits hard; rotate across all endpoints so a single
 // slow host can't stall an approve or a receipt wait (a hung broadcast).
@@ -253,12 +299,17 @@ export async function preparePayment(
     // use to recognise this credit, so it carries the payment's own handle.
     refCode: `RIVO-${quote.id.slice(0, 8)}`,
   });
-  preparedTx.set(payment.id, { transaction, corridorKey: corridor.key });
+  const prepared: PreparedEntry = { transaction, corridorKey: corridor.key };
+  preparedTx.set(payment.id, prepared);
 
   // Persist the cash-out now, not after broadcasting. CPN can report on it
   // (RFI, delay, failure) from the moment the payment exists, and a webhook
   // about a payment we never stored is dropped as unknown.
+  //
+  // The intent rides along in the same write: the broadcast that needs it is a
+  // separate request, and on Vercel a separate process.
   await cpnStore().recordCpnPayment({
+    prepared,
     paymentId: payment.id,
     corridor: corridor.key,
     senderAddress: sender,
@@ -294,6 +345,17 @@ async function persistStatus(paymentId: string, status: string): Promise<void> {
   if (outcome.changed) await store.advanceCpnPayment(paymentId, outcome.state);
 }
 
+/**
+ * Said once, so both broadcast paths report the same thing.
+ *
+ * Deliberately no longer blames a restart: with the intent on the row, the two
+ * ways to get here are a payment id that was never prepared, and one whose
+ * intent has already gone out. Neither is recoverable by trying again — a new
+ * quote is, which is what this asks for.
+ */
+const PREPARED_GONE =
+  "No intent to broadcast for this payment — it was never prepared, or it has already been broadcast. Prepare a new cash-out.";
+
 /** Poll status → the webhook notificationType that means the same thing. */
 const POLL_EVENT: Record<string, string> = {
   CRYPTO_FUNDS_PENDING: "cpn.payment.cryptoFundsPending",
@@ -327,8 +389,8 @@ export async function broadcastPayment(paymentId: string): Promise<{
   lifecycle: string[];
   finalStatus: string;
 }> {
-  const entry = preparedTx.get(paymentId);
-  if (!entry) throw new Error("Payment was never prepared (or the server restarted) — prepare it again.");
+  const entry = await loadPrepared(paymentId);
+  if (!entry) throw new Error(PREPARED_GONE);
   const ramp = getRampFor(corridorFor(entry.corridorKey));
   const signer = getSellerSigner();
 
@@ -336,7 +398,7 @@ export async function broadcastPayment(paymentId: string): Promise<{
   await ensureAllowance(permitAmount > 0n ? permitAmount : 20_000_000n);
 
   const submitted = await ramp.submit({ paymentId, transaction: entry.transaction }, signer);
-  preparedTx.delete(paymentId);
+  await forgetPrepared(paymentId);
 
   const lifecycle: string[] = [];
   let last = "";
@@ -371,12 +433,12 @@ export async function broadcastSignedPayment(paymentId: string, signature: Hex):
   lifecycle: string[];
   finalStatus: string;
 }> {
-  const entry = preparedTx.get(paymentId);
-  if (!entry) throw new Error("Payment was never prepared (or the server restarted) — prepare it again.");
+  const entry = await loadPrepared(paymentId);
+  if (!entry) throw new Error(PREPARED_GONE);
   const ramp = getRampFor(corridorFor(entry.corridorKey));
 
   const submitted = await ramp.submitSigned({ paymentId, transaction: entry.transaction }, signature);
-  preparedTx.delete(paymentId);
+  await forgetPrepared(paymentId);
 
   const lifecycle: string[] = [];
   let last = "";
@@ -580,11 +642,11 @@ export function payoutAvailable(): boolean {
 }
 
 /** The raw intent the browser must sign, plus what Permit2 needs approved. */
-export function preparedIntent(paymentId: string): {
+export async function preparedIntent(paymentId: string): Promise<{
   messageToBeSigned: CpnTransaction["messageToBeSigned"];
   permitAmountMinor: string;
-} | null {
-  const entry = preparedTx.get(paymentId);
+} | null> {
+  const entry = await loadPrepared(paymentId);
   if (!entry) return null;
   const m = entry.transaction.messageToBeSigned;
   const permitted = (m.message as Record<string, any>)?.permitted?.amount;

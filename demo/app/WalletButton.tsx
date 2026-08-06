@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useAccount, useConnect, useDisconnect } from "wagmi";
 import { RiLogoutBoxRLine, RiWallet3Line } from "@remixicon/react";
-import { mpAddrArcUsdc } from "./marketplace.actions";
 import { Button } from "@/components/ui/button";
 import { shortAddr, usd } from "./_ui";
+import { useWalletBalance } from "./wallet-balance";
 
 /**
  * Header wallet control. Optional by design: without a wallet the buyer is
@@ -18,16 +17,9 @@ export default function WalletButton() {
   const { disconnect } = useDisconnect();
   const injected = connectors.find((c) => c.type === "injected") ?? connectors[0];
 
-  const [arcUsdc, setArcUsdc] = useState<string | null>(null);
-  useEffect(() => {
-    if (!isConnected || !address) {
-      setArcUsdc(null);
-      return;
-    }
-    mpAddrArcUsdc(address).then(setArcUsdc);
-    const id = setInterval(() => mpAddrArcUsdc(address).then(setArcUsdc), 10_000);
-    return () => clearInterval(id);
-  }, [address, isConnected]);
+  // Shared with the market board — see wallet-balance.tsx for why this stopped
+  // being a poll of its own.
+  const { arcUsdc } = useWalletBalance();
 
   if (!isConnected) {
     return (

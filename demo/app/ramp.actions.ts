@@ -4,13 +4,9 @@ import type { Hex } from "viem";
 import {
   broadcastPayment,
   broadcastSignedPayment,
-  corridorList,
   getCpnRamp,
-  listCashouts,
   preparedIntent,
   preparePayment,
-  sellerInfo,
-  type CorridorInfo,
 } from "../lib/cpn.server.ts";
 import {
   assertDecimalWithinCap,
@@ -18,54 +14,14 @@ import {
   CAP_TOKEN_MINOR,
 } from "../lib/guard.server.ts";
 
-/** The payout corridors the seller can cash out to (EUR/BRL/MXN/USD). */
-export async function cpnCorridorsAction(): Promise<CorridorInfo[]> {
-  return corridorList();
-}
-
-/** One past cash-out, decimalised for display. */
-export type CashoutRow = {
-  paymentId: string;
-  corridor: string;
-  status: string;
-  source: string;
-  sourceCurrency: string;
-  destination: string;
-  destinationCurrency: string;
-  signedBy: "server" | "wallet";
-  orderId: string | null;
-  failureReason: string | null;
-  createdAt: string;
-};
-
-export type CashoutHistoryResult = { ok: true; rows: CashoutRow[] } | { ok: false; error: string };
-
-const dec = (minor: string, scale: number) => (Number(minor) / 10 ** scale).toFixed(scale === 6 ? 2 : scale);
-
-/** Past CPN cash-outs, newest first — the panel's history. */
-export async function cpnHistoryAction(limit = 8): Promise<CashoutHistoryResult> {
-  try {
-    const rows = await listCashouts(limit);
-    return {
-      ok: true,
-      rows: rows.map((r) => ({
-        paymentId: r.payment_id,
-        corridor: r.corridor,
-        status: r.status,
-        source: dec(r.source_minor, 6),
-        sourceCurrency: r.source_currency,
-        destination: dec(r.destination_minor, r.destination_scale),
-        destinationCurrency: r.destination_currency,
-        signedBy: r.signed_by,
-        orderId: r.order_id,
-        failureReason: r.failure_reason,
-        createdAt: r.created_at,
-      })),
-    };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
+/*
+ * The reads that used to live here — corridors, the seller balance, the
+ * cash-out history — moved to `demo/lib/board.server.ts` and are served by
+ * `GET /api/withdraw`. They were Server Actions, which meant three POSTs the
+ * App Router ran one after another before the withdraw page could show
+ * anything. What stays here is what a Server Action is for: the steps that
+ * move money.
+ */
 
 /** A quote flattened for the UI — money as strings, like the rest of the demo. */
 export type CpnQuoteView = {
@@ -102,18 +58,6 @@ export async function cpnQuoteAction(sourceAmountUsdc: string): Promise<CpnQuote
         fees: { total: fees.total.amount, currency: fees.total.currency, byType: fees.byType },
       },
     };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-export type SellerInfoView = { address: string; usdcMinor: string };
-export type SellerInfoResult = { ok: true; seller: SellerInfoView } | { ok: false; error: string };
-
-/** The seller wallet's accumulated USDC on Arc — what's available to cash out. */
-export async function cpnSellerBalanceAction(): Promise<SellerInfoResult> {
-  try {
-    return { ok: true, seller: await sellerInfo() };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -215,8 +159,10 @@ export type IntentResult = { ok: true; intent: IntentView } | { ok: false; error
  * it. Read-only: this reveals what will be signed, it does not sign anything.
  */
 export async function cpnIntentAction(paymentId: string): Promise<IntentResult> {
-  const intent = preparedIntent(paymentId);
-  if (!intent) return { ok: false, error: "Payment was never prepared (or the server restarted)." };
+  const intent = await preparedIntent(paymentId);
+  if (!intent) {
+    return { ok: false, error: "No intent to sign for this payment — prepare a new cash-out." };
+  }
   return { ok: true, intent };
 }
 
