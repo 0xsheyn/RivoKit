@@ -381,13 +381,24 @@ function RailChooser({ name, rails, value, onChange, disabled, need }: {
         const enough = r.avail >= need + (r.fee ?? 0);
         const id = `${name}-${r.id}`;
         return (
-          <div key={r.id} className="flex items-start gap-3">
+          // `min-w-0` is load-bearing. RadioGroup is a grid, and a grid item's
+          // default `min-width: auto` forbids it from shrinking below its own
+          // min-content — which the note below inflated to the width of the
+          // whole sentence. The track grew past the card, and since the card is
+          // deliberately `overflow-visible` (see STICKY_ACTION) the balance was
+          // not clipped but thrown outside the panel entirely.
+          <div key={r.id} className="flex min-w-0 items-start gap-3">
             <RadioGroupItem value={r.id} id={id} disabled={r.disabled} className="mt-1" />
             <Label htmlFor={id} className="flex min-w-0 flex-1 items-start gap-2 font-normal">
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{r.label}</span>
+                {/* Wraps rather than truncates. It shows for the SELECTED rail
+                    only, so it is at most one extra line — and the part that
+                    got cut off was "needs ETH for gas", the one thing in it a
+                    payer has to act on. Truncating the warning out of a warning
+                    is worse than spending a line on it. */}
                 {value === r.id && (
-                  <span className="block truncate text-xs text-muted-foreground">{r.note}</span>
+                  <span className="block text-xs leading-snug text-balance text-muted-foreground">{r.note}</span>
                 )}
               </span>
               <span className={cn("shrink-0 tabular-nums", enough ? "text-foreground" : "text-destructive")}>
