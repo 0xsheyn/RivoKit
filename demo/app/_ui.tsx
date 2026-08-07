@@ -210,6 +210,39 @@ export function ToneBadge({
   return <Badge variant="outline" className={cn("shrink-0", TONE_CLASS[tone], className)}>{children}</Badge>;
 }
 
+/* ── the SDK seam ────────────────────────────────────────────────────────── */
+
+/**
+ * Marks a control that calls into RivoKit, and names the call.
+ *
+ * WHY. The marketplace is an application that EMBEDS the SDK, and embeddability
+ * is a claim about a seam — which nothing on screen showed. A visitor clicking
+ * through saw a marketplace, not a library being used by one, and the strongest
+ * fact this demo has went unsaid: the whole flow is six calls.
+ *
+ * Only real calls get a badge. `mpShip`, `mpConfirm`, `mpDispute` and
+ * `mpExpireOrder` are this app's own code and are deliberately left bare — the
+ * contrast between the labelled controls and the unlabelled ones IS the
+ * argument, and labelling everything would destroy it.
+ *
+ * Dashed and in the primary hue so it never reads as a status: those are
+ * ToneBadge, solid and tinted by meaning. This one is a source reference.
+ */
+export function SdkCall({ call, className }: { call: string; className?: string }) {
+  return (
+    <span
+      title="This control calls into the RivoKit SDK"
+      className={cn(
+        "inline-flex w-fit max-w-full items-center self-start rounded-md border border-dashed",
+        "border-primary/40 px-1.5 py-0.5 font-mono text-[11px] leading-relaxed text-primary/90",
+        className,
+      )}
+    >
+      {call}
+    </span>
+  );
+}
+
 export function StatusBadge({ status, label, busy }: { status: string; label: string; busy?: boolean }) {
   return (
     <ToneBadge tone={busy ? "progress" : stateTone(status)} className={cn(busy && "animate-pulse")}>

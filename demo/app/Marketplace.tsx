@@ -35,7 +35,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 // so the rails module is pulled in on demand rather than at first paint.
 import type { Eip1193 } from "./wallet-rails";
 const rails = () => import("./wallet-rails");
-import { Empty, Panel, SectionLabel, StatusBadge, ToneBadge, num, shortAddr, shortHash, usd } from "./_ui";
+import { Empty, Panel, SdkCall, SectionLabel, StatusBadge, ToneBadge, num, shortAddr, shortHash, usd } from "./_ui";
 import { useSellerWallet } from "./seller-wallet";
 import { withActionToast, withToast } from "./toast";
 import SellerWalletPicker from "./SellerWalletPicker";
@@ -537,6 +537,17 @@ export default function Marketplace({ initial, demoBuyer }: {
               payoutTo === "bank" ? "Creating bank-bound order (screening + rail quote)" : "Creating order (screening + FX quote)",
             )} />
 
+        {/* The seam, said once so every badge below is self-explanatory.
+            Without this the dashed badges read as decoration; with it, the
+            controls that DON'T carry one become the point. */}
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs text-muted-foreground">
+          <SdkCall call="kit.someCall()" />
+          <span>
+            marks a call into RivoKit. Everything else on this board — shipping, confirmation, disputes, the
+            dispute window, the order model itself — is this app&apos;s own code. Six calls carry the money.
+          </span>
+        </p>
+
         {/* Three roles only — the seller's fiat exits live on /app/withdraw.
             The grid stretches its items by default, so pinning every body to
             the same measured height is all it takes for the columns to end
@@ -610,6 +621,13 @@ function Storefront({ pending, payer, hints, bankEnabled, onBuy }: {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {/* One badge for the strip, not six identical ones in the cards: every
+            BUY is the same call, and repeating it per listing would turn the
+            marker into wallpaper the eye stops reading. */}
+        <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <SdkCall call="kit.createOrder({ priceEURMinor, payoutTo })" />
+          <span>— every BUY, whichever destination the listing&apos;s price already chose.</span>
+        </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {CATALOG.map((p) => {
             const hint = hintFor(p.id);
@@ -1017,9 +1035,12 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
             {!expired && stalled && fundingLanded && (mine || payableByServer) && (
               <Alert>
                 <AlertTitle>Authorization missing</AlertTitle>
-                <AlertDescription>
-                  The USDC reached Arc — only the escrow authorization is left. Signing again is safe; the escrow
-                  ignores a payment it has already collected.
+                <AlertDescription className="space-y-2">
+                  <p>
+                    The USDC reached Arc — only the escrow authorization is left. Signing again is safe; the escrow
+                    ignores a payment it has already collected.
+                  </p>
+                  <SdkCall call={mine ? "kit.fund(orderId, { signature })" : "kit.fund(orderId)"} />
                 </AlertDescription>
                 <AlertAction>
                   <Button size="xs" disabled={pending || busy(v.id)}
@@ -1085,6 +1106,10 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
                       ? `Pay via ${myRails.find((r) => r.id === sel)?.label}`
                       : `Not enough ${myRails.find((r) => r.id === sel)?.label}`}
                   </Button>
+                  {/* The cross-chain rails ahead of it are the app's own — App
+                      Kit driven from this browser. Only the last leg is the SDK,
+                      and saying so is more honest than badging the whole button. */}
+                  <SdkCall call="kit.fund(orderId, { signature })" />
                 </CardFooter>
               </Card>
             )}
@@ -1127,6 +1152,9 @@ function BuyerPanel({ views, bal, pending, busy, run, connectedAddress, walletUs
                     onClick={() => run(v.id, () => mpPay(v.id, sel, from), `Paying via ${railsFor(from).find((r) => r.id === sel)?.label ?? sel}`)}>
                     Pay via {railsFor(from).find((r) => r.id === sel)?.label} (gasless)
                   </Button>
+                  {/* No `signature` here: with no wallet connected the demo key
+                      signs server-side, which is the same call minus its opts. */}
+                  <SdkCall call="kit.fund(orderId)" />
                 </CardFooter>
               </Card>
             )}
@@ -1267,6 +1295,9 @@ function HostPanel({ views, busy, run, cap, relay }: {
   // Captured, holding the source token, never converted. The escrow is empty
   // here, so `release()` is the wrong door — it starts with a second capture.
   const stalled = active.filter((v) => v.state === "settlement_pending");
+  // Broadcast, waiting on the rail. The board polls these itself — there is no
+  // button — so it is the one SDK call a visitor would otherwise never see.
+  const awaitingRail = active.filter((v) => v.state === "payout_pending");
 
   // The relay is the host's running cost: the operator pays Arc gas (USDC) for
   // every escrow call, and the fee is what refills it. It rides along with the
@@ -1320,13 +1351,22 @@ function HostPanel({ views, busy, run, cap, relay }: {
                 </CardTitle>
                 <CardDescription>{v.disputeReason}</CardDescription>
               </CardHeader>
-              <CardFooter className="gap-2">
-                <Button size="xs" variant="destructive" disabled={busy(v.id)} onClick={() => run(v.id, () => mpRefund(v.id), "Refunding to buyer (bridge-back)")}>
-                  {busy(v.id) ? "…" : "Approve refund"}
-                </Button>
-                <Button size="xs" variant="outline" disabled={busy(v.id)} onClick={() => run(v.id, () => mpRelease(v.id), releaseLabel(v))}>
-                  Release to seller
-                </Button>
+              {/* Two outcomes, two calls — so the badges go on a line of their
+                  own under the buttons rather than beside them, where four
+                  elements in one row would wrap unpredictably at panel width. */}
+              <CardFooter className="flex-col items-start gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <Button size="xs" variant="destructive" disabled={busy(v.id)} onClick={() => run(v.id, () => mpRefund(v.id), "Refunding to buyer (bridge-back)")}>
+                    {busy(v.id) ? "…" : "Approve refund"}
+                  </Button>
+                  <Button size="xs" variant="outline" disabled={busy(v.id)} onClick={() => run(v.id, () => mpRelease(v.id), releaseLabel(v))}>
+                    Release to seller
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <SdkCall call="kit.refund(orderId)" />
+                  <SdkCall call="kit.release(orderId, proof)" />
+                </div>
               </CardFooter>
             </Card>
           ))}
@@ -1352,15 +1392,18 @@ function HostPanel({ views, busy, run, cap, relay }: {
                   {v.failureReason ?? "No reason was recorded."}
                 </p>
               </CardContent>
-              <CardFooter className="gap-2">
-                <Button size="xs" disabled={busy(v.id)}
-                  onClick={() => run(v.id, () => mpRetrySettlement(v.id),
-                    v.payoutTo === "bank" ? "Re-quoting and re-broadcasting the payout" : "Retrying the floored swap")}>
-                  {busy(v.id) ? "…" : "Retry settlement"}
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  Never <span className="font-mono">release</span> again — that would capture twice.
-                </span>
+              <CardFooter className="flex-col items-start gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="xs" disabled={busy(v.id)}
+                    onClick={() => run(v.id, () => mpRetrySettlement(v.id),
+                      v.payoutTo === "bank" ? "Re-quoting and re-broadcasting the payout" : "Retrying the floored swap")}>
+                    {busy(v.id) ? "…" : "Retry settlement"}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Never <span className="font-mono">release</span> again — that would capture twice.
+                  </span>
+                </div>
+                <SdkCall call="kit.retrySettlement(orderId)" />
               </CardFooter>
             </Card>
           ))}
@@ -1384,6 +1427,10 @@ function HostPanel({ views, busy, run, cap, relay }: {
                   ? `Dispute window — ${mmss(left)} left`
                   : "Release & settle → seller"}
             </Button>
+            {/* One call whichever way the order settles — that it covers both a
+                floored swap and an irreversible bank broadcast is exactly the
+                point worth making here. */}
+            <SdkCall call="kit.release(orderId, proof)" />
             {held && (
               <p className="text-sm text-muted-foreground">
                 The buyer can still confirm or dispute. Settling the moment the seller says &ldquo;shipped&rdquo;
@@ -1393,6 +1440,24 @@ function HostPanel({ views, busy, run, cap, relay }: {
           </OrderCard>
         );
       })}
+
+      {/* The only badge on this board with no button under it, because this call
+          has no button: a broadcast returns before its transfer is mined, so the
+          row is born `pending` and the board polls it. Shown only while such an
+          order exists — a permanent line explaining a poll that is not running
+          would be describing something untrue most of the time. */}
+      {awaitingRail.length > 0 && (
+        <>
+          <SectionLabel count={awaitingRail.length}>Waiting on the payment network</SectionLabel>
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <SdkCall call="kit.refreshPayout(orderId)" />
+            <span>
+              — polled every few seconds until the rail reports the fiat leg. The same path a webhook takes;
+              this demo has no public endpoint, so it reads instead.
+            </span>
+          </p>
+        </>
+      )}
 
       <SectionLabel count={active.length}>All orders</SectionLabel>
       {active.length === 0 && <Empty>No activity yet.</Empty>}
